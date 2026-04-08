@@ -1,7 +1,7 @@
 from dataclasses import dataclass, field
 
 from aiogram import Router, F
-from aiogram.filters import CommandStart
+from aiogram.filters import CommandStart, Command
 from aiogram.types import Message, CallbackQuery
 
 from app.bot.keyboards.inline import (
@@ -15,6 +15,7 @@ from app.bot.keyboards.inline import (
     CITY_LABELS,
 )
 from app.bot.services.api_client import EventMindAPIClient
+from app.bot.keyboards.reply import setup_keyboard, main_menu_keyboard
 
 router = Router()
 api_client = EventMindAPIClient()
@@ -47,8 +48,13 @@ async def cmd_start(message: Message):
         "- показать наиболее подходящие события;\n"
         "- учитывать твои предпочтения для персональных рекомендаций.\n\n"
         "Давай быстро настроим профиль.",
-        reply_markup=start_keyboard(),
+        reply_markup=setup_keyboard(),
         parse_mode="Markdown",
+    )
+
+    await message.answer(
+        "Также можно использовать inline-кнопки ниже:",
+        reply_markup=start_keyboard(),
     )
 
 
@@ -149,4 +155,38 @@ async def cb_city_selected(callback: CallbackQuery):
         f"- город: {city_text}\n\n"
         f"Теперь можно посмотреть рекомендации.",
         reply_markup=after_setup_keyboard(),
+    )
+
+    await callback.message.answer(
+        "Главное меню обновлено.",
+        reply_markup=main_menu_keyboard(),
+    )
+
+@router.message(Command("edit"))
+async def cmd_edit(message: Message):
+    user_setup_state[message.from_user.id] = SetupState()
+
+    await message.answer(
+        "Давай обновим профиль.\n\n"
+        "Выбери интересующие темы. Можно выбрать несколько.",
+        reply_markup=topics_keyboard(set()),
+    )
+
+@router.message(F.text == "Изменить профиль")
+async def msg_edit_profile(message: Message):
+    user_setup_state[message.from_user.id] = SetupState()
+
+    await message.answer(
+        "Давай обновим профиль.\n\n"
+        "Выбери интересующие темы. Можно выбрать несколько.",
+        reply_markup=topics_keyboard(set()),
+    )
+
+@router.message(F.text == "Начать настройку")
+async def msg_start_setup(message: Message):
+    state = get_state(message.from_user.id)
+
+    await message.answer(
+        "Выбери интересующие темы. Можно выбрать несколько.",
+        reply_markup=topics_keyboard(state.topics),
     )

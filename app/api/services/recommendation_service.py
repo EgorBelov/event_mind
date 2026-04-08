@@ -137,3 +137,38 @@ def get_event_interactions_for_user(db: Session, telegram_id: int, event_id: int
     )
 
     return [item.action for item in interactions]
+
+def get_saved_events_for_user(db: Session, telegram_id: int) -> list[dict]:
+    user = db.query(User).filter(User.telegram_id == telegram_id).first()
+    if not user:
+        return []
+
+    saved_interactions = (
+        db.query(Interaction)
+        .filter(
+            Interaction.user_id == user.id,
+            Interaction.action == "save",
+        )
+        .all()
+    )
+
+    if not saved_interactions:
+        return []
+
+    event_ids = [item.event_id for item in saved_interactions]
+    events = db.query(Event).filter(Event.id.in_(event_ids)).all()
+
+    results = []
+    for event in events:
+        results.append({
+            "event_id": event.id,
+            "title": event.title,
+            "description": event.description,
+            "format": event.format,
+            "city": event.city,
+            "level": event.level,
+            "date": event.date,
+            "topics": list(parse_topics(event.topics)),
+        })
+
+    return results

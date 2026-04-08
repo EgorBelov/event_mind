@@ -59,3 +59,9 @@ class EventMindAPIClient:
             )
             response.raise_for_status()
             return response.json()
+        
+    async def get_saved_events(self, telegram_id: int) -> list[dict]:
+        async with httpx.AsyncClient() as client:
+            response = await client.get(f"{self.base_url}/recommendations/{telegram_id}/saved")
+            response.raise_for_status()
+            return response.json()

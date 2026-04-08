@@ -1,11 +1,11 @@
 import json
 
-from aiogram import Router
+from aiogram import Router, F
 from aiogram.filters import Command
 from aiogram.types import Message
 
 from app.bot.services.api_client import EventMindAPIClient
-from app.bot.keyboards.inline import TOPIC_LABELS
+from app.bot.keyboards.inline import TOPIC_LABELS, FORMAT_LABELS, CITY_LABELS
 
 router = Router()
 api_client = EventMindAPIClient()
@@ -20,8 +20,8 @@ async def cmd_profile(message: Message):
         return
 
     topics = ", ".join(TOPIC_LABELS.get(topic, topic) for topic in user.get("topics", [])) or "не выбраны"
-    preferred_format = user.get("preferred_format") or "не выбран"
-    city = user.get("city") or "не выбран"
+    preferred_format = FORMAT_LABELS.get(user.get("preferred_format"), user.get("preferred_format") or "не выбран")
+    city = CITY_LABELS.get(user.get("city"), user.get("city") or "не выбран")
 
     topic_weights_raw = user.get("topic_weights", "{}")
     try:
@@ -44,3 +44,38 @@ async def cmd_profile(message: Message):
         f"Город: {city}\n\n"
         f"Веса интересов:\n{weights_text}"
     )
+
+
+@router.message(Command("saved"))
+async def cmd_saved(message: Message):
+    events = await api_client.get_saved_events(message.from_user.id)
+
+    if not events:
+        await message.answer("У тебя пока нет сохраненных событий.")
+        return
+
+    chunks = []
+    for event in events:
+        topics = ", ".join(TOPIC_LABELS.get(topic, topic) for topic in event.get("topics", []))
+        format_label = FORMAT_LABELS.get(event["format"], event["format"])
+        city_label = CITY_LABELS.get(event["city"], event["city"])
+
+        chunks.append(
+            f"*{event['title']}*\n"
+            f"Тема: {topics}\n"
+            f"Формат: {format_label}\n"
+            f"Город: {city_label}\n"
+            f"Дата: {event['date']}"
+        )
+
+    text = "*Сохраненные события:*\n\n" + "\n\n".join(chunks)
+    await message.answer(text, parse_mode="Markdown")
+
+@router.message(F.text == "Профиль")
+async def msg_profile(message: Message):
+    await cmd_profile(message)
+
+
+@router.message(F.text == "Избранное")
+async def msg_saved(message: Message):
+    await cmd_saved(message)

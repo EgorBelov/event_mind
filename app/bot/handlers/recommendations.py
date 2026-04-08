@@ -143,3 +143,8 @@ async def cb_save(callback: CallbackQuery):
     )
     await callback.answer("Событие сохранено")
     await update_current_message_markup(callback, event_id)
+
+@router.message(F.text == "Рекомендации")
+async def msg_recommendations(message: Message):
+    user_recommendation_index[message.from_user.id] = 0
+    await send_recommendation(message, message.from_user.id)
