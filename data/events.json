@@ -1,0 +1,47 @@
+[
+  {
+    "title": "AI Meetup for Analysts",
+    "description": "Практический митап о применении AI-инструментов в аналитике и принятии решений на основе данных.",
+    "format": "online",
+    "city": "any",
+    "level": "beginner",
+    "date": "2026-04-12 19:00",
+    "topics": ["ai_ml", "business_analytics"]
+  },
+  {
+    "title": "Data Science Open Talk",
+    "description": "Открытая встреча по Data Science, ML-пайплайнам и кейсам применения моделей.",
+    "format": "online",
+    "city": "any",
+    "level": "middle",
+    "date": "2026-04-14 18:30",
+    "topics": ["data_science", "ai_ml"]
+  },
+  {
+    "title": "Backend Community Day",
+    "description": "Оффлайн-встреча для backend-разработчиков: API, базы данных, архитектура сервисов.",
+    "format": "offline",
+    "city": "moscow",
+    "level": "middle",
+    "date": "2026-04-16 17:00",
+    "topics": ["backend"]
+  },
+  {
+    "title": "Product Metrics Workshop",
+    "description": "Воркшоп по продуктовым метрикам, A/B-тестам и data-driven принятию решений.",
+    "format": "online",
+    "city": "any",
+    "level": "beginner",
+    "date": "2026-04-18 18:00",
+    "topics": ["product", "business_analytics"]
+  },
+  {
+    "title": "BI Tools Webinar",
+    "description": "Вебинар по BI-инструментам, дашбордам и визуализации данных.",
+    "format": "online",
+    "city": "any",
+    "level": "beginner",
+    "date": "2026-04-20 19:30",
+    "topics": ["business_analytics", "data_science"]
+  }
+]
