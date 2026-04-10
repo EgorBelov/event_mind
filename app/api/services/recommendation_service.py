@@ -1,3 +1,4 @@
+from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
 
 from app.db.models.event import Event
@@ -16,7 +17,10 @@ from app.recommender.user_model import (
 def get_recommendations_for_user(db: Session, telegram_id: int) -> list[dict]:
     user = db.query(User).filter(User.telegram_id == telegram_id).first()
     if not user:
-        return []
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="User not found",
+        )
 
     events = db.query(Event).all()
     results = []
@@ -42,15 +46,28 @@ def get_recommendations_for_user(db: Session, telegram_id: int) -> list[dict]:
 
 
 def create_interaction(db: Session, telegram_id: int, event_id: int, action: str) -> dict:
+    if action not in {"like", "dislike", "save"}:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Unsupported action",
+        )
+
     user = db.query(User).filter(User.telegram_id == telegram_id).first()
     if not user:
-        return {"success": False, "message": "User not found"}
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="User not found",
+        )
 
     event = db.query(Event).filter(Event.id == event_id).first()
     if not event:
-        return {"success": False, "message": "Event not found"}
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Event not found",
+        )
 
-    changed = False
+    current_weights = parse_topic_weights(user.topic_weights)
+    event_topics = list(parse_topics(event.topics))
 
     if action in {"like", "dislike"}:
         opposite_action = "dislike" if action == "like" else "like"
@@ -67,8 +84,20 @@ def create_interaction(db: Session, telegram_id: int, event_id: int, action: str
 
         if existing_same:
             db.delete(existing_same)
+            user.topic_weights = dump_topic_weights(
+                apply_feedback_to_weights(
+                    current_weights=current_weights,
+                    event_topics=event_topics,
+                    action=action,
+                    direction=-1,
+                )
+            )
             db.commit()
-            return {"success": True, "message": f"Interaction '{action}' removed"}
+            return {
+                "success": True,
+                "message": f"Interaction '{action}' removed",
+                "topic_weights": parse_topic_weights(user.topic_weights),
+            }
 
         existing_opposite = (
             db.query(Interaction)
@@ -81,7 +110,12 @@ def create_interaction(db: Session, telegram_id: int, event_id: int, action: str
         )
         if existing_opposite:
             db.delete(existing_opposite)
-            changed = True
+            current_weights = apply_feedback_to_weights(
+                current_weights=current_weights,
+                event_topics=event_topics,
+                action=opposite_action,
+                direction=-1,
+            )
 
     elif action == "save":
         existing_save = (
@@ -96,8 +130,20 @@ def create_interaction(db: Session, telegram_id: int, event_id: int, action: str
 
         if existing_save:
             db.delete(existing_save)
+            user.topic_weights = dump_topic_weights(
+                apply_feedback_to_weights(
+                    current_weights=current_weights,
+                    event_topics=event_topics,
+                    action="save",
+                    direction=-1,
+                )
+            )
             db.commit()
-            return {"success": True, "message": "Interaction 'save' removed"}
+            return {
+                "success": True,
+                "message": "Interaction 'save' removed",
+                "topic_weights": parse_topic_weights(user.topic_weights),
+            }
 
     interaction = Interaction(
         user_id=user.id,
@@ -105,9 +151,6 @@ def create_interaction(db: Session, telegram_id: int, event_id: int, action: str
         action=action,
     )
     db.add(interaction)
-
-    current_weights = parse_topic_weights(user.topic_weights)
-    event_topics = list(parse_topics(event.topics))
 
     updated_weights = apply_feedback_to_weights(
         current_weights=current_weights,
@@ -128,7 +171,10 @@ def create_interaction(db: Session, telegram_id: int, event_id: int, action: str
 def get_event_interactions_for_user(db: Session, telegram_id: int, event_id: int) -> list[str]:
     user = db.query(User).filter(User.telegram_id == telegram_id).first()
     if not user:
-        return []
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="User not found",
+        )
 
     interactions = (
         db.query(Interaction)
@@ -141,7 +187,10 @@ def get_event_interactions_for_user(db: Session, telegram_id: int, event_id: int
 def get_saved_events_for_user(db: Session, telegram_id: int) -> list[dict]:
     user = db.query(User).filter(User.telegram_id == telegram_id).first()
     if not user:
-        return []
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="User not found",
+        )
 
     saved_interactions = (
         db.query(Interaction)

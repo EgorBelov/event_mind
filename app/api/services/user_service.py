@@ -2,7 +2,12 @@ from sqlalchemy.orm import Session
 
 from app.db.models.user import User
 from app.api.schemas.user import UserCreate
-from app.recommender.user_model import build_initial_topic_weights, dump_topic_weights
+from app.recommender.user_model import (
+    build_initial_topic_weights,
+    dump_topic_weights,
+    parse_topic_weights,
+    sync_topic_weights_with_topics,
+)
 
 
 def create_or_update_user(db: Session, user_data: UserCreate) -> User:
@@ -15,11 +20,9 @@ def create_or_update_user(db: Session, user_data: UserCreate) -> User:
         user.preferred_format = user_data.preferred_format
         user.city = user_data.city
         user.topics = topics_str
-
-        if not user.topic_weights:
-            user.topic_weights = dump_topic_weights(
-                build_initial_topic_weights(user_data.topics)
-            )
+        current_weights = parse_topic_weights(user.topic_weights)
+        synced_weights = sync_topic_weights_with_topics(current_weights, user_data.topics)
+        user.topic_weights = dump_topic_weights(synced_weights)
     else:
         user = User(
             telegram_id=user_data.telegram_id,

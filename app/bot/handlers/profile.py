@@ -15,7 +15,7 @@ api_client = EventMindAPIClient()
 async def cmd_profile(message: Message):
     user = await api_client.get_user(message.from_user.id)
 
-    if user.get("message") == "User not found":
+    if not user:
         await message.answer("Профиль пока не настроен. Запусти /start")
         return
 

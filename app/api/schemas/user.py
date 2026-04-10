@@ -1,4 +1,4 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class UserCreate(BaseModel):
@@ -6,7 +6,7 @@ class UserCreate(BaseModel):
     username: str | None = None
     preferred_format: str | None = None
     city: str | None = None
-    topics: list[str] = []
+    topics: list[str] = Field(default_factory=list)
 
 
 class UserResponse(BaseModel):

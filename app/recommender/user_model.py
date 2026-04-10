@@ -41,10 +41,23 @@ def build_initial_topic_weights(topics: list[str]) -> dict[str, int]:
     return {topic: DEFAULT_TOPIC_WEIGHT for topic in topics}
 
 
+def sync_topic_weights_with_topics(
+    current_weights: dict[str, int],
+    topics: list[str],
+) -> dict[str, int]:
+    synced_weights: dict[str, int] = {}
+
+    for topic in topics:
+        synced_weights[topic] = current_weights.get(topic, DEFAULT_TOPIC_WEIGHT)
+
+    return synced_weights
+
+
 def apply_feedback_to_weights(
     current_weights: dict[str, int],
     event_topics: list[str],
     action: str,
+    direction: int = 1,
 ) -> dict[str, int]:
     weights = dict(current_weights)
 
@@ -52,10 +65,10 @@ def apply_feedback_to_weights(
         current_value = weights.get(topic, 0)
 
         if action == "like":
-            weights[topic] = current_value + LIKE_BONUS
+            weights[topic] = max(MIN_TOPIC_WEIGHT, current_value + (LIKE_BONUS * direction))
         elif action == "save":
-            weights[topic] = current_value + SAVE_BONUS
+            weights[topic] = max(MIN_TOPIC_WEIGHT, current_value + (SAVE_BONUS * direction))
         elif action == "dislike":
-            weights[topic] = max(MIN_TOPIC_WEIGHT, current_value - DISLIKE_PENALTY)
+            weights[topic] = max(MIN_TOPIC_WEIGHT, current_value - (DISLIKE_PENALTY * direction))
 
     return weights

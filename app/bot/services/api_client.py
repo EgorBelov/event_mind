@@ -31,12 +31,16 @@ class EventMindAPIClient:
     async def get_user(self, telegram_id: int) -> dict:
         async with httpx.AsyncClient() as client:
             response = await client.get(f"{self.base_url}/users/{telegram_id}")
+            if response.status_code == 404:
+                return {}
             response.raise_for_status()
             return response.json()
 
     async def get_recommendations(self, telegram_id: int) -> list[dict]:
         async with httpx.AsyncClient() as client:
             response = await client.get(f"{self.base_url}/recommendations/{telegram_id}")
+            if response.status_code == 404:
+                return []
             response.raise_for_status()
             return response.json()
 
@@ -57,11 +61,15 @@ class EventMindAPIClient:
             response = await client.get(
                 f"{self.base_url}/recommendations/{telegram_id}/event/{event_id}/interactions"
             )
+            if response.status_code == 404:
+                return {"actions": []}
             response.raise_for_status()
             return response.json()
         
     async def get_saved_events(self, telegram_id: int) -> list[dict]:
         async with httpx.AsyncClient() as client:
             response = await client.get(f"{self.base_url}/recommendations/{telegram_id}/saved")
+            if response.status_code == 404:
+                return []
             response.raise_for_status()
             return response.json()

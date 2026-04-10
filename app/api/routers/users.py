@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
 from app.db.dependencies import get_db
@@ -26,7 +26,10 @@ def register_user(user_data: UserCreate, db: Session = Depends(get_db)):
 def get_user(telegram_id: int, db: Session = Depends(get_db)):
     user = get_user_by_telegram_id(db, telegram_id)
     if not user:
-        return {"message": "User not found"}
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="User not found",
+        )
 
     return {
         "id": user.id,

@@ -18,7 +18,16 @@ def load_events_from_json(db: Session, file_path: str = "data/events.json") -> i
     count = 0
 
     for item in events_data:
-        existing = db.query(Event).filter(Event.title == item["title"]).first()
+        existing = (
+            db.query(Event)
+            .filter(
+                Event.title == item["title"],
+                Event.date == item["date"],
+                Event.city == item["city"],
+                Event.format == item["format"],
+            )
+            .first()
+        )
         if existing:
             continue
 
