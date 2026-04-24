@@ -12,3 +12,4 @@ class User(Base):
     city = Column(String, nullable=True)
     topics = Column(String, nullable=True)  # ai_ml,data_science
     topic_weights = Column(Text, nullable=True)  # JSON-строка
+    is_subscribed = Column(Integer, default=0)  # 0 / 1

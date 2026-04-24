@@ -81,3 +81,28 @@ class EventMindAPIClient:
             )
             response.raise_for_status()
             return response.json()
+        
+    async def subscribe(self, telegram_id: int) -> dict:
+        async with httpx.AsyncClient() as client:
+            response = await client.post(
+                f"{self.base_url}/subscriptions/{telegram_id}/subscribe"
+            )
+            response.raise_for_status()
+            return response.json()
+
+    async def unsubscribe(self, telegram_id: int) -> dict:
+        async with httpx.AsyncClient() as client:
+            response = await client.post(
+                f"{self.base_url}/subscriptions/{telegram_id}/unsubscribe"
+            )
+            response.raise_for_status()
+            return response.json()
+
+
+    async def get_agent_recommendation_cards(self, telegram_id: int) -> dict:
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            response = await client.get(
+                f"{self.base_url}/agent-recommendations/{telegram_id}/cards"
+            )
+            response.raise_for_status()
+            return response.json()

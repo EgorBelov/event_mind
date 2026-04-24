@@ -2,14 +2,15 @@ from aiogram import Router, F
 from aiogram.filters import Command
 from aiogram.types import Message, CallbackQuery
 
-from app.bot.keyboards.inline import recommendation_keyboard
+from app.bot.keyboards.inline import recommendation_keyboard, ai_recommendation_keyboard
 from app.bot.services.api_client import EventMindAPIClient
 
 router = Router()
 api_client = EventMindAPIClient()
 
 user_recommendation_index: dict[int, int] = {}
-
+user_ai_recommendation_index: dict[int, int] = {}
+user_ai_recommendation_cards: dict[int, list[dict]] = {}
 
 def format_event_card(event: dict) -> str:
     topics = ", ".join(event.get("topics", []))
@@ -151,18 +152,144 @@ async def msg_recommendations(message: Message):
 
 @router.message(F.text == "AI-рекомендации")
 async def msg_agent_recommendations(message: Message):
-    await message.answer("Сейчас AI-агенты проанализируют твой профиль и события...")
+    user_ai_recommendation_cards[message.from_user.id] = []
+    user_ai_recommendation_index[message.from_user.id] = 0
 
-    try:
-        result = await api_client.get_agent_recommendations(message.from_user.id)
-    except Exception:
-        await message.answer(
-            "Не получилось получить AI-рекомендации. Проверь, что API запущен и GROQ_API_KEY указан в .env."
+    await message.answer("Подбираю AI-рекомендации под твой профиль...")
+    await send_ai_recommendation_card(message, message.from_user.id)
+
+def format_ai_event_card(event: dict) -> str:
+    topics = ", ".join(event.get("topics", []))
+
+    return (
+        f"🤖 *AI-рекомендация*\n\n"
+        f"*{event['title']}*\n\n"
+        f"Тема: {topics}\n"
+        f"Формат: {event['format']}\n"
+        f"Город: {event['city']}\n"
+        f"Уровень: {event['level']}\n"
+        f"Дата: {event['date']}\n\n"
+        f"{event['description']}\n\n"
+        f"{event['explanation']}\n"
+        f"Релевантность: {event['score']}"
+    )
+
+
+async def send_ai_recommendation_card(target: Message | CallbackQuery, telegram_id: int):
+    cards = user_ai_recommendation_cards.get(telegram_id)
+
+    if not cards:
+        result = await api_client.get_agent_recommendation_cards(telegram_id)
+
+        if not result.get("success"):
+            text = result.get("message", "Не удалось получить AI-рекомендации.")
+            if isinstance(target, Message):
+                await target.answer(text)
+            else:
+                await target.message.answer(text)
+            return
+
+        cards = result.get("cards", [])
+        user_ai_recommendation_cards[telegram_id] = cards
+        user_ai_recommendation_index[telegram_id] = 0
+
+    if not cards:
+        text = "Пока нет AI-рекомендаций."
+        if isinstance(target, Message):
+            await target.answer(text)
+        else:
+            await target.message.answer(text)
+        return
+
+    index = user_ai_recommendation_index.get(telegram_id, 0)
+
+    if index >= len(cards):
+        user_ai_recommendation_index[telegram_id] = 0
+        user_ai_recommendation_cards[telegram_id] = []
+
+        text = "Это все AI-рекомендации на сейчас."
+        if isinstance(target, Message):
+            await target.answer(text)
+        else:
+            await target.message.answer(text)
+        return
+
+    event = cards[index]
+
+    interactions_data = await api_client.get_event_interactions(
+        telegram_id,
+        event["event_id"],
+    )
+    actions = set(interactions_data.get("actions", []))
+
+    text = format_ai_event_card(event)
+
+    if isinstance(target, Message):
+        await target.answer(
+            text,
+            reply_markup=ai_recommendation_keyboard(event["event_id"], actions),
+            parse_mode="Markdown",
         )
-        return
+    else:
+        await target.message.answer(
+            text,
+            reply_markup=ai_recommendation_keyboard(event["event_id"], actions),
+            parse_mode="Markdown",
+        )
 
-    if not result.get("success"):
-        await message.answer(result.get("message", "Не удалось получить рекомендации."))
-        return
+@router.callback_query(F.data == "next_ai_recommendation")
+async def cb_next_ai_recommendation(callback: CallbackQuery):
+    await callback.answer("Показываю следующую AI-рекомендацию")
+    user_id = callback.from_user.id
+    user_ai_recommendation_index[user_id] = user_ai_recommendation_index.get(user_id, 0) + 1
+    await send_ai_recommendation_card(callback, user_id)
 
-    await message.answer(result["answer"])
+async def update_current_ai_message_markup(callback: CallbackQuery, event_id: int):
+    interactions_data = await api_client.get_event_interactions(callback.from_user.id, event_id)
+    actions = set(interactions_data.get("actions", []))
+
+    await callback.message.edit_reply_markup(
+        reply_markup=ai_recommendation_keyboard(event_id, actions)
+    )
+
+
+@router.callback_query(F.data.startswith("ai_like:"))
+async def cb_ai_like(callback: CallbackQuery):
+    event_id = int(callback.data.split(":", 1)[1])
+
+    await api_client.save_interaction(
+        telegram_id=callback.from_user.id,
+        event_id=event_id,
+        action="like",
+    )
+
+    await callback.answer("Отмечено как интересное")
+    await update_current_ai_message_markup(callback, event_id)
+
+
+@router.callback_query(F.data.startswith("ai_dislike:"))
+async def cb_ai_dislike(callback: CallbackQuery):
+    event_id = int(callback.data.split(":", 1)[1])
+
+    await api_client.save_interaction(
+        telegram_id=callback.from_user.id,
+        event_id=event_id,
+        action="dislike",
+    )
+
+    await callback.answer("Отмечено как неинтересное")
+    await update_current_ai_message_markup(callback, event_id)
+
+
+@router.callback_query(F.data.startswith("ai_save:"))
+async def cb_ai_save(callback: CallbackQuery):
+    event_id = int(callback.data.split(":", 1)[1])
+
+    await api_client.save_interaction(
+        telegram_id=callback.from_user.id,
+        event_id=event_id,
+        action="save",
+    )
+
+    await callback.answer("Событие сохранено")
+    await update_current_ai_message_markup(callback, event_id)

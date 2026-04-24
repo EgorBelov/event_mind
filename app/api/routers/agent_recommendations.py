@@ -6,6 +6,7 @@ from app.db.models.user import User
 from app.db.models.event import Event
 from app.recommender.user_model import parse_topics, parse_topic_weights
 from app.agents.recommendation import recommendation_graph
+from app.api.services.recommendation_service import get_recommendations_for_user
 
 router = APIRouter(prefix="/agent-recommendations", tags=["agent-recommendations"])
 
@@ -57,4 +58,19 @@ def get_agent_recommendations(telegram_id: int, db: Session = Depends(get_db)):
     return {
         "success": True,
         "answer": result["final_answer"],
+    }
+
+
+@router.get("/{telegram_id}/cards")
+def get_agent_recommendation_cards(
+    telegram_id: int,
+    db: Session = Depends(get_db),
+):
+    recommendations = get_recommendations_for_user(db, telegram_id)
+
+    cards = recommendations[:3]
+
+    return {
+        "success": True,
+        "cards": cards,
     }

@@ -86,3 +86,21 @@ def recommendation_keyboard(
     builder.button(text="Следующее", callback_data="next_recommendation")
     builder.adjust(2, 2)
     return builder.as_markup()
+
+def ai_recommendation_keyboard(
+    event_id: int,
+    actions: set[str] | None = None,
+) -> InlineKeyboardMarkup:
+    actions = actions or set()
+
+    like_text = "✅ Интересно" if "like" in actions else "Интересно"
+    dislike_text = "❌ Не интересно" if "dislike" in actions else "Не интересно"
+    save_text = "⭐ Сохранено" if "save" in actions else "Сохранить"
+
+    builder = InlineKeyboardBuilder()
+    builder.button(text=like_text, callback_data=f"ai_like:{event_id}")
+    builder.button(text=dislike_text, callback_data=f"ai_dislike:{event_id}")
+    builder.button(text=save_text, callback_data=f"ai_save:{event_id}")
+    builder.button(text="Следующее AI", callback_data="next_ai_recommendation")
+    builder.adjust(2, 2)
+    return builder.as_markup()

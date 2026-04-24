@@ -1,0 +1,17 @@
+[
+  {
+    "title": "AI Meetup: нейросети в бизнесе",
+    "raw_description": "12 апреля в 19:00 пройдет онлайн-встреча про применение ИИ в продуктах, аналитике и бизнес-процессах. Будут практические кейсы для аналитиков и product-менеджеров.",
+    "source_url": "https://example.com/ai-meetup"
+  },
+  {
+    "title": "Python Backend Day",
+    "raw_description": "Оффлайн митап в Москве для backend-разработчиков. Обсудим FastAPI, PostgreSQL, микросервисную архитектуру и production-подходы.",
+    "source_url": "https://example.com/python-backend-day"
+  },
+  {
+    "title": "BI Tools Webinar",
+    "raw_description": "Вебинар для начинающих аналитиков о BI-инструментах, дашбордах, визуализации данных и построении отчетности.",
+    "source_url": "https://example.com/bi-webinar"
+  }
+]

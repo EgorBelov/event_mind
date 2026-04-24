@@ -13,3 +13,4 @@ class Event(Base):
     level = Column(String, nullable=False)
     date = Column(String, nullable=False)
     topics = Column(String, nullable=False)  # ai_ml,business_analytics
+    source_url = Column(String, nullable=True)
