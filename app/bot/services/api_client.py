@@ -73,3 +73,11 @@ class EventMindAPIClient:
                 return []
             response.raise_for_status()
             return response.json()
+
+    async def get_agent_recommendations(self, telegram_id: int) -> dict:
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            response = await client.get(
+                f"{self.base_url}/agent-recommendations/{telegram_id}"
+            )
+            response.raise_for_status()
+            return response.json()

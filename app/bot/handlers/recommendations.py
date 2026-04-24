@@ -148,3 +148,21 @@ async def cb_save(callback: CallbackQuery):
 async def msg_recommendations(message: Message):
     user_recommendation_index[message.from_user.id] = 0
     await send_recommendation(message, message.from_user.id)
+
+@router.message(F.text == "AI-рекомендации")
+async def msg_agent_recommendations(message: Message):
+    await message.answer("Сейчас AI-агенты проанализируют твой профиль и события...")
+
+    try:
+        result = await api_client.get_agent_recommendations(message.from_user.id)
+    except Exception:
+        await message.answer(
+            "Не получилось получить AI-рекомендации. Проверь, что API запущен и GROQ_API_KEY указан в .env."
+        )
+        return
+
+    if not result.get("success"):
+        await message.answer(result.get("message", "Не удалось получить рекомендации."))
+        return
+
+    await message.answer(result["answer"])

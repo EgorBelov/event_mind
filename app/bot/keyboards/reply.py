@@ -6,10 +6,13 @@ def main_menu_keyboard() -> ReplyKeyboardMarkup:
         keyboard=[
             [
                 KeyboardButton(text="Рекомендации"),
-                KeyboardButton(text="Профиль"),
+                KeyboardButton(text="AI-рекомендации"),
             ],
             [
+                KeyboardButton(text="Профиль"),
                 KeyboardButton(text="Избранное"),
+            ],
+            [
                 KeyboardButton(text="Изменить профиль"),
             ],
         ],
