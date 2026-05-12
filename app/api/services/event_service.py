@@ -4,7 +4,34 @@ from pathlib import Path
 from sqlalchemy.orm import Session
 
 from app.db.models.event import Event
-from app.agents.event_normalization import event_normalizer_agent
+from app.db.models.topic import Topic, EventTopic
+from app.core.topics import TOPIC_TITLES
+
+
+def _get_or_create_topic(db: Session, code: str) -> Topic:
+    topic = db.query(Topic).filter(Topic.code == code).first()
+    if not topic:
+        topic = Topic(code=code, title=TOPIC_TITLES.get(code, code))
+        db.add(topic)
+        db.flush()
+    return topic
+
+
+def _attach_event_topics(db: Session, event: Event, topic_codes: list[str]) -> None:
+    for code in topic_codes:
+        topic = _get_or_create_topic(db, code)
+        exists = (
+            db.query(EventTopic)
+            .filter(EventTopic.event_id == event.id, EventTopic.topic_id == topic.id)
+            .first()
+        )
+        if not exists:
+            db.add(EventTopic(event_id=event.id, topic_id=topic.id))
+    db.flush()
+
+
+def get_event_topic_codes(event: Event) -> list[str]:
+    return [et.topic.code for et in (event.event_topics or []) if et.topic]
 
 
 def load_events_from_json(db: Session, file_path: str = "data/events.json") -> int:
@@ -17,10 +44,8 @@ def load_events_from_json(db: Session, file_path: str = "data/events.json") -> i
         events_data = json.load(f)
 
     count = 0
-
     for item in events_data:
-        existing = db.query(Event).filter(Event.title == item["title"]).first()
-        if existing:
+        if db.query(Event).filter(Event.title == item["title"]).first():
             continue
 
         event = Event(
@@ -30,50 +55,11 @@ def load_events_from_json(db: Session, file_path: str = "data/events.json") -> i
             city=item["city"],
             level=item["level"],
             date=item["date"],
-            topics=",".join(item["topics"]),
-        )
-        db.add(event)
-        count += 1
-
-    db.commit()
-    return count
-
-
-def load_raw_events_with_ai(db: Session, file_path: str = "data/events_raw.json") -> int:
-    path = Path(file_path)
-
-    if not path.exists():
-        raise FileNotFoundError(f"Файл {file_path} не найден")
-
-    with path.open("r", encoding="utf-8") as f:
-        raw_events = json.load(f)
-
-    count = 0
-
-    for raw_event in raw_events:
-        result = event_normalizer_agent({
-            "raw_event": raw_event,
-            "normalized_event": {},
-        })
-
-        item = result["normalized_event"]
-
-        existing = db.query(Event).filter(Event.title == item["title"]).first()
-        if existing:
-            continue
-
-        event = Event(
-            title=item["title"],
-            description=item["description"],
-            format=item["format"],
-            city=item["city"],
-            level=item["level"],
-            date=item["date"],
-            topics=",".join(item["topics"]),
             source_url=item.get("source_url"),
         )
-
         db.add(event)
+        db.flush()
+        _attach_event_topics(db, event, item.get("topics", []))
         count += 1
 
     db.commit()

@@ -1,3 +1,6 @@
+import json
+import re
+
 from langchain_core.prompts import ChatPromptTemplate
 
 from app.agents.recommendation.llm import llm
@@ -11,6 +14,15 @@ def recommendation_agent_node(state: RecommendationState):
 Твоя задача — сопоставить анализ пользователя и анализ событий.
 Выбери наиболее подходящие события.
 Не рекомендуй события, которые явно противоречат интересам пользователя.
+
+Верни ТОЛЬКО JSON-массив из топ-3 событий. Никакого другого текста до или после.
+
+Формат:
+[
+  {{"event_id": <id числом>, "score": <число от 1 до 10>, "reason": "<краткая причина на русском>"}},
+  {{"event_id": <id числом>, "score": <число от 1 до 10>, "reason": "<краткая причина на русском>"}},
+  {{"event_id": <id числом>, "score": <число от 1 до 10>, "reason": "<краткая причина на русском>"}}
+]
 """),
         ("user", """
 Анализ пользователя:
@@ -19,16 +31,10 @@ def recommendation_agent_node(state: RecommendationState):
 Анализ событий:
 {events_analysis}
 
-Исходный список событий:
+Исходный список событий (используй точные id из этого списка):
 {events}
 
-Выбери топ-3 события.
-
-Для каждого события укажи:
-- место в рейтинге
-- название
-- оценку релевантности от 1 до 10
-- краткую причину выбора
+Верни JSON-массив топ-3 событий.
 """)
     ])
 
@@ -40,6 +46,23 @@ def recommendation_agent_node(state: RecommendationState):
         )
     )
 
-    return {
-        "ranked_events": result.content
-    }
+    ranked_event_ids = _parse_ranked_events(result.content, state["events"])
+    return {"ranked_event_ids": ranked_event_ids}
+
+
+def _parse_ranked_events(text: str, events: list) -> list:
+    try:
+        text = text.strip()
+        match = re.search(r'\[.*?\]', text, re.DOTALL)
+        if match:
+            parsed = json.loads(match.group())
+            valid_ids = {e["id"] for e in events}
+            return [
+                item for item in parsed
+                if isinstance(item, dict)
+                and isinstance(item.get("event_id"), int)
+                and item["event_id"] in valid_ids
+            ]
+    except (json.JSONDecodeError, Exception):
+        pass
+    return []

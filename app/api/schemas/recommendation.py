@@ -12,8 +12,10 @@ class RecommendationResponse(BaseModel):
     level: str
     date: str
     topics: list[str]
-    score: int
+    score: float
     explanation: str
+    summary: str | None = None
+    source_url: str | None = None
 
 
 class InteractionCreate(BaseModel):

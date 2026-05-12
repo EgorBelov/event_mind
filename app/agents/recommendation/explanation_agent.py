@@ -5,6 +5,28 @@ from app.agents.recommendation.state import RecommendationState
 
 
 def explanation_agent(state: RecommendationState):
+    ranked_event_ids = state.get("ranked_event_ids", [])
+    events_by_id = {e["id"]: e for e in state["events"]}
+
+    ranked_cards = []
+    for item in ranked_event_ids:
+        event_id = item.get("event_id")
+        event = events_by_id.get(event_id)
+        if not event:
+            continue
+        ranked_cards.append({
+            "event_id": event_id,
+            "title": event["title"],
+            "description": event["description"],
+            "format": event["format"],
+            "city": event["city"],
+            "level": event["level"],
+            "date": event["date"],
+            "topics": event["topics"],
+            "explanation": item.get("reason", "Подобрано AI-агентом."),
+            "score": f"{item.get('score', '?')}/10",
+        })
+
     prompt = ChatPromptTemplate.from_messages([
         ("system", """
 Ты ExplanationAgent.
@@ -33,11 +55,10 @@ def explanation_agent(state: RecommendationState):
     ])
 
     result = llm.invoke(
-        prompt.format_messages(
-            ranked_events=state["ranked_events"]
-        )
+        prompt.format_messages(ranked_events=ranked_event_ids)
     )
 
     return {
-        "final_answer": result.content
+        "ranked_cards": ranked_cards,
+        "final_answer": result.content,
     }

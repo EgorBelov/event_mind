@@ -7,6 +7,7 @@ from app.api.services.subscription_service import (
     unsubscribe_user,
     get_subscribed_users,
 )
+from app.api.services.user_service import get_user_topic_codes
 
 router = APIRouter(prefix="/subscriptions", tags=["subscriptions"])
 
@@ -21,15 +22,29 @@ def unsubscribe(telegram_id: int, db: Session = Depends(get_db)):
     return unsubscribe_user(db, telegram_id)
 
 
-@router.get("/users")
-def list_subscribed_users(db: Session = Depends(get_db)):
+@router.get("/subscribers")
+def list_subscribers(db: Session = Depends(get_db)):
+    """Return subscribed users — used by send_ai_digest.py."""
     users = get_subscribed_users(db)
-
     return [
         {
             "telegram_id": user.telegram_id,
             "username": user.username,
-            "topics": user.topics.split(",") if user.topics else [],
+            "topics": get_user_topic_codes(user),
+        }
+        for user in users
+    ]
+
+
+@router.get("/users")
+def list_subscribed_users(db: Session = Depends(get_db)):
+    """Backward-compatible alias for /subscribers."""
+    users = get_subscribed_users(db)
+    return [
+        {
+            "telegram_id": user.telegram_id,
+            "username": user.username,
+            "topics": get_user_topic_codes(user),
         }
         for user in users
     ]

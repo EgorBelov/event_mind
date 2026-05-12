@@ -1,4 +1,7 @@
-from sqlalchemy import Column, Integer, String, Text
+from sqlalchemy import Column, Integer, String, Text, DateTime
+from sqlalchemy.orm import relationship
+from sqlalchemy.sql import func
+
 from app.db.base import Base
 
 
@@ -12,5 +15,14 @@ class Event(Base):
     city = Column(String, nullable=False)
     level = Column(String, nullable=False)
     date = Column(String, nullable=False)
-    topics = Column(String, nullable=False)  # ai_ml,business_analytics
+    event_type = Column(String, nullable=True)
+    target_audience = Column(String, nullable=True)
     source_url = Column(String, nullable=True)
+    summary = Column(Text, nullable=True)
+    embedding = Column(Text, nullable=True)
+    created_at = Column(DateTime, server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now(), nullable=False)
+
+    # Relationships
+    event_topics = relationship("EventTopic", back_populates="event", cascade="all, delete-orphan")
+    interactions = relationship("Interaction", back_populates="event", cascade="all, delete-orphan")

@@ -1,4 +1,7 @@
-from sqlalchemy import Column, Integer, String, Text
+from sqlalchemy import Column, Integer, String, Text, DateTime
+from sqlalchemy.orm import relationship
+from sqlalchemy.sql import func
+
 from app.db.base import Base
 
 
@@ -10,6 +13,11 @@ class User(Base):
     username = Column(String, nullable=True)
     preferred_format = Column(String, nullable=True)
     city = Column(String, nullable=True)
-    topics = Column(String, nullable=True)  # ai_ml,data_science
-    topic_weights = Column(Text, nullable=True)  # JSON-строка
+    topic_weights = Column(Text, nullable=True)  # JSON-string
     is_subscribed = Column(Integer, default=0)  # 0 / 1
+    created_at = Column(DateTime, server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now(), nullable=False)
+
+    # Relationships
+    user_topics = relationship("UserTopic", back_populates="user", cascade="all, delete-orphan")
+    interactions = relationship("Interaction", back_populates="user", cascade="all, delete-orphan")

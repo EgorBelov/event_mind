@@ -6,18 +6,24 @@ TOPIC_LABELS = {
     "data_science": "Data Science",
     "business_analytics": "Бизнес-аналитика",
     "backend": "Backend",
+    "frontend": "Frontend",
     "product": "Product",
+    "cybersecurity": "Cybersecurity",
+    "devops": "DevOps",
 }
 
 FORMAT_LABELS = {
     "online": "Онлайн",
     "offline": "Оффлайн",
+    "hybrid": "Гибрид",
     "any": "Без разницы",
 }
 
 CITY_LABELS = {
     "moscow": "Москва",
     "spb": "Санкт-Петербург",
+    "kazan": "Казань",
+    "ekb": "Екатеринбург",
     "any": "Любой",
 }
 
@@ -38,7 +44,7 @@ def topics_keyboard(selected_topics: set[str]) -> InlineKeyboardMarkup:
         builder.button(text=f"{prefix}{topic_label}", callback_data=f"topic:{topic_key}")
 
     builder.button(text="Готово", callback_data="topics_done")
-    builder.adjust(2, 2, 1)
+    builder.adjust(2, 2, 2, 2, 1)
     return builder.as_markup()
 
 
@@ -48,7 +54,7 @@ def format_keyboard() -> InlineKeyboardMarkup:
     for format_key, format_label in FORMAT_LABELS.items():
         builder.button(text=format_label, callback_data=f"format:{format_key}")
 
-    builder.adjust(2, 1)
+    builder.adjust(2, 2)
     return builder.as_markup()
 
 
@@ -58,7 +64,7 @@ def city_keyboard() -> InlineKeyboardMarkup:
     for city_key, city_label in CITY_LABELS.items():
         builder.button(text=city_label, callback_data=f"city:{city_key}")
 
-    builder.adjust(2, 1)
+    builder.adjust(2, 2, 1)
     return builder.as_markup()
 
 
@@ -83,9 +89,11 @@ def recommendation_keyboard(
     builder.button(text=like_text, callback_data=f"like:{event_id}")
     builder.button(text=dislike_text, callback_data=f"dislike:{event_id}")
     builder.button(text=save_text, callback_data=f"save:{event_id}")
+    builder.button(text="Похожие", callback_data=f"similar:{event_id}")
     builder.button(text="Следующее", callback_data="next_recommendation")
-    builder.adjust(2, 2)
+    builder.adjust(2, 2, 1)
     return builder.as_markup()
+
 
 def ai_recommendation_keyboard(
     event_id: int,
@@ -101,6 +109,7 @@ def ai_recommendation_keyboard(
     builder.button(text=like_text, callback_data=f"ai_like:{event_id}")
     builder.button(text=dislike_text, callback_data=f"ai_dislike:{event_id}")
     builder.button(text=save_text, callback_data=f"ai_save:{event_id}")
+    builder.button(text="Похожие", callback_data=f"similar:{event_id}")
     builder.button(text="Следующее AI", callback_data="next_ai_recommendation")
-    builder.adjust(2, 2)
+    builder.adjust(2, 2, 1)
     return builder.as_markup()

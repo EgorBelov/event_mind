@@ -7,6 +7,7 @@ from app.bot.handlers.start import router as start_router
 from app.bot.handlers.profile import router as profile_router
 from app.bot.handlers.recommendations import router as recommendations_router
 from app.bot.handlers.subscriptions import router as subscriptions_router
+from app.bot.handlers.search import router as search_router
 
 
 async def main():
@@ -20,6 +21,7 @@ async def main():
     dp.include_router(profile_router)
     dp.include_router(recommendations_router)
     dp.include_router(subscriptions_router)
+    dp.include_router(search_router)
 
     await dp.start_polling(bot)
 

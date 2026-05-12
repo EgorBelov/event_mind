@@ -4,14 +4,19 @@ from sqlalchemy.orm import Session
 from app.db.models.event import Event
 from app.db.models.user import User
 from app.db.models.interaction import Interaction
-from app.recommender.scoring import score_event_for_user
+from app.recommender.scoring import score_event_for_user, _get_event_topic_codes
 from app.recommender.explain import explain_event_for_user
 from app.recommender.user_model import (
-    parse_topics,
     parse_topic_weights,
     dump_topic_weights,
     apply_feedback_to_weights,
 )
+
+try:
+    from app.recommender.hybrid import hybrid_score as _hybrid_score
+    _HAS_HYBRID = True
+except Exception:
+    _HAS_HYBRID = False
 
 
 def get_recommendations_for_user(db: Session, telegram_id: int) -> list[dict]:
@@ -26,7 +31,10 @@ def get_recommendations_for_user(db: Session, telegram_id: int) -> list[dict]:
     results = []
 
     for event in events:
-        score = score_event_for_user(user, event)
+        try:
+            score = float(_hybrid_score(user, event)) if _HAS_HYBRID else float(score_event_for_user(user, event))
+        except Exception:
+            score = float(score_event_for_user(user, event))
 
         results.append({
             "event_id": event.id,
@@ -36,9 +44,12 @@ def get_recommendations_for_user(db: Session, telegram_id: int) -> list[dict]:
             "city": event.city,
             "level": event.level,
             "date": event.date,
-            "topics": list(parse_topics(event.topics)),
-            "score": score,
-            "explanation": explain_event_for_user(user, event),
+            "topics": list(_get_event_topic_codes(event)),
+            "summary": getattr(event, "summary", None),
+            "source_url": event.source_url,
+            "target_audience": getattr(event, "target_audience", None),
+            "score": round(score, 2),
+            "explanation": explain_event_for_user(user, event, db=db),
         })
 
     results.sort(key=lambda x: x["score"], reverse=True)
@@ -67,7 +78,7 @@ def create_interaction(db: Session, telegram_id: int, event_id: int, action: str
         )
 
     current_weights = parse_topic_weights(user.topic_weights)
-    event_topics = list(parse_topics(event.topics))
+    event_topics = _get_event_topic_codes(event)
 
     if action in {"like", "dislike"}:
         opposite_action = "dislike" if action == "like" else "like"
@@ -184,6 +195,7 @@ def get_event_interactions_for_user(db: Session, telegram_id: int, event_id: int
 
     return [item.action for item in interactions]
 
+
 def get_saved_events_for_user(db: Session, telegram_id: int) -> list[dict]:
     user = db.query(User).filter(User.telegram_id == telegram_id).first()
     if not user:
@@ -209,6 +221,7 @@ def get_saved_events_for_user(db: Session, telegram_id: int) -> list[dict]:
 
     results = []
     for event in events:
+        topics = _get_event_topic_codes(event)
         results.append({
             "event_id": event.id,
             "title": event.title,
@@ -217,7 +230,7 @@ def get_saved_events_for_user(db: Session, telegram_id: int) -> list[dict]:
             "city": event.city,
             "level": event.level,
             "date": event.date,
-            "topics": list(parse_topics(event.topics)),
+            "topics": topics,
         })
 
     return results

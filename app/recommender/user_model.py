@@ -8,9 +8,11 @@ DISLIKE_PENALTY = 2
 MIN_TOPIC_WEIGHT = 0
 
 
-def parse_topics(value: str | None) -> set[str]:
+def parse_topics(value: str | list | None) -> set[str]:
     if not value:
         return set()
+    if isinstance(value, (list, set)):
+        return {item.strip() for item in value if item and item.strip()}
     return {item.strip() for item in value.split(",") if item.strip()}
 
 

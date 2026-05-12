@@ -5,18 +5,34 @@ httpx==0.27.0
 # --- Backend ---
 fastapi==0.110.0
 uvicorn[standard]==0.29.0
+jinja2
 
 # --- DB ---
 sqlalchemy==2.0.29
+alembic==1.13.2
 
 # --- Telegram ---
 aiogram==3.13.1
 
 # --- Pydantic ---
 pydantic==2.8.2
+pydantic-settings==2.3.4
 
 # --- LangChain / LangGraph / Groq ---
 langchain==0.2.14
 langchain-core==0.2.36
 langgraph==0.2.16
 langchain-groq==0.1.6
+
+# --- Embeddings / Hybrid scoring ---
+sentence-transformers==2.7.0
+
+# --- Scheduling ---
+apscheduler==3.10.4
+
+# --- HTML parsing ---
+beautifulsoup4==4.12.3
+lxml==5.2.2
+
+# --- Tests ---
+pytest==8.2.2

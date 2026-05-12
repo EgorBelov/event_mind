@@ -7,102 +7,162 @@ class EventMindAPIClient:
     def __init__(self, base_url: str = API_HOST):
         self.base_url = base_url.rstrip("/")
 
-    async def register_user(
-        self,
-        telegram_id: int,
-        username: str | None,
-        preferred_format: str | None,
-        city: str | None,
-        topics: list[str],
-    ) -> dict:
-        payload = {
-            "telegram_id": telegram_id,
-            "username": username,
-            "preferred_format": preferred_format,
-            "city": city,
-            "topics": topics,
-        }
-
-        async with httpx.AsyncClient() as client:
-            response = await client.post(f"{self.base_url}/users/register", json=payload)
-            response.raise_for_status()
-            return response.json()
+    async def register_user(self, telegram_id, username, preferred_format, city, topics) -> dict:
+        payload = {"telegram_id": telegram_id, "username": username,
+                   "preferred_format": preferred_format, "city": city, "topics": topics}
+        try:
+            async with httpx.AsyncClient() as c:
+                r = await c.post(f"{self.base_url}/users/register", json=payload)
+                r.raise_for_status()
+                return r.json()
+        except httpx.HTTPError:
+            return {}
 
     async def get_user(self, telegram_id: int) -> dict:
-        async with httpx.AsyncClient() as client:
-            response = await client.get(f"{self.base_url}/users/{telegram_id}")
-            if response.status_code == 404:
-                return {}
-            response.raise_for_status()
-            return response.json()
+        try:
+            async with httpx.AsyncClient() as c:
+                r = await c.get(f"{self.base_url}/users/{telegram_id}")
+                if r.status_code == 404:
+                    return {}
+                r.raise_for_status()
+                return r.json()
+        except httpx.HTTPError:
+            return {}
 
     async def get_recommendations(self, telegram_id: int) -> list[dict]:
-        async with httpx.AsyncClient() as client:
-            response = await client.get(f"{self.base_url}/recommendations/{telegram_id}")
-            if response.status_code == 404:
-                return []
-            response.raise_for_status()
-            return response.json()
+        try:
+            async with httpx.AsyncClient() as c:
+                r = await c.get(f"{self.base_url}/recommendations/{telegram_id}")
+                if r.status_code == 404:
+                    return []
+                r.raise_for_status()
+                return r.json()
+        except httpx.HTTPError:
+            return []
 
     async def save_interaction(self, telegram_id: int, event_id: int, action: str) -> dict:
-        payload = {
-            "telegram_id": telegram_id,
-            "event_id": event_id,
-            "action": action,
-        }
-
-        async with httpx.AsyncClient() as client:
-            response = await client.post(f"{self.base_url}/recommendations/interactions", json=payload)
-            response.raise_for_status()
-            return response.json()
+        payload = {"telegram_id": telegram_id, "event_id": event_id, "action": action}
+        try:
+            async with httpx.AsyncClient() as c:
+                r = await c.post(f"{self.base_url}/recommendations/interactions", json=payload)
+                r.raise_for_status()
+                return r.json()
+        except httpx.HTTPError:
+            return {}
 
     async def get_event_interactions(self, telegram_id: int, event_id: int) -> dict:
-        async with httpx.AsyncClient() as client:
-            response = await client.get(
-                f"{self.base_url}/recommendations/{telegram_id}/event/{event_id}/interactions"
-            )
-            if response.status_code == 404:
-                return {"actions": []}
-            response.raise_for_status()
-            return response.json()
-        
+        try:
+            async with httpx.AsyncClient() as c:
+                r = await c.get(
+                    f"{self.base_url}/recommendations/{telegram_id}/event/{event_id}/interactions"
+                )
+                if r.status_code == 404:
+                    return {"actions": []}
+                r.raise_for_status()
+                return r.json()
+        except httpx.HTTPError:
+            return {"actions": []}
+
     async def get_saved_events(self, telegram_id: int) -> list[dict]:
-        async with httpx.AsyncClient() as client:
-            response = await client.get(f"{self.base_url}/recommendations/{telegram_id}/saved")
-            if response.status_code == 404:
-                return []
-            response.raise_for_status()
-            return response.json()
+        try:
+            async with httpx.AsyncClient() as c:
+                r = await c.get(f"{self.base_url}/recommendations/{telegram_id}/saved")
+                if r.status_code == 404:
+                    return []
+                r.raise_for_status()
+                return r.json()
+        except httpx.HTTPError:
+            return []
 
     async def get_agent_recommendations(self, telegram_id: int) -> dict:
-        async with httpx.AsyncClient(timeout=60.0) as client:
-            response = await client.get(
-                f"{self.base_url}/agent-recommendations/{telegram_id}"
-            )
-            response.raise_for_status()
-            return response.json()
-        
+        try:
+            async with httpx.AsyncClient(timeout=60.0) as c:
+                r = await c.get(f"{self.base_url}/agent-recommendations/{telegram_id}")
+                r.raise_for_status()
+                return r.json()
+        except httpx.HTTPError:
+            return {"success": False, "message": "Сервис временно недоступен."}
+
     async def subscribe(self, telegram_id: int) -> dict:
-        async with httpx.AsyncClient() as client:
-            response = await client.post(
-                f"{self.base_url}/subscriptions/{telegram_id}/subscribe"
-            )
-            response.raise_for_status()
-            return response.json()
+        try:
+            async with httpx.AsyncClient() as c:
+                r = await c.post(f"{self.base_url}/subscriptions/{telegram_id}/subscribe")
+                r.raise_for_status()
+                return r.json()
+        except httpx.HTTPError:
+            return {"message": "Не удалось оформить подписку. Попробуй позже."}
 
     async def unsubscribe(self, telegram_id: int) -> dict:
-        async with httpx.AsyncClient() as client:
-            response = await client.post(
-                f"{self.base_url}/subscriptions/{telegram_id}/unsubscribe"
-            )
-            response.raise_for_status()
-            return response.json()
-
+        try:
+            async with httpx.AsyncClient() as c:
+                r = await c.post(f"{self.base_url}/subscriptions/{telegram_id}/unsubscribe")
+                r.raise_for_status()
+                return r.json()
+        except httpx.HTTPError:
+            return {"message": "Не удалось отписаться. Попробуй позже."}
 
     async def get_agent_recommendation_cards(self, telegram_id: int) -> dict:
-        async with httpx.AsyncClient(timeout=60.0) as client:
-            response = await client.get(
-                f"{self.base_url}/agent-recommendations/{telegram_id}/cards"
-            )
-            response.raise_for_status()
-            return response.json()
+        try:
+            async with httpx.AsyncClient(timeout=60.0) as c:
+                r = await c.get(f"{self.base_url}/agent-recommendations/{telegram_id}/cards")
+                r.raise_for_status()
+                return r.json()
+        except httpx.HTTPError:
+            return {"success": False, "message": "Не удалось получить AI-рекомендации."}
+
+    async def get_user_stats(self, telegram_id: int) -> dict:
+        try:
+            async with httpx.AsyncClient() as c:
+                r = await c.get(f"{self.base_url}/users/{telegram_id}/stats")
+                if r.status_code == 404:
+                    return {"success": False}
+                r.raise_for_status()
+                return r.json()
+        except httpx.HTTPError:
+            return {"success": False}
+
+    async def analyze_bio(self, telegram_id: int, bio: str) -> dict:
+        try:
+            async with httpx.AsyncClient(timeout=60.0) as c:
+                r = await c.post(
+                    f"{self.base_url}/users/{telegram_id}/analyze-bio", json={"bio": bio}
+                )
+                if r.status_code == 404:
+                    return {"success": False, "message": "Пользователь не найден"}
+                r.raise_for_status()
+                return r.json()
+        except httpx.HTTPError:
+            return {"success": False, "message": "Сервис недоступен."}
+
+    async def search_events(self, query=None, topics=None, format=None, city=None) -> list[dict]:
+        params: dict = {}
+        if query:
+            params["q"] = query
+        if topics:
+            params["topics"] = ",".join(topics)
+        if format:
+            params["format"] = format
+        if city:
+            params["city"] = city
+        try:
+            async with httpx.AsyncClient() as c:
+                r = await c.get(f"{self.base_url}/events/search", params=params)
+                if r.status_code == 404:
+                    return []
+                r.raise_for_status()
+                return r.json()
+        except httpx.HTTPError:
+            return []
+
+    async def get_similar_events(self, event_id: int, limit: int = 3) -> list[dict]:
+        try:
+            async with httpx.AsyncClient() as c:
+                r = await c.get(
+                    f"{self.base_url}/events/{event_id}/similar", params={"limit": limit}
+                )
+                if r.status_code == 404:
+                    return []
+                r.raise_for_status()
+                return r.json()
+        except httpx.HTTPError:
+            return []

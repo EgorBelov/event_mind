@@ -1,7 +1,7 @@
 import json
 
 from aiogram import Router, F
-from aiogram.filters import Command
+from aiogram.filters import Command, CommandObject
 from aiogram.types import Message
 
 from app.bot.services.api_client import EventMindAPIClient
@@ -9,6 +9,13 @@ from app.bot.keyboards.inline import TOPIC_LABELS, FORMAT_LABELS, CITY_LABELS
 
 router = Router()
 api_client = EventMindAPIClient()
+
+
+ACTION_LABELS = {
+    "like": "Интересно",
+    "dislike": "Не интересно",
+    "save": "Сохранено",
+}
 
 
 @router.message(Command("profile"))
@@ -71,6 +78,7 @@ async def cmd_saved(message: Message):
     text = "*Сохраненные события:*\n\n" + "\n\n".join(chunks)
     await message.answer(text, parse_mode="Markdown")
 
+
 @router.message(F.text == "Профиль")
 async def msg_profile(message: Message):
     await cmd_profile(message)
@@ -79,3 +87,65 @@ async def msg_profile(message: Message):
 @router.message(F.text == "Избранное")
 async def msg_saved(message: Message):
     await cmd_saved(message)
+
+
+@router.message(Command("stats"))
+async def cmd_stats(message: Message):
+    await _send_stats(message)
+
+
+@router.message(F.text == "Моя активность")
+async def msg_stats(message: Message):
+    await _send_stats(message)
+
+
+async def _send_stats(message: Message):
+    stats = await api_client.get_user_stats(message.from_user.id)
+    if not stats or not stats.get("success", True):
+        await message.answer("Статистика пока недоступна. Сначала настрой профиль через /start.")
+        return
+
+    top_topics = stats.get("top_topics") or []
+    last_actions = stats.get("last_actions") or []
+
+    top_topics_text = "\n".join(
+        f"- {TOPIC_LABELS.get(t['topic'], t['topic'])}: {t['score']}"
+        for t in top_topics
+    ) or "пока пусто"
+
+    last_actions_text = "\n".join(
+        f"- [{ACTION_LABELS.get(item['action'], item['action'])}] {item['event_title']}"
+        for item in last_actions
+    ) or "ещё нет действий"
+
+    text = (
+        "*Моя активность*\n\n"
+        f"Интересно: {stats.get('likes_count', 0)}\n"
+        f"Не интересно: {stats.get('dislikes_count', 0)}\n"
+        f"Сохранено: {stats.get('saves_count', 0)}\n\n"
+        f"*Топ тем по интересу:*\n{top_topics_text}\n\n"
+        f"*Последние действия:*\n{last_actions_text}"
+    )
+    await message.answer(text, parse_mode="Markdown")
+
+
+@router.message(Command("bio"))
+async def cmd_bio(message: Message, command: CommandObject):
+    bio_text = (command.args or "").strip()
+    if not bio_text:
+        await message.answer(
+            "Расскажи о себе одной строкой после команды.\n"
+            "Например: /bio Я Python разработчик, интересуюсь AI/ML и DevOps."
+        )
+        return
+
+    result = await api_client.analyze_bio(message.from_user.id, bio_text)
+    if not result.get("success"):
+        await message.answer(result.get("message", "Не удалось обработать bio."))
+        return
+
+    topics = result.get("extracted_topics", [])
+    topic_text = ", ".join(TOPIC_LABELS.get(t, t) for t in topics)
+    await message.answer(
+        f"Готово. По описанию я обновил твои темы: {topic_text}.",
+    )
