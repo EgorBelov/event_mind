@@ -11,6 +11,7 @@ from app.api.routers import (
     ingestion,
     admin,
     analytics,
+    copilot,
 )
 
 setup_logging(debug=settings.debug)
@@ -29,6 +30,7 @@ app.include_router(subscriptions.router)
 app.include_router(ingestion.router)
 app.include_router(admin.router)
 app.include_router(analytics.router)
+app.include_router(copilot.router)
 
 
 @app.get("/health", tags=["system"])

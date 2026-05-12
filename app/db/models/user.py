@@ -14,10 +14,10 @@ class User(Base):
     preferred_format = Column(String, nullable=True)
     city = Column(String, nullable=True)
     topic_weights = Column(Text, nullable=True)  # JSON-string
-    is_subscribed = Column(Integer, default=0)  # 0 / 1
+    is_subscribed = Column(Integer, default=0)   # 0 / 1
+    embedding = Column(Text, nullable=True)      # JSON vector (personal embedding)
     created_at = Column(DateTime, server_default=func.now(), nullable=False)
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now(), nullable=False)
 
-    # Relationships
     user_topics = relationship("UserTopic", back_populates="user", cascade="all, delete-orphan")
     interactions = relationship("Interaction", back_populates="user", cascade="all, delete-orphan")

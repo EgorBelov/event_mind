@@ -91,3 +91,16 @@ htmlcov/
 
 *.sqlite3
 *.db
+
+
+# ======================
+
+# Claude Code WorkTrees
+
+# ======================
+
+.claude/
+.claude
+.claude/worktrees
+claude/
+claude

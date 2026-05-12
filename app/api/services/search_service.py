@@ -6,7 +6,7 @@ from app.recommender.scoring import _get_event_topic_codes
 
 
 def _serialize_event(event: Event) -> dict:
-    data = {
+    return {
         "event_id": event.id,
         "id": event.id,
         "title": event.title,
@@ -17,11 +17,23 @@ def _serialize_event(event: Event) -> dict:
         "date": event.date,
         "topics": list(_get_event_topic_codes(event)),
         "source_url": event.source_url,
+        "summary": getattr(event, "summary", None),
+        "tech_stack": _parse_json_field(getattr(event, "tech_stack", None)),
+        "seniority": getattr(event, "seniority", None),
+        "quality_score": getattr(event, "quality_score", None),
+        "hype_score": getattr(event, "hype_score", None),
     }
-    summary = getattr(event, "summary", None)
-    if summary:
-        data["summary"] = summary
-    return data
+
+
+def _parse_json_field(value) -> list:
+    if not value:
+        return []
+    try:
+        import json
+        result = json.loads(value)
+        return result if isinstance(result, list) else []
+    except Exception:
+        return []
 
 
 def search_events(
@@ -31,7 +43,7 @@ def search_events(
     format: str | None = None,
     city: str | None = None,
 ) -> list[dict]:
-    """Filter events by title/description query, topics, format, and city."""
+    """Keyword search: filter by title/description, topics, format, city."""
     q = db.query(Event)
 
     if query:
@@ -58,8 +70,38 @@ def search_events(
     return [_serialize_event(e) for e in events]
 
 
+def semantic_search_events(db: Session, query: str, limit: int = 5) -> list[dict]:
+    """Semantic search: rank events by embedding cosine similarity to the query text.
+
+    Falls back to keyword search if embeddings are unavailable.
+    """
+    try:
+        from app.recommender.embeddings import embed_text, cosine_similarity, get_or_build_event_embedding
+
+        query_emb = embed_text(query)
+        events = db.query(Event).all()
+
+        scored: list[tuple[float, Event]] = []
+        for event in events:
+            try:
+                event_emb = get_or_build_event_embedding(event)
+                sim = cosine_similarity(query_emb, event_emb)
+                scored.append((sim, event))
+            except Exception:
+                continue
+
+        scored.sort(key=lambda x: x[0], reverse=True)
+        return [
+            {**_serialize_event(e), "similarity": round(sim, 3)}
+            for sim, e in scored[:limit]
+        ]
+
+    except Exception:
+        return search_events(db, query=query)[:limit]
+
+
 def get_similar_events(db: Session, event_id: int, limit: int = 3) -> list[dict]:
-    """Return events that share the most topics with the given event."""
+    """Return events sharing the most topics with the given event."""
     base = db.query(Event).filter(Event.id == event_id).first()
     if not base:
         return []
@@ -69,11 +111,10 @@ def get_similar_events(db: Session, event_id: int, limit: int = 3) -> list[dict]
         return []
 
     others = db.query(Event).filter(Event.id != event_id).all()
-    scored = []
-    for e in others:
-        overlap = len(_get_event_topic_codes(e).intersection(base_topics))
-        if overlap > 0:
-            scored.append((overlap, e))
-
+    scored = [
+        (len(_get_event_topic_codes(e).intersection(base_topics)), e)
+        for e in others
+        if _get_event_topic_codes(e).intersection(base_topics)
+    ]
     scored.sort(key=lambda x: x[0], reverse=True)
     return [_serialize_event(e) for _, e in scored[:limit]]

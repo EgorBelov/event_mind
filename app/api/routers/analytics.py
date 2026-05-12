@@ -1,6 +1,7 @@
 from collections import Counter
+from datetime import datetime, timedelta
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 
 from app.db.dependencies import get_db
@@ -20,8 +21,7 @@ def analytics_topics(db: Session = Depends(get_db)):
     event_topics_map: dict[int, list[str]] = {}
     if interactions:
         event_ids = list({i.event_id for i in interactions})
-        events = db.query(Event).filter(Event.id.in_(event_ids)).all()
-        for e in events:
+        for e in db.query(Event).filter(Event.id.in_(event_ids)).all():
             event_topics_map[e.id] = list(_get_event_topic_codes(e))
 
     liked_counter: Counter[str] = Counter()
@@ -37,20 +37,14 @@ def analytics_topics(db: Session = Depends(get_db)):
         elif i.action == "dislike":
             disliked_counter.update(topics)
 
-    # Topic weights distribution (averaged across users)
     weight_totals: dict[str, float] = {}
     weight_counts: dict[str, int] = {}
-    users = db.query(User).all()
-    for u in users:
-        weights = parse_topic_weights(u.topic_weights)
-        for topic, value in weights.items():
+    for u in db.query(User).all():
+        for topic, value in parse_topic_weights(u.topic_weights).items():
             weight_totals[topic] = weight_totals.get(topic, 0) + float(value)
             weight_counts[topic] = weight_counts.get(topic, 0) + 1
 
-    avg_weights = {
-        t: round(weight_totals[t] / weight_counts[t], 2)
-        for t in weight_totals
-    }
+    avg_weights = {t: round(weight_totals[t] / weight_counts[t], 2) for t in weight_totals}
 
     return {
         "most_liked_topics": liked_counter.most_common(10),
@@ -67,7 +61,6 @@ def analytics_interactions(db: Session = Depends(get_db)):
 
     by_action: Counter[str] = Counter()
     by_event: Counter[int] = Counter()
-
     for i in interactions:
         by_action[i.action] += 1
         by_event[i.event_id] += 1
@@ -75,20 +68,71 @@ def analytics_interactions(db: Session = Depends(get_db)):
     top_event_ids = [eid for eid, _ in by_event.most_common(10)]
     top_events_data = []
     if top_event_ids:
-        events = db.query(Event).filter(Event.id.in_(top_event_ids)).all()
-        events_by_id = {e.id: e for e in events}
+        events_by_id = {e.id: e for e in db.query(Event).filter(Event.id.in_(top_event_ids)).all()}
         for eid in top_event_ids:
             e = events_by_id.get(eid)
-            if not e:
-                continue
-            top_events_data.append({
+            if e:
+                top_events_data.append({"event_id": e.id, "title": e.title, "interactions": by_event[eid]})
+
+    return {"total": sum(by_action.values()), "by_action": dict(by_action), "top_events": top_events_data}
+
+
+@router.get("/trending")
+def analytics_trending(
+    days: int = Query(default=7, ge=1, le=90),
+    limit: int = Query(default=10, ge=1, le=50),
+    db: Session = Depends(get_db),
+):
+    """Hot events and trending topics based on recent interaction signals.
+
+    Score formula: likes×3 + saves×2 + dislikes×0 (recency-weighted).
+    """
+    cutoff = datetime.utcnow() - timedelta(days=days)
+
+    # Only recent interactions (created_at >= cutoff)
+    interactions = (
+        db.query(Interaction)
+        .filter(Interaction.created_at >= cutoff)
+        .all()
+    )
+
+    # Fallback: use all interactions if none in window
+    if not interactions:
+        interactions = db.query(Interaction).all()
+
+    event_score: dict[int, float] = {}
+    topic_counter: Counter[str] = Counter()
+
+    event_ids_seen = {i.event_id for i in interactions}
+    events_map = {e.id: e for e in db.query(Event).filter(Event.id.in_(event_ids_seen)).all()}
+
+    for i in interactions:
+        weight = 3.0 if i.action == "like" else (2.0 if i.action == "save" else 0.0)
+        event_score[i.event_id] = event_score.get(i.event_id, 0.0) + weight
+
+        event = events_map.get(i.event_id)
+        if event and i.action in ("like", "save"):
+            topic_counter.update(_get_event_topic_codes(event))
+
+    # Top events by score
+    top_ids = sorted(event_score, key=event_score.get, reverse=True)[:limit]
+    hot_events = []
+    for eid in top_ids:
+        e = events_map.get(eid)
+        if e:
+            hot_events.append({
                 "event_id": e.id,
                 "title": e.title,
-                "interactions": by_event[eid],
+                "format": e.format,
+                "city": e.city,
+                "date": e.date,
+                "topics": list(_get_event_topic_codes(e)),
+                "hype_score": getattr(e, "hype_score", None),
+                "trending_score": round(event_score[eid], 1),
             })
 
     return {
-        "total": sum(by_action.values()),
-        "by_action": dict(by_action),
-        "top_events": top_events_data,
+        "period_days": days,
+        "hot_events": hot_events,
+        "trending_topics": topic_counter.most_common(8),
     }

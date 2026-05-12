@@ -19,10 +19,13 @@ class Event(Base):
     target_audience = Column(String, nullable=True)
     source_url = Column(String, nullable=True)
     summary = Column(Text, nullable=True)
-    embedding = Column(Text, nullable=True)
+    embedding = Column(Text, nullable=True)       # JSON vector
+    tech_stack = Column(Text, nullable=True)      # JSON array of tech names
+    seniority = Column(String, nullable=True)     # junior/middle/senior/any
+    quality_score = Column(Integer, nullable=True)  # 1-10 AI-estimated quality
+    hype_score = Column(Integer, nullable=True)   # 1-10 topic relevance/freshness
     created_at = Column(DateTime, server_default=func.now(), nullable=False)
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now(), nullable=False)
 
-    # Relationships
     event_topics = relationship("EventTopic", back_populates="event", cascade="all, delete-orphan")
     interactions = relationship("Interaction", back_populates="event", cascade="all, delete-orphan")

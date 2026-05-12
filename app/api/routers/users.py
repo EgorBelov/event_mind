@@ -11,6 +11,7 @@ from app.api.services.user_service import (
     get_user_stats,
     get_user_topic_codes,
 )
+from app.api.services.recommendation_service import refresh_user_embedding
 
 router = APIRouter(prefix="/users", tags=["users"])
 
@@ -58,3 +59,15 @@ def get_stats(telegram_id: int, db: Session = Depends(get_db)):
 @router.post("/{telegram_id}/analyze-bio")
 def analyze_bio(telegram_id: int, payload: BioPayload, db: Session = Depends(get_db)):
     return analyze_bio_and_update_topics(db, telegram_id, payload.bio)
+
+
+@router.post("/{telegram_id}/update-embedding")
+def update_embedding(telegram_id: int, db: Session = Depends(get_db)):
+    """Recompute and cache the user's personal embedding based on profile + interactions."""
+    from app.db.models.user import User as UserModel
+    user = db.query(UserModel).filter(UserModel.telegram_id == telegram_id).first()
+    if not user:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+    refresh_user_embedding(db, user)
+    db.commit()
+    return {"success": True, "message": "Embedding обновлён."}

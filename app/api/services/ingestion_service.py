@@ -116,6 +116,8 @@ def _normalize_single(db: Session, raw: RawEvent) -> str:
 
         existing = db.query(Event).filter(Event.title == item["title"]).first()
         if not existing:
+            import json as _json
+            tech_stack = item.get("tech_stack", [])
             event = Event(
                 title=item["title"],
                 description=item["description"],
@@ -126,6 +128,10 @@ def _normalize_single(db: Session, raw: RawEvent) -> str:
                 event_type=item.get("event_type"),
                 target_audience=item.get("target_audience"),
                 source_url=item.get("source_url") or raw.source_url,
+                tech_stack=_json.dumps(tech_stack, ensure_ascii=False) if tech_stack else None,
+                seniority=item.get("seniority"),
+                quality_score=item.get("quality_score"),
+                hype_score=item.get("hype_score"),
             )
             db.add(event)
             db.flush()

@@ -166,3 +166,38 @@ class EventMindAPIClient:
                 return r.json()
         except httpx.HTTPError:
             return []
+
+    async def semantic_search_events(self, query: str, limit: int = 5) -> list[dict]:
+        try:
+            async with httpx.AsyncClient(timeout=30.0) as c:
+                r = await c.get(
+                    f"{self.base_url}/events/semantic-search",
+                    params={"q": query, "limit": limit},
+                )
+                if r.status_code == 404:
+                    return []
+                r.raise_for_status()
+                return r.json()
+        except httpx.HTTPError:
+            return []
+
+    async def get_trending(self, days: int = 7) -> dict:
+        try:
+            async with httpx.AsyncClient() as c:
+                r = await c.get(f"{self.base_url}/analytics/trending", params={"days": days})
+                r.raise_for_status()
+                return r.json()
+        except httpx.HTTPError:
+            return {}
+
+    async def copilot(self, telegram_id: int, goal: str) -> dict:
+        try:
+            async with httpx.AsyncClient(timeout=60.0) as c:
+                r = await c.post(
+                    f"{self.base_url}/copilot/{telegram_id}",
+                    json={"goal": goal},
+                )
+                r.raise_for_status()
+                return r.json()
+        except httpx.HTTPError:
+            return {"success": False, "message": "Copilot временно недоступен."}

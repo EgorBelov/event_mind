@@ -17,6 +17,9 @@ def main_menu_keyboard() -> ReplyKeyboardMarkup:
                 KeyboardButton(text="Поиск"),
             ],
             [
+                KeyboardButton(text="Тренды"),
+            ],
+            [
                 KeyboardButton(text="Подписаться на AI"),
                 KeyboardButton(text="Отписаться"),
             ],
