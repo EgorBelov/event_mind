@@ -95,7 +95,7 @@ def get_agent_recommendation_cards(
         raise ValueError("AI returned no cards")
 
     except Exception:
-        # Fallback: scoring-based recommendations
+        # Fallback: scoring-based рекомендации
         try:
             recommendations = get_recommendations_for_user(db, telegram_id)
             return {"success": True, "cards": recommendations[:limit]}

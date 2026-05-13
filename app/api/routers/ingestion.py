@@ -14,25 +14,25 @@ router = APIRouter(prefix="/ingestion", tags=["ingestion"])
 
 @router.post("/load-raw")
 def load_raw(db: Session = Depends(get_db)):
-    """Load raw events from data/events_raw.json into the raw_events table."""
+    """Загрузить сырые события из data/events_raw.json в таблицу raw_events."""
     result = load_raw_events(db)
     return result
 
 
 @router.post("/load-habr")
 def load_habr(limit: int = 20, db: Session = Depends(get_db)):
-    """Fetch events from Habr, normalize via AI agent, insert into events table."""
+    """Скачать события с Habr, нормализовать через AI-агента, добавить в events."""
     return load_habr_events(db, limit=limit)
 
 
 @router.post("/normalize")
 def normalize(db: Session = Depends(get_db)):
-    """Normalize raw events into Event rows using AI agent."""
+    """Прогнать pending raw-события через AI-нормализатор и сохранить в events."""
     result = normalize_raw_events(db)
     return result
 
 
 @router.get("/status")
 def ingestion_status(db: Session = Depends(get_db)):
-    """Show raw/normalized/failed counts."""
+    """Счётчики по статусам raw_events (raw / normalized / non_it / failed)."""
     return get_ingestion_status(db)

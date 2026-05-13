@@ -22,7 +22,7 @@ except Exception:
 
 
 def refresh_user_embedding(db: Session, user: User) -> None:
-    """Compute and cache the user's personal embedding (best-effort)."""
+    """Посчитать и закэшировать персональный embedding пользователя (best-effort)."""
     try:
         from app.recommender.embeddings import build_rich_user_embedding
         interactions = db.query(Interaction).filter(Interaction.user_id == user.id).all()

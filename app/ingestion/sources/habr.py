@@ -1,4 +1,4 @@
-"""Habr events page parser for raw event ingestion."""
+"""Парсер страницы событий Habr для загрузки сырых событий в систему."""
 
 import httpx
 from bs4 import BeautifulSoup
@@ -12,10 +12,10 @@ _BASE = "https://habr.com"
 
 
 def fetch_habr_events(limit: int = 20) -> list[dict]:
-    """Fetch events from habr.com/ru/events/ via HTML parsing.
+    """Скачать события с habr.com/ru/events/ через HTML-парсинг.
 
-    Returns list of dicts with keys: title, raw_description, source_url.
-    Any network or parse error returns [].
+    Возвращает список словарей с ключами: title, raw_description, source_url.
+    Любая сетевая или парсинговая ошибка → пустой список.
     """
     try:
         response = httpx.get(

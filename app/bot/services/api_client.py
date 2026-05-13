@@ -201,3 +201,13 @@ class EventMindAPIClient:
                 return r.json()
         except httpx.HTTPError:
             return {"success": False, "message": "Copilot временно недоступен."}
+
+    async def get_vocabulary(self, kind: str) -> list[dict]:
+        """Получить динамический словарь: topics / cities / formats / levels."""
+        try:
+            async with httpx.AsyncClient() as c:
+                r = await c.get(f"{self.base_url}/vocabulary/{kind}")
+                r.raise_for_status()
+                return r.json()
+        except httpx.HTTPError:
+            return []

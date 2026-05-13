@@ -1,24 +1,24 @@
 from app.recommender.user_model import parse_topic_weights
 from app.recommender.scoring import _get_user_topic_codes, _get_event_topic_codes
-from app.core.topics import TOPIC_TITLES, FORMAT_LABELS
+from app.core.topics import topic_title, format_label
 
 
 def explain_event_for_user(user, event, db=None) -> str:
-    """Return a human-readable explanation string (Telegram-friendly)."""
+    """Вернуть человекочитаемое объяснение (под Telegram)."""
     result = explain_event_detailed(user, event, db=db)
     return result["text"]
 
 
 def explain_event_detailed(user, event, db=None) -> dict:
-    """Return structured explanation with text + detail fields.
+    """Вернуть структурированное объяснение: текст + детали.
 
-    Keys:
-        text (str): human-readable explanation
-        topic_match (list[str]): matching topic codes
-        format_match (bool)
-        city_match (bool)
-        semantic_similarity (float | None): cosine similarity if computed
-        history_signals (list[str]): reasons from interaction history
+    Ключи:
+        text (str): человекочитаемое объяснение.
+        topic_match (list[str]): совпавшие коды тем.
+        format_match (bool): совпадение формата.
+        city_match (bool): совпадение города.
+        semantic_similarity (float | None): cosine-сходство, если посчитано.
+        history_signals (list[str]): причины из истории взаимодействий.
     """
     reasons: list[str] = []
     details: dict = {
@@ -36,17 +36,17 @@ def explain_event_detailed(user, event, db=None) -> dict:
     common_topics = list(user_topics.intersection(event_topics))
     details["topic_match"] = common_topics
     if common_topics:
-        names = [TOPIC_TITLES.get(t, t) for t in common_topics]
+        names = [topic_title(t) for t in common_topics]
         reasons.append(f"темы: {', '.join(names)}")
 
     weighted = [t for t in event_topics if topic_weights.get(t, 0) > 3]
     if weighted:
-        names = [TOPIC_TITLES.get(t, t) for t in weighted]
+        names = [topic_title(t) for t in weighted]
         reasons.append(f"высокий интерес: {', '.join(names)}")
 
     if user.preferred_format and user.preferred_format == event.format:
         details["format_match"] = True
-        reasons.append(f"формат ({FORMAT_LABELS.get(event.format, event.format)})")
+        reasons.append(f"формат ({format_label(event.format)})")
     elif getattr(user, "preferred_format", None) == "any":
         reasons.append("любой формат")
 
@@ -56,7 +56,7 @@ def explain_event_detailed(user, event, db=None) -> dict:
     elif user.city == "any" or event.city == "any":
         reasons.append("нет ограничения по городу")
 
-    # Semantic similarity (best-effort)
+    # Семантическое сходство (best-effort)
     try:
         from app.recommender.embeddings import (
             get_or_build_user_embedding,
@@ -114,16 +114,16 @@ def _explain_from_interactions(user, event, db) -> list[str]:
                 saved_topics.update(topics)
 
     if saved_match := saved_topics.intersection(event_topics):
-        names = [TOPIC_TITLES.get(t, t) for t in saved_match]
+        names = [topic_title(t) for t in saved_match]
         reasons.append(f"сохранял похожие темы: {', '.join(names)}")
 
     if liked_match := liked_topics.intersection(event_topics) - saved_match:
-        names = [TOPIC_TITLES.get(t, t) for t in liked_match]
+        names = [topic_title(t) for t in liked_match]
         reasons.append(f"лайкал похожие темы: {', '.join(names)}")
 
     if liked_formats:
         top_fmt = max(liked_formats, key=liked_formats.get)
         if event.format == top_fmt and liked_formats[top_fmt] >= 2:
-            reasons.append(f"любит {FORMAT_LABELS.get(event.format, event.format)}-формат")
+            reasons.append(f"любит {format_label(event.format)}-формат")
 
     return reasons

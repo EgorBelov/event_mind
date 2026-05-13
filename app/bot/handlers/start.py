@@ -68,6 +68,20 @@ async def cb_how_it_works(callback: CallbackQuery):
     )
 
 
+async def _extra_topic_codes() -> list[str]:
+    """Коды, которые есть в БД, но отсутствуют в seed-списке."""
+    items = await api_client.get_vocabulary("topics")
+    seed = set(TOPIC_LABELS.keys())
+    return [item["code"] for item in items if item.get("code") and item["code"] not in seed]
+
+
+async def _extra_city_codes() -> list[str]:
+    items = await api_client.get_vocabulary("cities")
+    from app.bot.keyboards.inline import CITY_LABELS as _seed_cities
+    seed = set(_seed_cities.keys())
+    return [item["code"] for item in items if item.get("code") and item["code"] not in seed]
+
+
 @router.callback_query(F.data == "start_setup")
 async def cb_start_setup(callback: CallbackQuery):
     await callback.answer()
@@ -75,7 +89,7 @@ async def cb_start_setup(callback: CallbackQuery):
 
     await callback.message.answer(
         "Выбери интересующие темы. Можно выбрать несколько.",
-        reply_markup=topics_keyboard(state.topics),
+        reply_markup=topics_keyboard(state.topics, extra_codes=await _extra_topic_codes()),
     )
 
 
@@ -91,7 +105,9 @@ async def cb_topic_toggle(callback: CallbackQuery):
     else:
         state.topics.add(topic_key)
 
-    await callback.message.edit_reply_markup(reply_markup=topics_keyboard(state.topics))
+    await callback.message.edit_reply_markup(
+        reply_markup=topics_keyboard(state.topics, extra_codes=await _extra_topic_codes())
+    )
 
 
 @router.callback_query(F.data == "topics_done")
@@ -104,7 +120,10 @@ async def cb_topics_done(callback: CallbackQuery):
         await callback.message.answer("Выбери хотя бы одну тему.")
         return
 
-    selected_topics = ", ".join(TOPIC_LABELS[topic] for topic in state.topics)
+    from app.core.topics import topic_title
+    selected_topics = ", ".join(
+        TOPIC_LABELS.get(topic) or topic_title(topic) for topic in state.topics
+    )
 
     await callback.message.answer(
         f"Отлично. Я сохранил выбранные темы:\n{selected_topics}\n\n"
@@ -122,7 +141,7 @@ async def cb_format_selected(callback: CallbackQuery):
 
     await callback.message.answer(
         "Укажи город для оффлайн-событий.",
-        reply_markup=city_keyboard(),
+        reply_markup=city_keyboard(extra_codes=await _extra_city_codes()),
     )
 
 
@@ -143,9 +162,12 @@ async def cb_city_selected(callback: CallbackQuery):
         topics=list(state.topics),
     )
 
-    topics_text = ", ".join(TOPIC_LABELS[topic] for topic in state.topics)
-    format_text = FORMAT_LABELS.get(state.preferred_format, state.preferred_format)
-    city_text = CITY_LABELS.get(state.city, state.city)
+    from app.core.topics import topic_title, format_label, city_label
+    topics_text = ", ".join(
+        TOPIC_LABELS.get(topic) or topic_title(topic) for topic in state.topics
+    )
+    format_text = FORMAT_LABELS.get(state.preferred_format) or format_label(state.preferred_format)
+    city_text = CITY_LABELS.get(state.city) or city_label(state.city)
 
     await callback.message.answer(
         f"Профиль настроен.\n\n"
@@ -169,7 +191,7 @@ async def cmd_edit(message: Message):
     await message.answer(
         "Давай обновим профиль.\n\n"
         "Выбери интересующие темы. Можно выбрать несколько.",
-        reply_markup=topics_keyboard(set()),
+        reply_markup=topics_keyboard(set(), extra_codes=await _extra_topic_codes()),
     )
 
 @router.message(F.text == "Изменить профиль")
@@ -179,7 +201,7 @@ async def msg_edit_profile(message: Message):
     await message.answer(
         "Давай обновим профиль.\n\n"
         "Выбери интересующие темы. Можно выбрать несколько.",
-        reply_markup=topics_keyboard(set()),
+        reply_markup=topics_keyboard(set(), extra_codes=await _extra_topic_codes()),
     )
 
 @router.message(F.text == "Начать настройку")
@@ -188,5 +210,5 @@ async def msg_start_setup(message: Message):
 
     await message.answer(
         "Выбери интересующие темы. Можно выбрать несколько.",
-        reply_markup=topics_keyboard(state.topics),
+        reply_markup=topics_keyboard(state.topics, extra_codes=await _extra_topic_codes()),
     )

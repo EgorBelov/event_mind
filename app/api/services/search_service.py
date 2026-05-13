@@ -43,7 +43,7 @@ def search_events(
     format: str | None = None,
     city: str | None = None,
 ) -> list[dict]:
-    """Keyword search: filter by title/description, topics, format, city."""
+    """Поиск по ключевым словам: фильтры по title/description, темам, формату, городу."""
     q = db.query(Event)
 
     if query:
@@ -71,9 +71,9 @@ def search_events(
 
 
 def semantic_search_events(db: Session, query: str, limit: int = 5) -> list[dict]:
-    """Semantic search: rank events by embedding cosine similarity to the query text.
+    """Семантический поиск: ранжирование событий по cosine-сходству embedding'ов.
 
-    Falls back to keyword search if embeddings are unavailable.
+    При недоступности embedding'ов откатывается к keyword-поиску.
     """
     try:
         from app.recommender.embeddings import embed_text, cosine_similarity, get_or_build_event_embedding
@@ -101,7 +101,7 @@ def semantic_search_events(db: Session, query: str, limit: int = 5) -> list[dict
 
 
 def get_similar_events(db: Session, event_id: int, limit: int = 3) -> list[dict]:
-    """Return events sharing the most topics with the given event."""
+    """Найти события с максимальным пересечением тем относительно заданного."""
     base = db.query(Event).filter(Event.id == event_id).first()
     if not base:
         return []

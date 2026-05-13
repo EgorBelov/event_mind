@@ -63,7 +63,7 @@ def analyze_bio(telegram_id: int, payload: BioPayload, db: Session = Depends(get
 
 @router.post("/{telegram_id}/update-embedding")
 def update_embedding(telegram_id: int, db: Session = Depends(get_db)):
-    """Recompute and cache the user's personal embedding based on profile + interactions."""
+    """Пересчитать и закэшировать персональный embedding пользователя (профиль + история)."""
     from app.db.models.user import User as UserModel
     user = db.query(UserModel).filter(UserModel.telegram_id == telegram_id).first()
     if not user:

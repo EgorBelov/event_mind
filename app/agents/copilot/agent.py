@@ -1,9 +1,9 @@
-"""AI Event Copilot — single-node LangGraph agent.
+"""AI Event Copilot — однонодовый LangGraph-агент.
 
-Given a user goal + profile + events, the copilot:
-1. Analyses the goal against the user profile.
-2. Selects the most relevant events.
-3. Returns a friendly roadmap/plan with event recommendations.
+На вход — цель пользователя + его профиль + список событий. Copilot:
+1. Анализирует цель в контексте профиля.
+2. Выбирает наиболее релевантные события.
+3. Возвращает дружелюбный roadmap/план с рекомендациями.
 """
 import json
 import re
@@ -78,7 +78,7 @@ def copilot_node(state: CopilotState) -> dict:
     valid_ids = {e["id"] for e in state["events"]}
     recommended_ids = _parse_recommended_ids(result.content, valid_ids)
 
-    # Strip the RECOMMENDED_IDS line from the answer shown to user
+    # Вырезаем строку RECOMMENDED_IDS из текста, который покажем пользователю
     answer = re.sub(r"RECOMMENDED_IDS:.*", "", result.content).strip()
 
     return {

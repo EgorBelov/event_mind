@@ -24,7 +24,7 @@ def unsubscribe(telegram_id: int, db: Session = Depends(get_db)):
 
 @router.get("/subscribers")
 def list_subscribers(db: Session = Depends(get_db)):
-    """Return subscribed users — used by send_ai_digest.py."""
+    """Список подписчиков — используется планировщиком AI-дайджеста."""
     users = get_subscribed_users(db)
     return [
         {
@@ -38,7 +38,7 @@ def list_subscribers(db: Session = Depends(get_db)):
 
 @router.get("/users")
 def list_subscribed_users(db: Session = Depends(get_db)):
-    """Backward-compatible alias for /subscribers."""
+    """Обратно-совместимый алиас для /subscribers."""
     users = get_subscribed_users(db)
     return [
         {

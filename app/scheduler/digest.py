@@ -1,9 +1,9 @@
-"""Daily AI digest scheduler.
+"""Планировщик ежедневного AI-дайджеста.
 
-Pulls subscribed users from the API, then sends each of them their top AI
-recommendation card via Telegram. Powered by APScheduler.
+Берёт список подписчиков из API, затем каждому отправляет его топ-карточку
+AI-рекомендации через Telegram. Работает на APScheduler.
 
-Run as:
+Запуск:
     python -m app.scheduler.digest
 """
 
@@ -34,7 +34,7 @@ def format_card(card: dict) -> str:
 
 
 async def send_digest_once() -> None:
-    """Fetch subscribers and send them their top AI digest card."""
+    """Получить список подписчиков и отправить каждому его топ-карточку AI-дайджеста."""
     async with httpx.AsyncClient(base_url=API_HOST, timeout=60.0) as client:
         resp = await client.get("/subscriptions/users")
         if resp.status_code != 200:
@@ -81,7 +81,7 @@ async def send_digest_once() -> None:
 
 
 def run_scheduler() -> None:
-    """Run the blocking scheduler that fires `send_digest_once` every 24h."""
+    """Запустить блокирующий scheduler, который вызывает `send_digest_once` раз в 24 часа."""
     from apscheduler.schedulers.blocking import BlockingScheduler
 
     scheduler = BlockingScheduler()

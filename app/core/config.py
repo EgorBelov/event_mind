@@ -1,4 +1,4 @@
-"""Application configuration via Pydantic BaseSettings."""
+"""Конфигурация приложения через Pydantic BaseSettings."""
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -13,7 +13,7 @@ class Settings(BaseSettings):
     # Telegram
     bot_token: str = ""
 
-    # Database
+    # База данных
     database_url: str = "sqlite:///./eventmind.db"
 
     # API
@@ -23,13 +23,13 @@ class Settings(BaseSettings):
     groq_api_key: str = ""
     groq_model: str = "llama-3.3-70b-versatile"
 
-    # Dev flags
+    # Dev-флаги
     debug: bool = False
 
 
 settings = Settings()
 
-# Convenience re-exports for legacy imports
+# Удобные re-export'ы для legacy-импортов
 BOT_TOKEN: str = settings.bot_token
 DATABASE_URL: str = settings.database_url
 API_HOST: str = settings.api_host

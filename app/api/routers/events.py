@@ -45,7 +45,7 @@ def _serialize(event) -> dict:
 
 @router.post("/load")
 def load_events(db: Session = Depends(get_db)):
-    """Load events from data/events.json."""
+    """Загрузить события из data/events.json."""
     count = load_events_from_json(db)
     return {"loaded": count}
 
@@ -63,18 +63,18 @@ def search(
     city: str | None = Query(default=None),
     db: Session = Depends(get_db),
 ):
-    """Keyword search: filter by title/description, topics, format, city."""
+    """Поиск по ключевым словам: фильтры по title/description, темам, формату, городу."""
     topic_list = [t.strip() for t in topics.split(",")] if topics else None
     return search_events(db, query=q, topics=topic_list, format=format, city=city)
 
 
 @router.get("/semantic-search")
 def semantic_search(
-    q: str = Query(..., description="Natural language search query"),
+    q: str = Query(..., description="Запрос на естественном языке"),
     limit: int = Query(default=5, ge=1, le=20),
     db: Session = Depends(get_db),
 ):
-    """Semantic search: rank events by embedding similarity to the query text."""
+    """Семантический поиск: ранжирование событий по embedding-сходству с запросом."""
     return semantic_search_events(db, query=q, limit=limit)
 
 

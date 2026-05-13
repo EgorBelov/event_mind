@@ -1,31 +1,39 @@
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
-TOPIC_LABELS = {
-    "ai_ml": "AI / ML",
-    "data_science": "Data Science",
-    "business_analytics": "Бизнес-аналитика",
-    "backend": "Backend",
-    "frontend": "Frontend",
-    "product": "Product",
-    "cybersecurity": "Cybersecurity",
-    "devops": "DevOps",
-}
+from app.core.topics import (
+    SEED_TOPIC_TITLES,
+    SEED_FORMAT_LABELS,
+    SEED_CITY_LABELS,
+    city_label,
+    format_label,
+    topic_title,
+)
 
+# Seed-значения по умолчанию — отправная точка для мастера настройки.
+# Реальные лукапы лучше делать через topic_title()/format_label()/city_label():
+# они откатываются на humanize_code(), если код неизвестен (например, когда
+# новый город/тема появились из спарсенных событий).
+TOPIC_LABELS = dict(SEED_TOPIC_TITLES)
 FORMAT_LABELS = {
     "online": "Онлайн",
     "offline": "Оффлайн",
     "hybrid": "Гибрид",
     "any": "Без разницы",
 }
+CITY_LABELS = {**SEED_CITY_LABELS, "any": "Любой"}
 
-CITY_LABELS = {
-    "moscow": "Москва",
-    "spb": "Санкт-Петербург",
-    "kazan": "Казань",
-    "ekb": "Екатеринбург",
-    "any": "Любой",
-}
+
+def _label_for_topic(code: str) -> str:
+    return TOPIC_LABELS.get(code) or topic_title(code)
+
+
+def _label_for_format(code: str) -> str:
+    return FORMAT_LABELS.get(code) or format_label(code)
+
+
+def _label_for_city(code: str) -> str:
+    return CITY_LABELS.get(code) or city_label(code)
 
 
 def start_keyboard() -> InlineKeyboardMarkup:
@@ -36,34 +44,53 @@ def start_keyboard() -> InlineKeyboardMarkup:
     return builder.as_markup()
 
 
-def topics_keyboard(selected_topics: set[str]) -> InlineKeyboardMarkup:
+def topics_keyboard(
+    selected_topics: set[str],
+    extra_codes: list[str] | None = None,
+) -> InlineKeyboardMarkup:
+    """Собрать клавиатуру тем. `extra_codes` — динамические темы из БД."""
     builder = InlineKeyboardBuilder()
 
-    for topic_key, topic_label in TOPIC_LABELS.items():
-        prefix = "✅ " if topic_key in selected_topics else ""
-        builder.button(text=f"{prefix}{topic_label}", callback_data=f"topic:{topic_key}")
+    # Сначала seed-темы в стабильном порядке; затем дополнения (без дубликатов)
+    codes: list[str] = list(TOPIC_LABELS.keys())
+    if extra_codes:
+        for code in extra_codes:
+            if code and code not in codes:
+                codes.append(code)
+
+    for code in codes:
+        prefix = "✅ " if code in selected_topics else ""
+        builder.button(text=f"{prefix}{_label_for_topic(code)}", callback_data=f"topic:{code}")
 
     builder.button(text="Готово", callback_data="topics_done")
-    builder.adjust(2, 2, 2, 2, 1)
+    # Автогрид: по 2 кнопки в строке + финальная "Готово" отдельно
+    rows = [2] * ((len(codes) + 1) // 2) + [1]
+    builder.adjust(*rows)
     return builder.as_markup()
 
 
-def format_keyboard() -> InlineKeyboardMarkup:
+def format_keyboard(extra_codes: list[str] | None = None) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
-
-    for format_key, format_label in FORMAT_LABELS.items():
-        builder.button(text=format_label, callback_data=f"format:{format_key}")
-
+    codes = list(FORMAT_LABELS.keys())
+    if extra_codes:
+        for c in extra_codes:
+            if c and c not in codes:
+                codes.append(c)
+    for code in codes:
+        builder.button(text=_label_for_format(code), callback_data=f"format:{code}")
     builder.adjust(2, 2)
     return builder.as_markup()
 
 
-def city_keyboard() -> InlineKeyboardMarkup:
+def city_keyboard(extra_codes: list[str] | None = None) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
-
-    for city_key, city_label in CITY_LABELS.items():
-        builder.button(text=city_label, callback_data=f"city:{city_key}")
-
+    codes = list(CITY_LABELS.keys())
+    if extra_codes:
+        for c in extra_codes:
+            if c and c not in codes:
+                codes.append(c)
+    for code in codes:
+        builder.button(text=_label_for_city(code), callback_data=f"city:{code}")
     builder.adjust(2, 2, 1)
     return builder.as_markup()
 

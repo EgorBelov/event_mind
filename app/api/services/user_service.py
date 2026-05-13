@@ -5,7 +5,7 @@ from app.db.models.event import Event
 from app.db.models.interaction import Interaction
 from app.db.models.topic import Topic, UserTopic
 from app.api.schemas.user import UserCreate
-from app.core.topics import TOPIC_TITLES
+from app.core.topics import topic_title, slugify_code, get_allowed_topics
 from app.recommender.user_model import (
     build_initial_topic_weights,
     dump_topic_weights,
@@ -15,9 +15,10 @@ from app.recommender.user_model import (
 
 
 def _get_or_create_topic(db: Session, code: str) -> Topic:
+    code = slugify_code(code) or code
     topic = db.query(Topic).filter(Topic.code == code).first()
     if not topic:
-        topic = Topic(code=code, title=TOPIC_TITLES.get(code, code))
+        topic = Topic(code=code, title=topic_title(code))
         db.add(topic)
         db.flush()
     return topic
@@ -116,7 +117,7 @@ def analyze_bio_and_update_topics(db: Session, telegram_id: int, bio_text: str) 
     if not user:
         return {"success": False, "message": "User not found"}
 
-    extracted = _extract_topics_from_bio(bio_text)
+    extracted = _extract_topics_from_bio(bio_text, db=db)
     if not extracted:
         return {"success": False, "message": "Не удалось извлечь темы из текста.", "extracted_topics": []}
 
@@ -132,24 +133,37 @@ def analyze_bio_and_update_topics(db: Session, telegram_id: int, bio_text: str) 
     return {"success": True, "extracted_topics": extracted, "message": "Темы обновлены на основе bio."}
 
 
-def _extract_topics_from_bio(bio_text: str) -> list[str]:
-    from app.core.topics import ALLOWED_TOPICS
+def _extract_topics_from_bio(bio_text: str, db: Session | None = None) -> list[str]:
+    """Извлечь коды тем из произвольного bio пользователя.
+
+    Если доступен LLM — использует его; иначе откатывается к keyword-эвристикам.
+    Возвращённые темы могут быть как уже известными (seed/БД), так и новыми
+    slug'ами — вызывающий код должен сохранить их через `_get_or_create_topic`.
+    """
     import json as _json
+
+    allowed = get_allowed_topics(db)
     try:
         from langchain_core.prompts import ChatPromptTemplate
         from app.agents.recommendation.llm import llm
 
         prompt = ChatPromptTemplate.from_messages([
             ("system",
-             "Ты помогаешь профилировать пользователя. На основе текста верни JSON-массив тем строго из: "
-             f"{', '.join(ALLOWED_TOPICS)}. Только валидный JSON-массив."),
+             "Ты помогаешь профилировать пользователя. На основе текста верни JSON-массив "
+             "тем как snake_case-слаги. Предпочитай существующие темы: "
+             f"{', '.join(allowed)}. Если из описания явно следует тема, которой "
+             "нет в списке — можешь предложить новый slug (например 'mlops'). "
+             "Только валидный JSON-массив."),
             ("user", "Bio: {bio}\n\nВерни JSON-массив, например: [\"ai_ml\", \"backend\"]"),
         ])
         response = llm.invoke(prompt.format_messages(bio=bio_text))
         text = response.content.strip().strip("`").removeprefix("json").strip()
         raw = _json.loads(text)
         if isinstance(raw, list):
-            extracted = [t for t in raw if isinstance(t, str) and t in ALLOWED_TOPICS]
+            extracted = [
+                slugify_code(t) for t in raw if isinstance(t, str) and t.strip()
+            ]
+            extracted = [t for t in extracted if t]
             if extracted:
                 return list(dict.fromkeys(extracted))
     except Exception:

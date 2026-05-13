@@ -16,7 +16,7 @@ router = APIRouter(prefix="/analytics", tags=["analytics"])
 
 @router.get("/topics")
 def analytics_topics(db: Session = Depends(get_db)):
-    """Most liked topics, most saved topics, and topic-weight distribution."""
+    """Самые лайкнутые / сохранённые темы и распределение весов тем по юзерам."""
     interactions = db.query(Interaction).all()
     event_topics_map: dict[int, list[str]] = {}
     if interactions:
@@ -56,7 +56,7 @@ def analytics_topics(db: Session = Depends(get_db)):
 
 @router.get("/interactions")
 def analytics_interactions(db: Session = Depends(get_db)):
-    """Total interactions by action and top events by total interactions."""
+    """Сумма интеракций по типам действий + топ событий по числу интеракций."""
     interactions = db.query(Interaction).all()
 
     by_action: Counter[str] = Counter()
@@ -83,20 +83,20 @@ def analytics_trending(
     limit: int = Query(default=10, ge=1, le=50),
     db: Session = Depends(get_db),
 ):
-    """Hot events and trending topics based on recent interaction signals.
+    """Горячие события и темы по свежим сигналам взаимодействий.
 
-    Score formula: likes×3 + saves×2 + dislikes×0 (recency-weighted).
+    Формула score: likes×3 + saves×2 + dislikes×0 (с учётом свежести).
     """
     cutoff = datetime.utcnow() - timedelta(days=days)
 
-    # Only recent interactions (created_at >= cutoff)
+    # Только свежие интеракции (created_at >= cutoff)
     interactions = (
         db.query(Interaction)
         .filter(Interaction.created_at >= cutoff)
         .all()
     )
 
-    # Fallback: use all interactions if none in window
+    # Fallback: если за окно ничего не нашлось — берём все интеракции
     if not interactions:
         interactions = db.query(Interaction).all()
 
@@ -114,7 +114,7 @@ def analytics_trending(
         if event and i.action in ("like", "save"):
             topic_counter.update(_get_event_topic_codes(event))
 
-    # Top events by score
+    # Топ событий по score
     top_ids = sorted(event_score, key=event_score.get, reverse=True)[:limit]
     hot_events = []
     for eid in top_ids:

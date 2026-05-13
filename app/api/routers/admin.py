@@ -37,6 +37,7 @@ def admin_dashboard(db: Session = Depends(get_db)):
         for e in latest_events
     )
 
+    # HTML рендерится статикой, без шаблонизатора
     html = f"""<!DOCTYPE html>
 <html><head><meta charset="utf-8"><title>EventMind Admin</title>
 <style>body{{font-family:sans-serif;padding:20px;background:#f5f5f5}}

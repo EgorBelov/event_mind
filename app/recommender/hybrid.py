@@ -1,4 +1,4 @@
-"""Hybrid score: rule-based score blended with embedding-based similarity."""
+"""Гибридный score: rule-based балл смешивается с близостью по embedding'ам."""
 
 import json
 
@@ -10,7 +10,7 @@ def hybrid_score(user, event) -> float:
     rule = score_event_for_user(user, event)
 
     try:
-        # Lazy import — sentence-transformers may not be installed.
+        # Ленивый импорт — sentence-transformers может быть не установлен.
         from app.recommender.embeddings import (
             cosine_similarity,
             build_user_embedding,
@@ -31,7 +31,7 @@ def hybrid_score(user, event) -> float:
             event_emb = build_event_embedding(event)
 
         sim = cosine_similarity(user_emb, event_emb)
-        # Blend: rule contributes ~50%, embedding cosine scaled to 0..10.
+        # Смешение: rule даёт ~50%, embedding-cosine масштабируется в 0..10.
         return float(rule) * 0.5 + sim * 10.0
     except Exception:
         return float(rule)

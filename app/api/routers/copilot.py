@@ -26,7 +26,7 @@ def copilot(
     limit: int = Query(default=3, ge=1, le=10),
     db: Session = Depends(get_db),
 ):
-    """AI Event Copilot: analyse the user's goal and suggest relevant events with a roadmap."""
+    """AI Event Copilot: разобрать цель пользователя и предложить релевантные события с roadmap."""
     user = db.query(User).filter(User.telegram_id == telegram_id).first()
     if not user:
         return {"success": False, "message": "Профиль не найден. Сначала настрой профиль через /start."}
@@ -68,7 +68,7 @@ def copilot(
             "recommended_event_ids": [],
         })
 
-        # Enrich recommended cards
+        # Обогащаем карточки рекомендованных событий
         recommended_ids = result.get("recommended_event_ids", [])[:limit]
         events_by_id = {e.id: e for e in events}
         cards = [
@@ -92,7 +92,7 @@ def copilot(
         }
 
     except Exception:
-        # Fallback: rule-based recommendations with goal note
+        # Fallback: rule-based рекомендации + пометка про цель
         try:
             recs = get_recommendations_for_user(db, telegram_id)[:limit]
             return {

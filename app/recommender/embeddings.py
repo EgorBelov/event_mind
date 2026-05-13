@@ -1,7 +1,8 @@
-"""Vector embeddings backed by sentence-transformers.
+"""Векторные embedding'и на базе sentence-transformers.
 
-The heavy model is created on first use of get_model().
-If sentence-transformers is not available, callers should catch exceptions and fall back.
+Тяжёлая модель создаётся при первом вызове get_model().
+Если sentence-transformers недоступен, вызывающий код должен перехватить
+исключение и плавно деградировать.
 """
 
 import json
@@ -30,20 +31,20 @@ def cosine_similarity(a: list[float], b: list[float]) -> float:
 
 
 def build_user_embedding(user_topics: list[str], topic_weights: dict) -> list[float]:
-    """Basic user embedding from topic descriptions + weights."""
+    """Базовый embedding пользователя из описаний тем + весов."""
     parts = [f"{t}: {topic_weights.get(t, 1)}" for t in user_topics]
     text = " ".join(parts) if parts else "general technology events"
     return embed_text(text)
 
 
 def build_rich_user_embedding(user, interactions: list | None = None) -> list[float]:
-    """Richer user embedding: topic weights + city/format preference + interaction history.
+    """Расширенный embedding: веса тем + город/формат + история взаимодействий.
 
-    Falls back to basic topic embedding if any step fails.
+    При сбое на любом шаге откатывается к базовому embedding'у по темам.
     """
     from app.recommender.scoring import _get_user_topic_codes
     from app.recommender.user_model import parse_topic_weights
-    from app.core.topics import TOPIC_TITLES
+    from app.core.topics import topic_title
 
     user_topics = list(_get_user_topic_codes(user))
     weights = parse_topic_weights(user.topic_weights)
@@ -52,7 +53,7 @@ def build_rich_user_embedding(user, interactions: list | None = None) -> list[fl
 
     if user_topics:
         parts.append(
-            " ".join(f"{TOPIC_TITLES.get(t, t)} (интерес {weights.get(t, 1):.0f})" for t in user_topics)
+            " ".join(f"{topic_title(t)} (интерес {weights.get(t, 1):.0f})" for t in user_topics)
         )
 
     if user.preferred_format and user.preferred_format not in ("any", "unknown"):
@@ -72,7 +73,7 @@ def build_rich_user_embedding(user, interactions: list | None = None) -> list[fl
 
 
 def get_or_build_user_embedding(user, interactions: list | None = None) -> list[float]:
-    """Return cached user embedding from DB or compute a fresh one."""
+    """Вернуть закэшированный embedding пользователя из БД или посчитать новый."""
     cached = getattr(user, "embedding", None)
     if cached:
         try:
@@ -88,7 +89,7 @@ def build_event_embedding(event) -> list[float]:
 
 
 def get_or_build_event_embedding(event) -> list[float]:
-    """Return cached event embedding or compute on the fly."""
+    """Вернуть закэшированный embedding события или посчитать на лету."""
     cached = getattr(event, "embedding", None)
     if cached:
         try:

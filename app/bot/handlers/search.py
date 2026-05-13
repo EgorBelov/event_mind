@@ -4,6 +4,7 @@ from aiogram.types import Message
 
 from app.bot.services.api_client import EventMindAPIClient
 from app.bot.keyboards.inline import TOPIC_LABELS, FORMAT_LABELS, CITY_LABELS
+from app.core.topics import topic_title, format_label, city_label
 
 router = Router()
 api_client = EventMindAPIClient()
@@ -15,9 +16,11 @@ def _format_search_result(events: list[dict], show_similarity: bool = False) -> 
 
     chunks = []
     for event in events[:5]:
-        topics = ", ".join(TOPIC_LABELS.get(t, t) for t in event.get("topics", []))
-        fmt = FORMAT_LABELS.get(event.get("format"), event.get("format", ""))
-        city = CITY_LABELS.get(event.get("city"), event.get("city", ""))
+        topics = ", ".join(
+            TOPIC_LABELS.get(t) or topic_title(t) for t in event.get("topics", [])
+        )
+        fmt = FORMAT_LABELS.get(event.get("format")) or format_label(event.get("format"))
+        city = CITY_LABELS.get(event.get("city")) or city_label(event.get("city"))
         summary = event.get("summary") or event.get("description", "")
         summary = summary[:200]
 
@@ -51,7 +54,7 @@ async def cmd_search(message: Message, command: CommandObject):
 
 @router.message(Command("semantic"))
 async def cmd_semantic_search(message: Message, command: CommandObject):
-    """Semantic (AI) search: finds events by meaning, not just keywords."""
+    """Семантический (AI) поиск: находит события по смыслу, а не только по ключевым словам."""
     query = (command.args or "").strip()
     if not query:
         await message.answer(

@@ -9,7 +9,7 @@ from app.api.services.event_service import _attach_event_topics
 
 
 def load_raw_events(db: Session, file_path: str = "data/events_raw.json") -> dict:
-    """Load data/events_raw.json into the raw_events table."""
+    """Загрузить data/events_raw.json в таблицу raw_events."""
     path = Path(file_path)
 
     if not path.exists():
@@ -42,7 +42,7 @@ def load_raw_events(db: Session, file_path: str = "data/events_raw.json") -> dic
 
 
 def normalize_raw_events(db: Session) -> dict:
-    """Run all pending raw events through the EventNormalizerAgent."""
+    """Прогнать все pending raw-события через EventNormalizerAgent."""
     raw_events = db.query(RawEvent).filter(RawEvent.status == "raw").all()
     raw_ids = [r.id for r in raw_events]
     normalized, non_it, failed = _normalize_by_ids(db, raw_ids)
@@ -50,7 +50,7 @@ def normalize_raw_events(db: Session) -> dict:
 
 
 def load_habr_events(db: Session, limit: int = 20) -> dict:
-    """Fetch events from Habr, save to raw_events, normalize via agent, insert into events."""
+    """Скачать события с Habr, сложить в raw_events, нормализовать AI-агентом и записать в events."""
     from app.ingestion.sources.habr import fetch_habr_events
 
     items = fetch_habr_events(limit=limit)
@@ -94,7 +94,7 @@ def load_habr_events(db: Session, limit: int = 20) -> dict:
 
 
 def _normalize_single(db: Session, raw: RawEvent) -> str:
-    """Normalize one raw event. Returns final status: 'normalized' | 'non_it' | 'failed'."""
+    """Нормализовать одно raw-событие. Возвращает итоговый статус: 'normalized' | 'non_it' | 'failed'."""
     from app.agents.event_normalization.agent import event_normalizer_agent
 
     try:
@@ -147,9 +147,9 @@ def _normalize_single(db: Session, raw: RawEvent) -> str:
 
 
 def _normalize_by_ids(db: Session, raw_ids: list[int]) -> tuple[int, int, int]:
-    """Run specific raw_event rows through the normalization agent.
+    """Прогнать конкретные строки raw_events через AI-нормализатор.
 
-    Returns (normalized, non_it, failed) counts.
+    Возвращает кортеж счётчиков (normalized, non_it, failed).
     """
     if not raw_ids:
         return 0, 0, 0
@@ -171,7 +171,7 @@ def _normalize_by_ids(db: Session, raw_ids: list[int]) -> tuple[int, int, int]:
 
 
 def get_ingestion_status(db: Session) -> dict:
-    """Return counts of raw events by status."""
+    """Счётчики raw-событий по статусам."""
     total = db.query(RawEvent).count()
     return {
         "total": total,

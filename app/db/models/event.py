@@ -19,11 +19,11 @@ class Event(Base):
     target_audience = Column(String, nullable=True)
     source_url = Column(String, nullable=True)
     summary = Column(Text, nullable=True)
-    embedding = Column(Text, nullable=True)       # JSON vector
-    tech_stack = Column(Text, nullable=True)      # JSON array of tech names
+    embedding = Column(Text, nullable=True)       # JSON-вектор
+    tech_stack = Column(Text, nullable=True)      # JSON-массив технологий
     seniority = Column(String, nullable=True)     # junior/middle/senior/any
-    quality_score = Column(Integer, nullable=True)  # 1-10 AI-estimated quality
-    hype_score = Column(Integer, nullable=True)   # 1-10 topic relevance/freshness
+    quality_score = Column(Integer, nullable=True)  # 1-10, оценка качества от AI
+    hype_score = Column(Integer, nullable=True)   # 1-10, актуальность темы
     created_at = Column(DateTime, server_default=func.now(), nullable=False)
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now(), nullable=False)
 

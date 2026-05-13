@@ -14,6 +14,6 @@ class Interaction(Base):
     action = Column(String, nullable=False)  # like / dislike / save
     created_at = Column(DateTime, server_default=func.now(), nullable=False)
 
-    # Relationships
+    # Связи
     user = relationship("User", back_populates="interactions")
     event = relationship("Event", back_populates="interactions")

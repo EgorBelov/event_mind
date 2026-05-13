@@ -4,7 +4,13 @@ from langchain_core.prompts import ChatPromptTemplate
 
 from app.agents.recommendation.llm import llm
 from app.agents.event_normalization.state import EventNormalizationState
-from app.core.topics import ALLOWED_TOPICS
+from app.core.topics import (
+    SEED_TOPICS,
+    SEED_CITY_LABELS,
+    SEED_LEVEL_LABELS,
+    SEED_FORMAT_LABELS,
+    slugify_code,
+)
 
 
 def _extract_json(text: str) -> dict:
@@ -14,6 +20,15 @@ def _extract_json(text: str) -> dict:
     elif text.startswith("```"):
         text = text.removeprefix("```").removesuffix("```").strip()
     return json.loads(text)
+
+
+# Списки ниже — *предпочтительные* значения. LLM призывается переиспользовать
+# их, но незнакомые slug'и принимаются и сохраняются, чтобы словарь мог
+# расти вместе с новыми источниками.
+_PREFERRED_TOPICS = ", ".join(SEED_TOPICS)
+_PREFERRED_CITIES = ", ".join(SEED_CITY_LABELS.keys())
+_PREFERRED_LEVELS = ", ".join(SEED_LEVEL_LABELS.keys())
+_PREFERRED_FORMATS = ", ".join(SEED_FORMAT_LABELS.keys())
 
 
 _SYSTEM_PROMPT = f"""
@@ -26,34 +41,31 @@ _SYSTEM_PROMPT = f"""
 4. Не придумывать факты, если данных недостаточно.
 5. Вернуть ТОЛЬКО валидный JSON без markdown и пояснений.
 
-Допустимые значения:
-format: online | offline | hybrid | unknown
-city: moscow | spb | kazan | ekb | any | unknown
-level: beginner | middle | advanced | unknown
-topics: {', '.join(ALLOWED_TOPICS)}
+Предпочитаемые значения (используй их, когда подходят):
+format: {_PREFERRED_FORMATS}
+city: {_PREFERRED_CITIES}
+level: {_PREFERRED_LEVELS}
+topics: {_PREFERRED_TOPICS}
 event_type: meetup | conference | webinar | workshop | hackathon | lecture | unknown
 seniority: junior | middle | senior | any
 
-Правила:
-- Если событие онлайн → city = "any".
-- Если вебинар/трансляция/онлайн-встреча → format = "online".
-- Если физический адрес/площадка/офис → format = "offline".
-- Если указан и онлайн, и офлайн → format = "hybrid".
-- Если город нельзя определить → city = "unknown".
-- Если уровень нельзя определить → level = "unknown".
-- topics — список из допустимых значений.
-- description — короткое и чистое описание.
-- tech_stack — список конкретных технологий из описания (например ["Python", "FastAPI", "Docker"]).
-  Если технологии не упомянуты — пустой список [].
-- seniority — уровень аудитории по сложности доклада/темы. Если непонятно → "any".
-- quality_score — от 1 до 10: насколько событие полезно и информативно для IT-специалиста.
-  Конкретные темы/доклады/спикеры → выше. Размытое описание/реклама → ниже.
-- hype_score — от 1 до 10: насколько тема актуальна и популярна в IT прямо сейчас.
-  AI/ML, DevOps, Security, Web3 → выше. Устаревшие темы → ниже.
+ВАЖНО про новые значения:
+- Если событие явно НЕ попадает в перечисленные topics/city/level, ты можешь
+  создать новый код в формате короткого латинского slug в snake_case
+  (например topic "mlops", city "novosibirsk", level "expert").
+- Используй существующие значения, когда они подходят — не плоди дубли
+  ("ml" вместо "ai_ml" недопустимо).
+- city для онлайн-событий = "any", если место не указано → "unknown".
+- format: вебинар/трансляция → "online"; физический адрес → "offline";
+  оба формата → "hybrid".
+- topics — список slug'ов. Минимум 1 для IT-событий.
+- tech_stack — список конкретных технологий (["Python", "FastAPI", "Docker"]).
+- seniority — "junior"/"middle"/"senior"/"any".
+- quality_score (1-10) — информативность для IT-специалиста.
+- hype_score (1-10) — актуальность темы в IT сейчас.
 
 ВАЖНО — фильтрация не-IT событий:
-- Это система ТОЛЬКО для IT-специалистов.
-- Если событие не относится к IT (маркетинг, HR, PR, спорт, медицина и т.п.) → topics = [].
+- Если событие не относится к IT (маркетинг, HR, спорт, медицина и т.п.) → topics = [].
 - Примеры НЕ-IT: PR-премии, HR-конференции, маркетинг без IT-составляющей.
 - Примеры IT: DevOps-конференции, AI/ML митапы, хакатоны, аналитика данных.
 """
@@ -67,10 +79,10 @@ _USER_PROMPT = """
   "title": "...",
   "description": "...",
   "format": "online/offline/hybrid/unknown",
-  "city": "moscow/spb/kazan/ekb/any/unknown",
-  "level": "beginner/middle/advanced/unknown",
+  "city": "<slug города или any/unknown>",
+  "level": "<slug уровня или unknown>",
   "date": "...",
-  "topics": ["..."],
+  "topics": ["<slug темы>", "..."],
   "event_type": "meetup/conference/webinar/workshop/hackathon/lecture/unknown",
   "target_audience": "...",
   "source_url": "...",
@@ -95,9 +107,16 @@ def event_normalizer_agent(state: EventNormalizationState) -> dict:
     )
 
     normalized = _extract_json(result.content)
-    normalized["topics"] = [t for t in normalized.get("topics", []) if t in ALLOWED_TOPICS]
 
-    # Clamp scores to valid range
+    # Прогоняем все свободные строки от LLM через slugify — это гарантирует
+    # единый формат словаря (snake_case) независимо от того, как выглядели
+    # исходные данные.
+    normalized["topics"] = _slug_list(normalized.get("topics", []))
+    for field in ("format", "city", "level", "event_type", "seniority"):
+        if normalized.get(field):
+            normalized[field] = slugify_code(normalized[field]) or normalized[field]
+
+    # Зажимаем score'ы в допустимый диапазон 1..10
     for score_field in ("quality_score", "hype_score"):
         val = normalized.get(score_field)
         if isinstance(val, (int, float)):
@@ -105,8 +124,23 @@ def event_normalizer_agent(state: EventNormalizationState) -> dict:
         else:
             normalized[score_field] = None
 
-    # Ensure tech_stack is a list
+    # tech_stack гарантированно должен быть списком
     if not isinstance(normalized.get("tech_stack"), list):
         normalized["tech_stack"] = []
 
     return {"normalized_event": normalized}
+
+
+def _slug_list(values) -> list[str]:
+    if not isinstance(values, list):
+        return []
+    out: list[str] = []
+    seen: set[str] = set()
+    for v in values:
+        if not isinstance(v, str):
+            continue
+        slug = slugify_code(v)
+        if slug and slug not in seen:
+            seen.add(slug)
+            out.append(slug)
+    return out

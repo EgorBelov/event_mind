@@ -13,9 +13,9 @@ class User(Base):
     username = Column(String, nullable=True)
     preferred_format = Column(String, nullable=True)
     city = Column(String, nullable=True)
-    topic_weights = Column(Text, nullable=True)  # JSON-string
+    topic_weights = Column(Text, nullable=True)  # JSON-строка вида {topic_code: int}
     is_subscribed = Column(Integer, default=0)   # 0 / 1
-    embedding = Column(Text, nullable=True)      # JSON vector (personal embedding)
+    embedding = Column(Text, nullable=True)      # JSON-вектор персонального embedding'а
     created_at = Column(DateTime, server_default=func.now(), nullable=False)
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now(), nullable=False)
 

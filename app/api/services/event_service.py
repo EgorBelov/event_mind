@@ -5,13 +5,14 @@ from sqlalchemy.orm import Session
 
 from app.db.models.event import Event
 from app.db.models.topic import Topic, EventTopic
-from app.core.topics import TOPIC_TITLES
+from app.core.topics import topic_title, slugify_code
 
 
 def _get_or_create_topic(db: Session, code: str) -> Topic:
+    code = slugify_code(code) or code
     topic = db.query(Topic).filter(Topic.code == code).first()
     if not topic:
-        topic = Topic(code=code, title=TOPIC_TITLES.get(code, code))
+        topic = Topic(code=code, title=topic_title(code))
         db.add(topic)
         db.flush()
     return topic
