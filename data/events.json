@@ -43,5 +43,185 @@
     "level": "beginner",
     "date": "2026-04-20 19:30",
     "topics": ["business_analytics", "data_science"]
+  },
+  {
+    "title": "LLM Engineering Meetup",
+    "description": "Митап про создание production-ready LLM систем, RAG и AI Agents.",
+    "format": "offline",
+    "city": "saint_petersburg",
+    "level": "advanced",
+    "date": "2026-04-22 18:00",
+    "topics": ["ai_ml", "backend"]
+  },
+  {
+    "title": "Frontend Future Conf",
+    "description": "Конференция по современному frontend: React, Next.js, animations и UX.",
+    "format": "offline",
+    "city": "moscow",
+    "level": "middle",
+    "date": "2026-04-23 11:00",
+    "topics": ["frontend"]
+  },
+  {
+    "title": "Python Backend Intensive",
+    "description": "Интенсив по FastAPI, PostgreSQL, Docker и архитектуре backend-сервисов.",
+    "format": "online",
+    "city": "any",
+    "level": "middle",
+    "date": "2026-04-24 19:00",
+    "topics": ["backend", "python"]
+  },
+  {
+    "title": "AI Agents Hackathon",
+    "description": "Хакатон по разработке AI-агентов и multi-agent систем.",
+    "format": "offline",
+    "city": "kazan",
+    "level": "advanced",
+    "date": "2026-04-25 10:00",
+    "topics": ["ai_ml", "backend"]
+  },
+  {
+    "title": "Junior Dev Meetup",
+    "description": "Нетворкинг и выступления для junior-разработчиков.",
+    "format": "offline",
+    "city": "yekaterinburg",
+    "level": "beginner",
+    "date": "2026-04-26 17:30",
+    "topics": ["backend", "frontend"]
+  },
+  {
+    "title": "DevOps Day",
+    "description": "Доклады про Kubernetes, CI/CD, observability и cloud-инфраструктуру.",
+    "format": "offline",
+    "city": "moscow",
+    "level": "advanced",
+    "date": "2026-04-27 12:00",
+    "topics": ["devops", "backend"]
+  },
+  {
+    "title": "Startup & AI Networking",
+    "description": "Нетворкинг-встреча для AI-стартапов, ML engineers и founders.",
+    "format": "offline",
+    "city": "moscow",
+    "level": "middle",
+    "date": "2026-04-28 18:30",
+    "topics": ["startup", "ai_ml", "product"]
+  },
+  {
+    "title": "Machine Learning Bootcamp",
+    "description": "Практический bootcamp по классическому ML и feature engineering.",
+    "format": "online",
+    "city": "any",
+    "level": "middle",
+    "date": "2026-04-29 18:00",
+    "topics": ["ai_ml", "data_science"]
+  },
+  {
+    "title": "System Design Live",
+    "description": "Разбор архитектуры высоконагруженных систем и distributed services.",
+    "format": "online",
+    "city": "any",
+    "level": "advanced",
+    "date": "2026-04-30 20:00",
+    "topics": ["backend", "devops"]
+  },
+  {
+    "title": "Mobile Dev Summit",
+    "description": "Конференция по iOS, Android и мобильной архитектуре.",
+    "format": "offline",
+    "city": "novosibirsk",
+    "level": "middle",
+    "date": "2026-05-02 11:00",
+    "topics": ["mobile"]
+  },
+  {
+    "title": "Data Visualization Meetup",
+    "description": "Практика визуализации данных и построения аналитических dashboard.",
+    "format": "online",
+    "city": "any",
+    "level": "beginner",
+    "date": "2026-05-03 18:30",
+    "topics": ["business_analytics", "data_science"]
+  },
+  {
+    "title": "Cybersecurity Workshop",
+    "description": "Воркшоп по безопасности веб-приложений и защите API.",
+    "format": "offline",
+    "city": "saint_petersburg",
+    "level": "middle",
+    "date": "2026-05-04 17:00",
+    "topics": ["security", "backend"]
+  },
+  {
+    "title": "AI for Product Managers",
+    "description": "Как использовать AI в продуктовой аналитике и roadmap planning.",
+    "format": "online",
+    "city": "any",
+    "level": "beginner",
+    "date": "2026-05-05 19:00",
+    "topics": ["product", "ai_ml"]
+  },
+  {
+    "title": "RAG Systems Meetup",
+    "description": "Разработка Retrieval-Augmented Generation систем и vector search.",
+    "format": "online",
+    "city": "any",
+    "level": "advanced",
+    "date": "2026-05-06 19:30",
+    "topics": ["ai_ml", "backend"]
+  },
+  {
+    "title": "Open Source Community Night",
+    "description": "Встреча open source разработчиков и maintainers.",
+    "format": "offline",
+    "city": "moscow",
+    "level": "middle",
+    "date": "2026-05-07 18:00",
+    "topics": ["backend", "frontend"]
+  },
+  {
+    "title": "Cloud Architecture Meetup",
+    "description": "Архитектура cloud-native приложений и микросервисов.",
+    "format": "online",
+    "city": "any",
+    "level": "advanced",
+    "date": "2026-05-08 20:00",
+    "topics": ["devops", "backend"]
+  },
+  {
+    "title": "AI Research Talks",
+    "description": "Доклады про современные исследования в области AI и LLM.",
+    "format": "online",
+    "city": "any",
+    "level": "advanced",
+    "date": "2026-05-09 18:30",
+    "topics": ["ai_ml", "data_science"]
+  },
+  {
+    "title": "Design Systems Meetup",
+    "description": "Практика создания дизайн-систем и UI-kit для frontend-приложений.",
+    "format": "offline",
+    "city": "moscow",
+    "level": "middle",
+    "date": "2026-05-10 18:00",
+    "topics": ["frontend", "design"]
+  },
+  {
+    "title": "SQL & Analytics Day",
+    "description": "SQL-оптимизация, аналитические запросы и работа с большими данными.",
+    "format": "online",
+    "city": "any",
+    "level": "middle",
+    "date": "2026-05-11 19:00",
+    "topics": ["data_science", "business_analytics"]
+  },
+  {
+    "title": "Career in AI Webinar",
+    "description": "Как перейти в AI/ML, roadmap и востребованные навыки.",
+    "format": "online",
+    "city": "any",
+    "level": "beginner",
+    "date": "2026-05-12 18:00",
+    "topics": ["ai_ml", "career"]
   }
 ]
