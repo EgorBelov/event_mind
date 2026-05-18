@@ -140,3 +140,31 @@ def ai_recommendation_keyboard(
     builder.button(text="Следующее AI", callback_data="next_ai_recommendation")
     builder.adjust(2, 2, 1)
     return builder.as_markup()
+
+
+def recommendations_picker_keyboard() -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    builder.button(text="📋 Обычные", callback_data="recs:rule")
+    builder.button(text="🤖 AI", callback_data="recs:ai")
+    builder.adjust(2)
+    return builder.as_markup()
+
+
+def profile_actions_keyboard(is_subscribed: bool) -> InlineKeyboardMarkup:
+    digest_label = "📬 AI-дайджест: ВКЛ" if is_subscribed else "📭 AI-дайджест: ВЫКЛ"
+    builder = InlineKeyboardBuilder()
+    builder.button(text="⭐ Избранное", callback_data="profile:saved")
+    builder.button(text="📊 Активность", callback_data="profile:stats")
+    builder.button(text="✏️ Изменить профиль", callback_data="profile:edit")
+    builder.button(text=digest_label, callback_data="profile:toggle_digest")
+    builder.adjust(2, 1, 1)
+    return builder.as_markup()
+
+
+def more_menu_keyboard() -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    builder.button(text="🔥 Тренды", callback_data="more:trending")
+    builder.button(text="🎯 Copilot", callback_data="more:copilot")
+    builder.button(text="❓ Помощь", callback_data="more:help")
+    builder.adjust(2, 1)
+    return builder.as_markup()

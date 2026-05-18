@@ -2,7 +2,11 @@ from aiogram import Router, F
 from aiogram.filters import Command
 from aiogram.types import Message, CallbackQuery
 
-from app.bot.keyboards.inline import recommendation_keyboard, ai_recommendation_keyboard
+from app.bot.keyboards.inline import (
+    recommendation_keyboard,
+    ai_recommendation_keyboard,
+    recommendations_picker_keyboard,
+)
 from app.bot.services.api_client import EventMindAPIClient
 
 router = Router()
@@ -145,18 +149,29 @@ async def cb_save(callback: CallbackQuery):
     await callback.answer("Событие сохранено")
     await update_current_message_markup(callback, event_id)
 
-@router.message(F.text == "Рекомендации")
-async def msg_recommendations(message: Message):
-    user_recommendation_index[message.from_user.id] = 0
-    await send_recommendation(message, message.from_user.id)
+@router.message(F.text == "🎯 Рекомендации")
+async def msg_recommendations_picker(message: Message):
+    await message.answer(
+        "Какой вид рекомендаций показать?",
+        reply_markup=recommendations_picker_keyboard(),
+    )
 
-@router.message(F.text == "AI-рекомендации")
-async def msg_agent_recommendations(message: Message):
-    user_ai_recommendation_cards[message.from_user.id] = []
-    user_ai_recommendation_index[message.from_user.id] = 0
 
-    await message.answer("Подбираю AI-рекомендации под твой профиль...")
-    await send_ai_recommendation_card(message, message.from_user.id)
+@router.callback_query(F.data == "recs:rule")
+async def cb_recs_rule(callback: CallbackQuery):
+    await callback.answer()
+    user_recommendation_index[callback.from_user.id] = 0
+    await send_recommendation(callback, callback.from_user.id)
+
+
+@router.callback_query(F.data == "recs:ai")
+async def cb_recs_ai(callback: CallbackQuery):
+    await callback.answer()
+    user_ai_recommendation_cards[callback.from_user.id] = []
+    user_ai_recommendation_index[callback.from_user.id] = 0
+
+    await callback.message.answer("Подбираю AI-рекомендации под твой профиль...")
+    await send_ai_recommendation_card(callback, callback.from_user.id)
 
 def format_ai_event_card(event: dict) -> str:
     topics = ", ".join(event.get("topics", []))

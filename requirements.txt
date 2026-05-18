@@ -34,5 +34,8 @@ apscheduler==3.10.4
 beautifulsoup4==4.12.3
 lxml==5.2.2
 
+# --- RSS / Atom parsing ---
+feedparser==6.0.11
+
 # --- Tests ---
 pytest==8.2.2

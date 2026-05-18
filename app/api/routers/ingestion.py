@@ -5,6 +5,7 @@ from app.db.dependencies import get_db
 from app.api.services.ingestion_service import (
     load_raw_events,
     load_habr_events,
+    load_rss_events,
     normalize_raw_events,
     get_ingestion_status,
 )
@@ -23,6 +24,12 @@ def load_raw(db: Session = Depends(get_db)):
 def load_habr(limit: int = 20, db: Session = Depends(get_db)):
     """Скачать события с Habr, нормализовать через AI-агента, добавить в events."""
     return load_habr_events(db, limit=limit)
+
+
+@router.post("/load-rss")
+def load_rss(limit_per_feed: int = 20, db: Session = Depends(get_db)):
+    """Скачать события из всех настроенных RSS-лент (settings.RSS_FEEDS) и нормализовать."""
+    return load_rss_events(db, limit_per_feed=limit_per_feed)
 
 
 @router.post("/normalize")

@@ -194,15 +194,17 @@ async def cmd_edit(message: Message):
         reply_markup=topics_keyboard(set(), extra_codes=await _extra_topic_codes()),
     )
 
-@router.message(F.text == "Изменить профиль")
-async def msg_edit_profile(message: Message):
-    user_setup_state[message.from_user.id] = SetupState()
+@router.callback_query(F.data == "profile:edit")
+async def cb_profile_edit(callback: CallbackQuery):
+    await callback.answer()
+    user_setup_state[callback.from_user.id] = SetupState()
 
-    await message.answer(
+    await callback.message.answer(
         "Давай обновим профиль.\n\n"
         "Выбери интересующие темы. Можно выбрать несколько.",
         reply_markup=topics_keyboard(set(), extra_codes=await _extra_topic_codes()),
     )
+
 
 @router.message(F.text == "Начать настройку")
 async def msg_start_setup(message: Message):

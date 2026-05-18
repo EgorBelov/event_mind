@@ -79,7 +79,7 @@ async def msg_search_prefix(message: Message):
     await message.answer(_format_search_result(events), parse_mode="Markdown")
 
 
-@router.message(F.text == "Поиск")
+@router.message(F.text == "🔍 Поиск")
 async def msg_search_help(message: Message):
     await message.answer(
         "Чтобы найти событие, отправь:\n"

@@ -49,6 +49,72 @@ def normalize_raw_events(db: Session) -> dict:
     return {"normalized": normalized, "non_it": non_it, "failed": failed}
 
 
+def load_rss_events(
+    db: Session,
+    limit_per_feed: int = 20,
+    feed_urls: list[str] | None = None,
+) -> dict:
+    """Скачать события из RSS/Atom-лент, нормализовать и записать в `events`.
+
+    Если `feed_urls` не передан, берётся `settings.rss_feeds_list`.
+    """
+    from app.core.config import settings
+    from app.ingestion.sources.rss import fetch_rss_events
+
+    urls = feed_urls if feed_urls is not None else settings.rss_feeds_list
+    if not urls:
+        return {
+            "source": "rss",
+            "feeds": 0,
+            "fetched": 0,
+            "new": 0,
+            "skipped": 0,
+            "normalized": 0,
+            "non_it": 0,
+            "failed": 0,
+        }
+
+    items = fetch_rss_events(urls, limit_per_feed=limit_per_feed)
+    loaded = 0
+    skipped = 0
+    pending_ids: list[int] = []
+
+    for item in items:
+        title = item.get("title", "")
+        existing = db.query(RawEvent).filter(RawEvent.title == title).first()
+        if existing:
+            skipped += 1
+            if existing.status == "raw":
+                pending_ids.append(existing.id)
+            continue
+
+        raw_event = RawEvent(
+            title=title,
+            raw_description=item.get("raw_description", ""),
+            source_url=item.get("source_url"),
+            status="raw",
+        )
+        db.add(raw_event)
+        db.flush()
+        pending_ids.append(raw_event.id)
+        loaded += 1
+
+    db.commit()
+
+    normalized, non_it, failed = _normalize_by_ids(db, pending_ids)
+
+    return {
+        "source": "rss",
+        "feeds": len(urls),
+        "fetched": loaded + skipped,
+        "new": loaded,
+        "skipped": skipped,
+        "normalized": normalized,
+        "non_it": non_it,
+        "failed": failed,
+    }
+
+
 def load_habr_events(db: Session, limit: int = 20) -> dict:
     """Скачать события с Habr, сложить в raw_events, нормализовать AI-агентом и записать в events."""
     from app.ingestion.sources.habr import fetch_habr_events

@@ -5,26 +5,12 @@ def main_menu_keyboard() -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(
         keyboard=[
             [
-                KeyboardButton(text="Рекомендации"),
-                KeyboardButton(text="AI-рекомендации"),
+                KeyboardButton(text="🎯 Рекомендации"),
+                KeyboardButton(text="🔍 Поиск"),
             ],
             [
-                KeyboardButton(text="Профиль"),
-                KeyboardButton(text="Избранное"),
-            ],
-            [
-                KeyboardButton(text="Моя активность"),
-                KeyboardButton(text="Поиск"),
-            ],
-            [
-                KeyboardButton(text="Тренды"),
-            ],
-            [
-                KeyboardButton(text="Подписаться на AI"),
-                KeyboardButton(text="Отписаться"),
-            ],
-            [
-                KeyboardButton(text="Изменить профиль"),
+                KeyboardButton(text="👤 Профиль"),
+                KeyboardButton(text="⚙️ Ещё"),
             ],
         ],
         resize_keyboard=True,

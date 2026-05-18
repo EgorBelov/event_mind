@@ -26,6 +26,23 @@ class Settings(BaseSettings):
     # Dev-флаги
     debug: bool = False
 
+    # Ingestion: список RSS/Atom-лент через запятую.
+    # Пример: RSS_FEEDS="https://example.com/feed.xml,https://other.org/rss"
+    rss_feeds: str = ""
+
+    # Периодический ingestion через APScheduler (часы между запусками)
+    ingest_interval_hours: int = 6
+    # Включать ли периодический ingestion вместе с digest-планировщиком
+    ingest_enabled: bool = True
+    # Лимит событий с Habr за один тик планировщика
+    ingest_habr_limit: int = 20
+    # Лимит событий на одну RSS-ленту за тик
+    ingest_rss_limit_per_feed: int = 20
+
+    @property
+    def rss_feeds_list(self) -> list[str]:
+        return [u.strip() for u in self.rss_feeds.split(",") if u.strip()]
+
 
 settings = Settings()
 

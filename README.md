@@ -321,6 +321,11 @@ curl -X POST http://localhost:8000/ingestion/normalize
 | `GROQ_API_KEY`   | —                             | Ключ Groq Cloud для LLM-агентов. Без него агенты падают, система деградирует до rule-based. |
 | `GROQ_MODEL`     | `llama-3.3-70b-versatile`     | Имя модели Groq.                                               |
 | `DEBUG`          | `false`                       | Включает verbose-логи и SQL echo.                              |
+| `RSS_FEEDS`            | `""`        | Список RSS/Atom-лент через запятую для `/ingestion/load-rss`.        |
+| `INGEST_ENABLED`       | `true`      | Включает периодический ingestion внутри scheduler-процесса.          |
+| `INGEST_INTERVAL_HOURS`| `6`         | Период запуска `ingest_habr` / `ingest_rss` в часах.                 |
+| `INGEST_HABR_LIMIT`    | `20`        | Сколько событий тянуть с Habr за один тик планировщика.              |
+| `INGEST_RSS_LIMIT_PER_FEED` | `20`    | Лимит элементов на одну RSS-ленту за один тик.                       |
 
 Файл `.env.example` уже содержит шаблон — скопируйте и подставьте свои значения.
 
@@ -410,8 +415,11 @@ docker compose down               # остановить
 | `/subscribe`                 | Подписка на ежедневный AI-дайджест.                                              |
 | `/unsubscribe`               | Отписка от дайджеста.                                                            |
 
-Reply-меню содержит дублирующие кнопки: «Рекомендации», «AI-рекомендации»,
-«Профиль», «Избранное», «Моя активность», «Тренды», «Поиск», «Подписаться на AI».
+Reply-меню — компактное, 4 кнопки: «🎯 Рекомендации» (открывает inline-пикер
+«Обычные / AI»), «🔍 Поиск», «👤 Профиль» (под профилем inline-сабменю:
+Избранное / Активность / Изменить профиль / AI-дайджест toggle),
+«⚙️ Ещё» (Тренды / Copilot / Помощь). Все редкие действия живут
+за inline-кнопками или slash-командами.
 
 ---
 
@@ -451,8 +459,11 @@ Reply-меню содержит дублирующие кнопки: «Реко�
 
 1. Источник:
    - JSON-файл `data/events_raw.json` через `POST /ingestion/load-raw`,
-   - или RSS/HTML с Habr через `POST /ingestion/load-habr?limit=N`
-     (см. `app/ingestion/sources/habr.py`).
+   - HTML с Habr через `POST /ingestion/load-habr?limit=N`
+     (см. `app/ingestion/sources/habr.py`),
+   - произвольные RSS/Atom-ленты через `POST /ingestion/load-rss?limit_per_feed=N`
+     (см. `app/ingestion/sources/rss.py`). Список лент задаётся в `.env`
+     переменной `RSS_FEEDS=url1,url2,...`.
 2. Запись попадает в таблицу `raw_events` со статусом `raw`.
 3. `EventNormalizerAgent` (LangGraph + Groq LLM, `app/agents/event_normalization/`)
    получает сырое описание и возвращает JSON:
@@ -476,11 +487,19 @@ Reply-меню содержит дублирующие кнопки: «Реко�
 
 ```bash
 curl -X POST "http://localhost:8000/ingestion/load-habr?limit=20"
+# или RSS:
+curl -X POST "http://localhost:8000/ingestion/load-rss?limit_per_feed=20"
 # или вручную:
 curl -X POST http://localhost:8000/ingestion/load-raw
 curl -X POST http://localhost:8000/ingestion/normalize
 curl http://localhost:8000/ingestion/status
 ```
+
+**Автоматическое пополнение.** `app/scheduler/digest.py` помимо ежедневного
+AI-дайджеста раз в `INGEST_INTERVAL_HOURS` часов (по умолчанию 6) дёргает
+`/ingestion/load-habr` и `/ingestion/load-rss`. Включается переменной
+`INGEST_ENABLED=true` (по умолчанию). Лимит за тик — `INGEST_HABR_LIMIT` и
+`INGEST_RSS_LIMIT_PER_FEED`.
 
 ---
 
@@ -573,12 +592,13 @@ LLM-провайдер: `ChatGroq` (см. `app/agents/recommendation/llm.py`), �
 
 ### Ingestion (`/ingestion`)
 
-| Метод | URL                       | Параметры                | Описание                                                                  |
-|-------|---------------------------|--------------------------|---------------------------------------------------------------------------|
-| POST  | `/ingestion/load-raw`     | —                        | Заливает `data/events_raw.json` в `raw_events`.                           |
-| POST  | `/ingestion/load-habr`    | `limit` (default 20)     | Парсит habr.com/ru/events, сохраняет в `raw_events`, сразу нормализует.   |
-| POST  | `/ingestion/normalize`    | —                        | Нормализует все `raw_events.status == 'raw'` через AI-агента.             |
-| GET   | `/ingestion/status`       | —                        | Счётчики `total / raw / normalized / non_it / failed`.                    |
+| Метод | URL                       | Параметры                       | Описание                                                                  |
+|-------|---------------------------|---------------------------------|---------------------------------------------------------------------------|
+| POST  | `/ingestion/load-raw`     | —                               | Заливает `data/events_raw.json` в `raw_events`.                           |
+| POST  | `/ingestion/load-habr`    | `limit` (default 20)            | Парсит habr.com/ru/events, сохраняет в `raw_events`, сразу нормализует.   |
+| POST  | `/ingestion/load-rss`     | `limit_per_feed` (default 20)   | Парсит все ленты из `RSS_FEEDS`, сохраняет в `raw_events`, нормализует.   |
+| POST  | `/ingestion/normalize`    | —                               | Нормализует все `raw_events.status == 'raw'` через AI-агента.             |
+| GET   | `/ingestion/status`       | —                               | Счётчики `total / raw / normalized / non_it / failed`.                    |
 
 ### Subscriptions (`/subscriptions`)
 

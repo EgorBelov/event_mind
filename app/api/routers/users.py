@@ -48,6 +48,7 @@ def get_user(telegram_id: int, db: Session = Depends(get_db)):
         "city": user.city,
         "topics": get_user_topic_codes(user),
         "topic_weights": user.topic_weights,
+        "is_subscribed": bool(user.is_subscribed),
     }
 
 

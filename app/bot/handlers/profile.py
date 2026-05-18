@@ -2,10 +2,16 @@ import json
 
 from aiogram import Router, F
 from aiogram.filters import Command, CommandObject
-from aiogram.types import Message
+from aiogram.types import Message, CallbackQuery
 
 from app.bot.services.api_client import EventMindAPIClient
-from app.bot.keyboards.inline import TOPIC_LABELS, FORMAT_LABELS, CITY_LABELS
+from app.bot.keyboards.inline import (
+    TOPIC_LABELS,
+    FORMAT_LABELS,
+    CITY_LABELS,
+    profile_actions_keyboard,
+    more_menu_keyboard,
+)
 from app.core.topics import topic_title, format_label, city_label
 
 
@@ -34,11 +40,11 @@ ACTION_LABELS = {
 }
 
 
-@router.message(Command("profile"))
-async def cmd_profile(message: Message):
-    user = await api_client.get_user(message.from_user.id)
+async def _render_profile(target: Message | CallbackQuery, telegram_id: int):
+    user = await api_client.get_user(telegram_id)
+    answer = target.answer if isinstance(target, Message) else target.message.answer
     if not user:
-        await message.answer("Профиль пока не настроен. Запусти /start")
+        await answer("Профиль пока не настроен. Запусти /start")
         return
 
     topics = ", ".join(_topic(t) for t in user.get("topics", [])) or "не выбраны"
@@ -56,20 +62,26 @@ async def cmd_profile(message: Message):
         if topic_weights else "пока не сформированы"
     )
 
-    await message.answer(
+    await answer(
         f"Твой профиль:\n\n"
         f"Темы: {topics}\n"
         f"Формат: {preferred_format}\n"
         f"Город: {city}\n\n"
-        f"Веса интересов:\n{weights_text}"
+        f"Веса интересов:\n{weights_text}",
+        reply_markup=profile_actions_keyboard(bool(user.get("is_subscribed"))),
     )
 
 
-@router.message(Command("saved"))
-async def cmd_saved(message: Message):
-    events = await api_client.get_saved_events(message.from_user.id)
+@router.message(Command("profile"))
+async def cmd_profile(message: Message):
+    await _render_profile(message, message.from_user.id)
+
+
+async def _send_saved(target: Message | CallbackQuery, telegram_id: int):
+    answer = target.answer if isinstance(target, Message) else target.message.answer
+    events = await api_client.get_saved_events(telegram_id)
     if not events:
-        await message.answer("У тебя пока нет сохраненных событий.")
+        await answer("У тебя пока нет сохраненных событий.")
         return
 
     chunks = [
@@ -80,33 +92,29 @@ async def cmd_saved(message: Message):
         f"Дата: {e['date']}"
         for e in events
     ]
-    await message.answer("*Сохраненные события:*\n\n" + "\n\n".join(chunks), parse_mode="Markdown")
+    await answer("*Сохраненные события:*\n\n" + "\n\n".join(chunks), parse_mode="Markdown")
 
 
-@router.message(F.text == "Профиль")
+@router.message(Command("saved"))
+async def cmd_saved(message: Message):
+    await _send_saved(message, message.from_user.id)
+
+
+@router.message(F.text == "👤 Профиль")
 async def msg_profile(message: Message):
-    await cmd_profile(message)
-
-
-@router.message(F.text == "Избранное")
-async def msg_saved(message: Message):
-    await cmd_saved(message)
+    await _render_profile(message, message.from_user.id)
 
 
 @router.message(Command("stats"))
 async def cmd_stats(message: Message):
-    await _send_stats(message)
+    await _send_stats(message, message.from_user.id)
 
 
-@router.message(F.text == "Моя активность")
-async def msg_stats(message: Message):
-    await _send_stats(message)
-
-
-async def _send_stats(message: Message):
-    stats = await api_client.get_user_stats(message.from_user.id)
+async def _send_stats(target: Message | CallbackQuery, telegram_id: int):
+    answer = target.answer if isinstance(target, Message) else target.message.answer
+    stats = await api_client.get_user_stats(telegram_id)
     if not stats or not stats.get("success", True):
-        await message.answer("Статистика пока недоступна. Сначала настрой профиль через /start.")
+        await answer("Статистика пока недоступна. Сначала настрой профиль через /start.")
         return
 
     top_topics = stats.get("top_topics") or []
@@ -115,7 +123,7 @@ async def _send_stats(message: Message):
     top_text = "\n".join(f"- {_topic(t['topic'])}: {t['score']}" for t in top_topics) or "пусто"
     last_text = "\n".join(f"- [{ACTION_LABELS.get(i['action'], i['action'])}] {i['event_title']}" for i in last_actions) or "нет действий"
 
-    await message.answer(
+    await answer(
         f"*Моя активность*\n\n"
         f"Интересно: {stats.get('likes_count', 0)}\n"
         f"Не интересно: {stats.get('dislikes_count', 0)}\n"
@@ -146,12 +154,11 @@ async def cmd_bio(message: Message, command: CommandObject):
     await message.answer(f"Готово. По описанию обновил твои темы: {topic_text}.")
 
 
-@router.message(Command("trending"))
-async def cmd_trending(message: Message):
-    """Показать горячие IT-события и трендовые темы."""
+async def _send_trending(target: Message | CallbackQuery):
+    answer = target.answer if isinstance(target, Message) else target.message.answer
     result = await api_client.get_trending()
     if not result:
-        await message.answer("Тренды пока недоступны.")
+        await answer("Тренды пока недоступны.")
         return
 
     hot_events = result.get("hot_events", [])
@@ -172,12 +179,17 @@ async def cmd_trending(message: Message):
     else:
         events_text = "Пока недостаточно данных."
 
-    await message.answer(
+    await answer(
         f"*Тренды IT-событий*\n\n"
         f"*Горячие темы:* {topics_text}\n\n"
         f"*Популярные события:*\n\n{events_text}",
         parse_mode="Markdown",
     )
+
+
+@router.message(Command("trending"))
+async def cmd_trending(message: Message):
+    await _send_trending(message)
 
 
 @router.message(Command("copilot"))
@@ -222,6 +234,80 @@ async def cmd_copilot(message: Message, command: CommandObject):
     await message.answer(text, parse_mode="Markdown")
 
 
-@router.message(F.text == "Тренды")
-async def msg_trending(message: Message):
-    await cmd_trending(message)
+@router.message(F.text == "⚙️ Ещё")
+async def msg_more(message: Message):
+    await message.answer(
+        "Дополнительные функции:",
+        reply_markup=more_menu_keyboard(),
+    )
+
+
+@router.callback_query(F.data == "profile:saved")
+async def cb_profile_saved(callback: CallbackQuery):
+    await callback.answer()
+    await _send_saved(callback, callback.from_user.id)
+
+
+@router.callback_query(F.data == "profile:stats")
+async def cb_profile_stats(callback: CallbackQuery):
+    await callback.answer()
+    await _send_stats(callback, callback.from_user.id)
+
+
+@router.callback_query(F.data == "profile:toggle_digest")
+async def cb_profile_toggle_digest(callback: CallbackQuery):
+    user = await api_client.get_user(callback.from_user.id)
+    if not user:
+        await callback.answer("Сначала настрой профиль через /start", show_alert=True)
+        return
+
+    was_subscribed = bool(user.get("is_subscribed"))
+    if was_subscribed:
+        result = await api_client.unsubscribe(callback.from_user.id)
+    else:
+        result = await api_client.subscribe(callback.from_user.id)
+
+    is_subscribed_now = not was_subscribed
+    await callback.answer(result.get("message", "Готово."))
+    try:
+        await callback.message.edit_reply_markup(
+            reply_markup=profile_actions_keyboard(is_subscribed_now)
+        )
+    except Exception:
+        pass
+
+
+@router.callback_query(F.data == "more:trending")
+async def cb_more_trending(callback: CallbackQuery):
+    await callback.answer()
+    await _send_trending(callback)
+
+
+@router.callback_query(F.data == "more:copilot")
+async def cb_more_copilot(callback: CallbackQuery):
+    await callback.answer()
+    await callback.message.answer(
+        "AI Copilot подбирает события под твою цель.\n\n"
+        "Использование: /copilot <цель>\n"
+        "Например: /copilot хочу разобраться в Kubernetes и SRE"
+    )
+
+
+@router.callback_query(F.data == "more:help")
+async def cb_more_help(callback: CallbackQuery):
+    await callback.answer()
+    await callback.message.answer(
+        "*Команды EventMind:*\n\n"
+        "/start — настроить профиль\n"
+        "/profile — мой профиль и быстрые действия\n"
+        "/recommend — обычные рекомендации\n"
+        "/search <запрос> — поиск по ключевым словам\n"
+        "/semantic <запрос> — AI-поиск по смыслу\n"
+        "/copilot <цель> — AI Copilot под твою цель\n"
+        "/bio <текст> — описать себя и обновить темы\n"
+        "/trending — горячие события\n"
+        "/saved — сохранённые события\n"
+        "/stats — моя активность\n"
+        "/subscribe, /unsubscribe — управлять AI-дайджестом",
+        parse_mode="Markdown",
+    )
