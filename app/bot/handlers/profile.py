@@ -12,6 +12,7 @@ from app.bot.keyboards.inline import (
     profile_actions_keyboard,
     more_menu_keyboard,
 )
+from app.bot.utils import esc, send
 from app.core.topics import topic_title, format_label, city_label
 
 
@@ -78,21 +79,20 @@ async def cmd_profile(message: Message):
 
 
 async def _send_saved(target: Message | CallbackQuery, telegram_id: int):
-    answer = target.answer if isinstance(target, Message) else target.message.answer
     events = await api_client.get_saved_events(telegram_id)
     if not events:
-        await answer("У тебя пока нет сохраненных событий.")
+        await send(target, "У тебя пока нет сохраненных событий.")
         return
 
     chunks = [
-        f"*{e['title']}*\n"
-        f"Тема: {', '.join(_topic(t) for t in e.get('topics', []))}\n"
-        f"Формат: {_format(e['format'])}\n"
-        f"Город: {_city(e['city'])}\n"
-        f"Дата: {e['date']}"
+        f"<b>{esc(e['title'])}</b>\n"
+        f"Тема: {esc(', '.join(_topic(t) for t in e.get('topics', [])))}\n"
+        f"Формат: {esc(_format(e['format']))}\n"
+        f"Город: {esc(_city(e['city']))}\n"
+        f"Дата: {esc(e['date'])}"
         for e in events
     ]
-    await answer("*Сохраненные события:*\n\n" + "\n\n".join(chunks), parse_mode="Markdown")
+    await send(target, "<b>Сохраненные события:</b>\n\n" + "\n\n".join(chunks))
 
 
 @router.message(Command("saved"))
@@ -111,26 +111,28 @@ async def cmd_stats(message: Message):
 
 
 async def _send_stats(target: Message | CallbackQuery, telegram_id: int):
-    answer = target.answer if isinstance(target, Message) else target.message.answer
     stats = await api_client.get_user_stats(telegram_id)
     if not stats or not stats.get("success", True):
-        await answer("Статистика пока недоступна. Сначала настрой профиль через /start.")
+        await send(target, "Статистика пока недоступна. Сначала настрой профиль через /start.")
         return
 
     top_topics = stats.get("top_topics") or []
     last_actions = stats.get("last_actions") or []
 
-    top_text = "\n".join(f"- {_topic(t['topic'])}: {t['score']}" for t in top_topics) or "пусто"
-    last_text = "\n".join(f"- [{ACTION_LABELS.get(i['action'], i['action'])}] {i['event_title']}" for i in last_actions) or "нет действий"
+    top_text = "\n".join(f"- {esc(_topic(t['topic']))}: {esc(t['score'])}" for t in top_topics) or "пусто"
+    last_text = "\n".join(
+        f"- [{esc(ACTION_LABELS.get(i['action'], i['action']))}] {esc(i['event_title'])}"
+        for i in last_actions
+    ) or "нет действий"
 
-    await answer(
-        f"*Моя активность*\n\n"
-        f"Интересно: {stats.get('likes_count', 0)}\n"
-        f"Не интересно: {stats.get('dislikes_count', 0)}\n"
-        f"Сохранено: {stats.get('saves_count', 0)}\n\n"
-        f"*Топ тем:*\n{top_text}\n\n"
-        f"*Последние действия:*\n{last_text}",
-        parse_mode="Markdown",
+    await send(
+        target,
+        f"<b>Моя активность</b>\n\n"
+        f"Интересно: {esc(stats.get('likes_count', 0))}\n"
+        f"Не интересно: {esc(stats.get('dislikes_count', 0))}\n"
+        f"Сохранено: {esc(stats.get('saves_count', 0))}\n\n"
+        f"<b>Топ тем:</b>\n{top_text}\n\n"
+        f"<b>Последние действия:</b>\n{last_text}",
     )
 
 
@@ -155,35 +157,34 @@ async def cmd_bio(message: Message, command: CommandObject):
 
 
 async def _send_trending(target: Message | CallbackQuery):
-    answer = target.answer if isinstance(target, Message) else target.message.answer
     result = await api_client.get_trending()
     if not result:
-        await answer("Тренды пока недоступны.")
+        await send(target, "Тренды пока недоступны.")
         return
 
     hot_events = result.get("hot_events", [])
     trending_topics = result.get("trending_topics", [])
 
     topics_text = ", ".join(
-        f"{_topic(t)} ({n})" for t, n in trending_topics[:5]
+        f"{esc(_topic(t))} ({esc(n)})" for t, n in trending_topics[:5]
     ) or "пока нет данных"
 
     if hot_events:
         events_text = "\n\n".join(
-            f"*{e['title']}*\n"
-            f"Формат: {_format(e.get('format'))}\n"
-            f"Дата: {e.get('date', '')}\n"
-            f"Рейтинг: {e.get('trending_score', '?')}"
+            f"<b>{esc(e['title'])}</b>\n"
+            f"Формат: {esc(_format(e.get('format')))}\n"
+            f"Дата: {esc(e.get('date', ''))}\n"
+            f"Рейтинг: {esc(e.get('trending_score', '?'))}"
             for e in hot_events[:5]
         )
     else:
         events_text = "Пока недостаточно данных."
 
-    await answer(
-        f"*Тренды IT-событий*\n\n"
-        f"*Горячие темы:* {topics_text}\n\n"
-        f"*Популярные события:*\n\n{events_text}",
-        parse_mode="Markdown",
+    await send(
+        target,
+        f"<b>Тренды IT-событий</b>\n\n"
+        f"<b>Горячие темы:</b> {topics_text}\n\n"
+        f"<b>Популярные события:</b>\n\n{events_text}",
     )
 
 
@@ -213,25 +214,25 @@ async def cmd_copilot(message: Message, command: CommandObject):
         await message.answer(result.get("message", "Copilot временно недоступен. Попробуй позже."))
         return
 
-    answer = result.get("answer", "")
+    answer_text = esc(result.get("answer", ""))
     cards = result.get("cards", [])
 
-    text = answer
+    text = answer_text
     if cards:
         events_text = "\n\n".join(
-            f"📌 *{c['title']}*\n"
-            f"Формат: {_format(c.get('format'))}\n"
-            f"Дата: {c.get('date', '')}"
-            + (f"\n🔗 {c['source_url']}" if c.get("source_url") else "")
+            f"📌 <b>{esc(c['title'])}</b>\n"
+            f"Формат: {esc(_format(c.get('format')))}\n"
+            f"Дата: {esc(c.get('date', ''))}"
+            + (f"\n🔗 {esc(c['source_url'])}" if c.get("source_url") else "")
             for c in cards
         )
-        text = f"{answer}\n\n*Рекомендованные события:*\n\n{events_text}"
+        text = f"{answer_text}\n\n<b>Рекомендованные события:</b>\n\n{events_text}"
 
     # Лимит сообщения в Telegram — 4096 символов
     if len(text) > 4000:
         text = text[:4000] + "..."
 
-    await message.answer(text, parse_mode="Markdown")
+    await send(message, text)
 
 
 @router.message(F.text == "⚙️ Ещё")
@@ -296,18 +297,18 @@ async def cb_more_copilot(callback: CallbackQuery):
 @router.callback_query(F.data == "more:help")
 async def cb_more_help(callback: CallbackQuery):
     await callback.answer()
-    await callback.message.answer(
-        "*Команды EventMind:*\n\n"
+    await send(
+        callback,
+        "<b>Команды EventMind:</b>\n\n"
         "/start — настроить профиль\n"
         "/profile — мой профиль и быстрые действия\n"
         "/recommend — обычные рекомендации\n"
-        "/search <запрос> — поиск по ключевым словам\n"
-        "/semantic <запрос> — AI-поиск по смыслу\n"
-        "/copilot <цель> — AI Copilot под твою цель\n"
-        "/bio <текст> — описать себя и обновить темы\n"
+        "/search &lt;запрос&gt; — поиск по ключевым словам\n"
+        "/semantic &lt;запрос&gt; — AI-поиск по смыслу\n"
+        "/copilot &lt;цель&gt; — AI Copilot под твою цель\n"
+        "/bio &lt;текст&gt; — описать себя и обновить темы\n"
         "/trending — горячие события\n"
         "/saved — сохранённые события\n"
         "/stats — моя активность\n"
         "/subscribe, /unsubscribe — управлять AI-дайджестом",
-        parse_mode="Markdown",
     )

@@ -203,6 +203,16 @@ def _normalize_single(db: Session, raw: RawEvent) -> str:
             db.flush()
             _attach_event_topics(db, event, topics)
 
+            # Сразу считаем вектор события, чтобы путь рекомендаций не
+            # досчитывал его лениво (тот самый «холодный» провал).
+            # Best-effort: при сбое embedding останется None и его
+            # подхватит ensure_event_embeddings при первом запросе.
+            try:
+                from app.recommender.embeddings import build_event_embedding
+                event.embedding = _json.dumps(build_event_embedding(event))
+            except Exception:
+                pass
+
         raw.status = "normalized"
         return "normalized"
 

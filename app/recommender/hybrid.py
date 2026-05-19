@@ -2,8 +2,7 @@
 
 import json
 
-from app.recommender.scoring import score_event_for_user, _get_user_topic_codes
-from app.recommender.user_model import parse_topic_weights
+from app.recommender.scoring import score_event_for_user
 
 
 def hybrid_score(user, event) -> float:
@@ -13,13 +12,13 @@ def hybrid_score(user, event) -> float:
         # Ленивый импорт — sentence-transformers может быть не установлен.
         from app.recommender.embeddings import (
             cosine_similarity,
-            build_user_embedding,
+            get_or_build_user_embedding,
             build_event_embedding,
         )
 
-        user_topics = list(_get_user_topic_codes(user))
-        weights = parse_topic_weights(user.topic_weights)
-        user_emb = build_user_embedding(user_topics, weights)
+        # Кэшированный вектор пользователя (user.embedding), а не пересчёт
+        # на каждое событие — раньше это был основной источник тормозов.
+        user_emb = get_or_build_user_embedding(user)
 
         event_emb_raw = getattr(event, "embedding", None)
         if event_emb_raw:

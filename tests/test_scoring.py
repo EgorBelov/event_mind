@@ -1,6 +1,5 @@
 """Tests for app/recommender/scoring.py"""
 import json
-import pytest
 
 from app.recommender.scoring import score_event_for_user
 

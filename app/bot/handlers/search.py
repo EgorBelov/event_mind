@@ -4,6 +4,7 @@ from aiogram.types import Message
 
 from app.bot.services.api_client import EventMindAPIClient
 from app.bot.keyboards.inline import TOPIC_LABELS, FORMAT_LABELS, CITY_LABELS
+from app.bot.utils import esc, send
 from app.core.topics import topic_title, format_label, city_label
 
 router = Router()
@@ -29,11 +30,11 @@ def _format_search_result(events: list[dict], show_similarity: bool = False) -> 
             sim_text = f"\nСходство: {event['similarity']:.0%}"
 
         chunks.append(
-            f"*{event['title']}*\n"
-            f"Темы: {topics}\n"
-            f"Формат: {fmt} | Город: {city}\n"
-            f"Дата: {event.get('date', '')}{sim_text}\n"
-            f"{summary}"
+            f"<b>{esc(event['title'])}</b>\n"
+            f"Темы: {esc(topics)}\n"
+            f"Формат: {esc(fmt)} | Город: {esc(city)}\n"
+            f"Дата: {esc(event.get('date', ''))}{esc(sim_text)}\n"
+            f"{esc(summary)}"
         )
     return "\n\n".join(chunks)
 
@@ -49,7 +50,7 @@ async def cmd_search(message: Message, command: CommandObject):
         return
 
     events = await api_client.search_events(query=query)
-    await message.answer(_format_search_result(events), parse_mode="Markdown")
+    await send(message, _format_search_result(events))
 
 
 @router.message(Command("semantic"))
@@ -66,26 +67,26 @@ async def cmd_semantic_search(message: Message, command: CommandObject):
 
     await message.answer("Ищу по смыслу запроса...")
     events = await api_client.semantic_search_events(query=query)
-    await message.answer(_format_search_result(events, show_similarity=True), parse_mode="Markdown")
+    await send(message, _format_search_result(events, show_similarity=True))
 
 
 @router.message(F.text.startswith("Найти:"))
 async def msg_search_prefix(message: Message):
     query = message.text.split(":", 1)[1].strip()
     if not query:
-        await message.answer("Уточни запрос после двоеточия. Пример: `Найти: AI`", parse_mode="Markdown")
+        await send(message, "Уточни запрос после двоеточия. Пример: <code>Найти: AI</code>")
         return
     events = await api_client.search_events(query=query)
-    await message.answer(_format_search_result(events), parse_mode="Markdown")
+    await send(message, _format_search_result(events))
 
 
 @router.message(F.text == "🔍 Поиск")
 async def msg_search_help(message: Message):
-    await message.answer(
+    await send(
+        message,
         "Чтобы найти событие, отправь:\n"
-        "`Найти: python`\n"
+        "<code>Найти: python</code>\n"
         "или используй команды:\n"
-        "/search <запрос> — поиск по ключевым словам\n"
-        "/semantic <запрос> — AI-поиск по смыслу",
-        parse_mode="Markdown",
+        "/search &lt;запрос&gt; — поиск по ключевым словам\n"
+        "/semantic &lt;запрос&gt; — AI-поиск по смыслу",
     )

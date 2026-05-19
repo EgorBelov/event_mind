@@ -113,14 +113,13 @@ eventmind/
 │   │   │   ├── recommendations.py        # /recommendations/* — rule+embedding рекомендации, лайки
 │   │   │   ├── agent_recommendations.py  # /agent-recommendations/* — LangGraph-агенты
 │   │   │   ├── copilot.py                # /copilot/* — AI-копилот по цели пользователя
-│   │   │   ├── ingestion.py              # /ingestion/* — raw events, Habr, нормализация
+│   │   │   ├── ingestion.py              # /ingestion/* — raw events, Habr, RSS, нормализация
 │   │   │   ├── subscriptions.py          # /subscriptions/* — подписки на AI-дайджест
 │   │   │   ├── admin.py                  # /admin/ — HTML-дашборд
 │   │   │   └── analytics.py              # /analytics/* — topics / interactions / trending
-│   │   ├── schemas/                      # Pydantic-схемы для запросов и ответов
-│   │   │   ├── user.py                   # UserCreate, UserResponse
-│   │   │   ├── event.py                  # EventResponse
-│   │   │   └── recommendation.py         # RecommendationResponse, InteractionCreate
+│   │   ├── schemas/                      # Pydantic-схемы для запросов
+│   │   │   ├── user.py                   # UserCreate
+│   │   │   └── recommendation.py         # InteractionCreate
 │   │   └── services/                     # доменная бизнес-логика (вне роутеров)
 │   │       ├── user_service.py           # CRUD юзера, stats, analyze_bio
 │   │       ├── event_service.py          # загрузка JSON-событий, прикрепление тем
@@ -138,8 +137,9 @@ eventmind/
 │   │   │   ├── subscriptions.py          # /subscribe / /unsubscribe
 │   │   │   └── search.py                 # /search, /semantic, "Найти: <q>"
 │   │   ├── keyboards/                    # inline + reply клавиатуры и лейблы тем/городов
-│   │   │   ├── inline.py                 # topics_keyboard, recommendation_keyboard и пр.
+│   │   │   ├── inline.py                 # topics_keyboard, единый recommendation_keyboard(mode) и пр.
 │   │   │   └── reply.py                  # главное меню (reply-кнопки)
+│   │   ├── utils.py                      # esc + send: безопасная HTML-отправка с откатом в plain
 │   │   └── services/
 │   │       └── api_client.py             # EventMindAPIClient — async-обёртка над всеми endpoint-ами
 │   │
@@ -162,13 +162,14 @@ eventmind/
 │   ├── recommender/                      # модуль ранжирования и объяснений
 │   │   ├── scoring.py                    # rule-based score: темы, веса, формат, город
 │   │   ├── hybrid.py                     # blend rule + embedding cosine (0.5 * rule + 10 * sim)
-│   │   ├── embeddings.py                 # sentence-transformers wrappers, кэш в БД
+│   │   ├── embeddings.py                 # sentence-transformers wrappers; persist + batch-backfill в БД
 │   │   ├── explain.py                    # explain_event_for_user / explain_event_detailed
 │   │   └── user_model.py                 # parse/dump topic_weights, apply_feedback_to_weights
 │   │
 │   ├── ingestion/                        # загрузка событий из внешних источников
 │   │   └── sources/
-│   │       └── habr.py                   # парсер habr.com/ru/events/ (BeautifulSoup + lxml)
+│   │       ├── habr.py                   # парсер habr.com/ru/events/ (BeautifulSoup + lxml)
+│   │       └── rss.py                     # универсальный RSS/Atom-источник (feedparser + certifi)
 │   │
 │   ├── agents/                           # LangGraph-агенты на Groq LLM
 │   │   ├── recommendation/               # граф из 4 нод
@@ -186,10 +187,8 @@ eventmind/
 │   │       ├── state.py
 │   │       └── agent.py                  # цель + профиль + события → roadmap
 │   │
-│   ├── scheduler/
-│   │   └── digest.py                     # APScheduler, ежедневный AI-дайджест в Telegram
-│   │
-│   └── admin/                            # заготовка под admin-инструменты
+│   └── scheduler/
+│       └── digest.py                     # APScheduler: ежедневный AI-дайджест + периодический ingestion
 │
 ├── alembic/                              # миграции БД
 │   ├── env.py
@@ -402,8 +401,8 @@ docker compose down               # остановить
 | `/start`                     | Запускает мастер настройки профиля (темы → формат → город). Сохраняет через API. |
 | `/edit`                      | Перезапуск мастера, чтобы переопределить темы/формат/город.                      |
 | `/profile`                   | Показывает текущий профиль и веса интересов.                                     |
-| `/recommend`                 | Лента rule+embedding рекомендаций с inline-кнопками 👍 / 👎 / ⭐ и «Дальше».     |
-| **AI-рекомендации** (кнопка) | Аналогичная лента, но карточки готовит LangGraph-граф (Groq LLM).                |
+| `/recommend`                 | Лента rule+embedding рекомендаций; общая карточка-клавиатура 👍 / 👎 / ⭐ / «Похожие» / «Следующее». |
+| **AI-рекомендации** (кнопка) | Та же карточка-клавиатура, но события готовит LangGraph-граф (Groq LLM); листание режимом `ai`. |
 | `/saved`                     | Список сохранённых событий.                                                      |
 | `/stats`                     | Личная статистика: лайки/дизлайки/сохранения, топ тем, последние действия.       |
 | `/search <запрос>`           | Keyword-поиск по `title` / `description` / темам / формату / городу.             |
@@ -421,6 +420,13 @@ Reply-меню — компактное, 4 кнопки: «🎯 Рекоменд
 «⚙️ Ещё» (Тренды / Copilot / Помощь). Все редкие действия живут
 за inline-кнопками или slash-командами.
 
+Карточки обычных и AI-рекомендаций используют **одну** клавиатуру
+(`recommendation_keyboard(mode)`): like/dislike/save идут в общий эндпойнт,
+режим (`rule`/`ai`) прокинут в callback_data только ради листания. Весь
+исходящий текст рендерится через `bot/utils.send` — HTML с экранированием
+динамики и авто-откатом в plain-text, поэтому «битый» Markdown в названии
+события больше не приводит к пропаже карточки.
+
 ---
 
 ## Логика рекомендаций
@@ -436,8 +442,12 @@ Reply-меню — компактное, 4 кнопки: «🎯 Рекоменд
    - модель `sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2`;
    - user embedding строится из тем + весов + предпочтений + истории
      (`build_rich_user_embedding`); кэшируется в `users.embedding`;
-   - event embedding — `title + description`, кэшируется в `events.embedding`;
+   - event embedding — `title + description`, **persist** в `events.embedding`;
+     считается при нормализации (ingestion), а недостающие досчитываются один
+     раз батчем (`ensure_event_embeddings`) на первом запросе и сохраняются;
    - сравнение через `cosine_similarity`.
+   > За счёт persist-кэша список рекомендаций отдаётся за ~0.4 c вместо
+   > ~16 c (раньше векторы всех событий пересчитывались на каждый запрос).
 3. **Итоговый score**: `rule * 0.5 + similarity * 10`.
    При недоступности `sentence-transformers` система плавно деградирует
    до чисто rule-based варианта.
@@ -479,7 +489,9 @@ Reply-меню — компактное, 4 кнопки: «🎯 Рекоменд
    привязываются темы (`event_topics`). Новые темы автоматически появляются
    в таблице `topics` через `_get_or_create_topic` → `topic_title()` сразу
    получает корректный human-label.
-6. Опционально считается `summary` и `embedding` (для `events`-таблицы).
+6. Сразу считается `embedding` события (`build_event_embedding`, best-effort:
+   при недоступности модели остаётся `None` и досчитывается лениво) — чтобы
+   путь рекомендаций не пересчитывал векторы.
 7. Статус `raw_event` обновляется на `normalized` или `failed`
    (в случае ошибки записывается `error`).
 

@@ -1,9 +1,8 @@
-from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.types import InlineKeyboardMarkup
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from app.core.topics import (
     SEED_TOPIC_TITLES,
-    SEED_FORMAT_LABELS,
     SEED_CITY_LABELS,
     city_label,
     format_label,
@@ -105,39 +104,28 @@ def after_setup_keyboard() -> InlineKeyboardMarkup:
 def recommendation_keyboard(
     event_id: int,
     actions: set[str] | None = None,
+    mode: str = "rule",
 ) -> InlineKeyboardMarkup:
+    """Клавиатура карточки события.
+
+    Единая для обычных и AI-рекомендаций: like/dislike/save идут в один и тот
+    же эндпойнт, поэтому отличается только листание (`mode`: "rule" | "ai"),
+    которое прокинуто в callback_data, чтобы перерисовка после реакции знала,
+    какую кнопку «Следующее» рендерить.
+    """
     actions = actions or set()
 
     like_text = "✅ Интересно" if "like" in actions else "Интересно"
     dislike_text = "❌ Не интересно" if "dislike" in actions else "Не интересно"
     save_text = "⭐ Сохранено" if "save" in actions else "Сохранить"
+    next_text = "Следующее AI" if mode == "ai" else "Следующее"
 
     builder = InlineKeyboardBuilder()
-    builder.button(text=like_text, callback_data=f"like:{event_id}")
-    builder.button(text=dislike_text, callback_data=f"dislike:{event_id}")
-    builder.button(text=save_text, callback_data=f"save:{event_id}")
+    builder.button(text=like_text, callback_data=f"like:{mode}:{event_id}")
+    builder.button(text=dislike_text, callback_data=f"dislike:{mode}:{event_id}")
+    builder.button(text=save_text, callback_data=f"save:{mode}:{event_id}")
     builder.button(text="Похожие", callback_data=f"similar:{event_id}")
-    builder.button(text="Следующее", callback_data="next_recommendation")
-    builder.adjust(2, 2, 1)
-    return builder.as_markup()
-
-
-def ai_recommendation_keyboard(
-    event_id: int,
-    actions: set[str] | None = None,
-) -> InlineKeyboardMarkup:
-    actions = actions or set()
-
-    like_text = "✅ Интересно" if "like" in actions else "Интересно"
-    dislike_text = "❌ Не интересно" if "dislike" in actions else "Не интересно"
-    save_text = "⭐ Сохранено" if "save" in actions else "Сохранить"
-
-    builder = InlineKeyboardBuilder()
-    builder.button(text=like_text, callback_data=f"ai_like:{event_id}")
-    builder.button(text=dislike_text, callback_data=f"ai_dislike:{event_id}")
-    builder.button(text=save_text, callback_data=f"ai_save:{event_id}")
-    builder.button(text="Похожие", callback_data=f"similar:{event_id}")
-    builder.button(text="Следующее AI", callback_data="next_ai_recommendation")
+    builder.button(text=next_text, callback_data=f"next:{mode}")
     builder.adjust(2, 2, 1)
     return builder.as_markup()
 

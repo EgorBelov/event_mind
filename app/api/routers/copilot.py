@@ -97,7 +97,7 @@ def copilot(
             recs = get_recommendations_for_user(db, telegram_id)[:limit]
             return {
                 "success": True,
-                "answer": f"Подобрал события по твоему профилю (AI-помощник временно недоступен).",
+                "answer": "Подобрал события по твоему профилю (AI-помощник временно недоступен).",
                 "cards": recs,
             }
         except Exception:

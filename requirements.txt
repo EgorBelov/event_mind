@@ -36,6 +36,9 @@ lxml==5.2.2
 
 # --- RSS / Atom parsing ---
 feedparser==6.0.11
+# CA-бандл для TLS-проверки RSS-лент (иначе CERTIFICATE_VERIFY_FAILED на macOS).
+# Уже тянется транзитивно через httpx — фиксируем как прямую зависимость.
+certifi>=2024.2.2
 
 # --- Tests ---
 pytest==8.2.2

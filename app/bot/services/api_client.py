@@ -2,6 +2,11 @@ import httpx
 
 from app.core.config import API_HOST
 
+# Дефолтный таймаут httpx — 5 c, а /recommendations при пересчёте эмбеддингов
+# по всем событиям легко уходит за 15 c. Без явного таймаута бот ловил
+# ReadTimeout → except httpx.HTTPError → [] → «Пока нет рекомендаций».
+_TIMEOUT = httpx.Timeout(30.0)
+
 
 class EventMindAPIClient:
     def __init__(self, base_url: str = API_HOST):
@@ -11,7 +16,7 @@ class EventMindAPIClient:
         payload = {"telegram_id": telegram_id, "username": username,
                    "preferred_format": preferred_format, "city": city, "topics": topics}
         try:
-            async with httpx.AsyncClient() as c:
+            async with httpx.AsyncClient(timeout=_TIMEOUT) as c:
                 r = await c.post(f"{self.base_url}/users/register", json=payload)
                 r.raise_for_status()
                 return r.json()
@@ -20,7 +25,7 @@ class EventMindAPIClient:
 
     async def get_user(self, telegram_id: int) -> dict:
         try:
-            async with httpx.AsyncClient() as c:
+            async with httpx.AsyncClient(timeout=_TIMEOUT) as c:
                 r = await c.get(f"{self.base_url}/users/{telegram_id}")
                 if r.status_code == 404:
                     return {}
@@ -31,7 +36,7 @@ class EventMindAPIClient:
 
     async def get_recommendations(self, telegram_id: int) -> list[dict]:
         try:
-            async with httpx.AsyncClient() as c:
+            async with httpx.AsyncClient(timeout=_TIMEOUT) as c:
                 r = await c.get(f"{self.base_url}/recommendations/{telegram_id}")
                 if r.status_code == 404:
                     return []
@@ -43,7 +48,7 @@ class EventMindAPIClient:
     async def save_interaction(self, telegram_id: int, event_id: int, action: str) -> dict:
         payload = {"telegram_id": telegram_id, "event_id": event_id, "action": action}
         try:
-            async with httpx.AsyncClient() as c:
+            async with httpx.AsyncClient(timeout=_TIMEOUT) as c:
                 r = await c.post(f"{self.base_url}/recommendations/interactions", json=payload)
                 r.raise_for_status()
                 return r.json()
@@ -52,7 +57,7 @@ class EventMindAPIClient:
 
     async def get_event_interactions(self, telegram_id: int, event_id: int) -> dict:
         try:
-            async with httpx.AsyncClient() as c:
+            async with httpx.AsyncClient(timeout=_TIMEOUT) as c:
                 r = await c.get(
                     f"{self.base_url}/recommendations/{telegram_id}/event/{event_id}/interactions"
                 )
@@ -65,7 +70,7 @@ class EventMindAPIClient:
 
     async def get_saved_events(self, telegram_id: int) -> list[dict]:
         try:
-            async with httpx.AsyncClient() as c:
+            async with httpx.AsyncClient(timeout=_TIMEOUT) as c:
                 r = await c.get(f"{self.base_url}/recommendations/{telegram_id}/saved")
                 if r.status_code == 404:
                     return []
@@ -74,18 +79,9 @@ class EventMindAPIClient:
         except httpx.HTTPError:
             return []
 
-    async def get_agent_recommendations(self, telegram_id: int) -> dict:
-        try:
-            async with httpx.AsyncClient(timeout=60.0) as c:
-                r = await c.get(f"{self.base_url}/agent-recommendations/{telegram_id}")
-                r.raise_for_status()
-                return r.json()
-        except httpx.HTTPError:
-            return {"success": False, "message": "Сервис временно недоступен."}
-
     async def subscribe(self, telegram_id: int) -> dict:
         try:
-            async with httpx.AsyncClient() as c:
+            async with httpx.AsyncClient(timeout=_TIMEOUT) as c:
                 r = await c.post(f"{self.base_url}/subscriptions/{telegram_id}/subscribe")
                 r.raise_for_status()
                 return r.json()
@@ -94,7 +90,7 @@ class EventMindAPIClient:
 
     async def unsubscribe(self, telegram_id: int) -> dict:
         try:
-            async with httpx.AsyncClient() as c:
+            async with httpx.AsyncClient(timeout=_TIMEOUT) as c:
                 r = await c.post(f"{self.base_url}/subscriptions/{telegram_id}/unsubscribe")
                 r.raise_for_status()
                 return r.json()
@@ -112,7 +108,7 @@ class EventMindAPIClient:
 
     async def get_user_stats(self, telegram_id: int) -> dict:
         try:
-            async with httpx.AsyncClient() as c:
+            async with httpx.AsyncClient(timeout=_TIMEOUT) as c:
                 r = await c.get(f"{self.base_url}/users/{telegram_id}/stats")
                 if r.status_code == 404:
                     return {"success": False}
@@ -145,7 +141,7 @@ class EventMindAPIClient:
         if city:
             params["city"] = city
         try:
-            async with httpx.AsyncClient() as c:
+            async with httpx.AsyncClient(timeout=_TIMEOUT) as c:
                 r = await c.get(f"{self.base_url}/events/search", params=params)
                 if r.status_code == 404:
                     return []
@@ -156,7 +152,7 @@ class EventMindAPIClient:
 
     async def get_similar_events(self, event_id: int, limit: int = 3) -> list[dict]:
         try:
-            async with httpx.AsyncClient() as c:
+            async with httpx.AsyncClient(timeout=_TIMEOUT) as c:
                 r = await c.get(
                     f"{self.base_url}/events/{event_id}/similar", params={"limit": limit}
                 )
@@ -183,7 +179,7 @@ class EventMindAPIClient:
 
     async def get_trending(self, days: int = 7) -> dict:
         try:
-            async with httpx.AsyncClient() as c:
+            async with httpx.AsyncClient(timeout=_TIMEOUT) as c:
                 r = await c.get(f"{self.base_url}/analytics/trending", params={"days": days})
                 r.raise_for_status()
                 return r.json()
@@ -205,7 +201,7 @@ class EventMindAPIClient:
     async def get_vocabulary(self, kind: str) -> list[dict]:
         """Получить динамический словарь: topics / cities / formats / levels."""
         try:
-            async with httpx.AsyncClient() as c:
+            async with httpx.AsyncClient(timeout=_TIMEOUT) as c:
                 r = await c.get(f"{self.base_url}/vocabulary/{kind}")
                 r.raise_for_status()
                 return r.json()

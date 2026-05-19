@@ -11,11 +11,13 @@ AI-рекомендации через Telegram. Параллельно с эт�
 
 import asyncio
 import os
+from datetime import datetime, timedelta
 
 import httpx
 from dotenv import load_dotenv
 
 from app.core.config import API_HOST, settings
+from app.bot.utils import esc, to_plain
 
 
 load_dotenv()
@@ -25,13 +27,13 @@ BOT_TOKEN = os.getenv("BOT_TOKEN")
 def format_card(card: dict) -> str:
     topics = ", ".join(card.get("topics", []))
     return (
-        f"🤖 *AI-дайджест*\n\n"
-        f"*{card['title']}*\n\n"
-        f"Тема: {topics}\n"
-        f"Формат: {card['format']}\n"
-        f"Город: {card['city']}\n"
-        f"Дата: {card['date']}\n\n"
-        f"{card.get('explanation', '')}"
+        f"🤖 <b>AI-дайджест</b>\n\n"
+        f"<b>{esc(card['title'])}</b>\n\n"
+        f"Тема: {esc(topics)}\n"
+        f"Формат: {esc(card['format'])}\n"
+        f"Город: {esc(card['city'])}\n"
+        f"Дата: {esc(card['date'])}\n\n"
+        f"{esc(card.get('explanation', ''))}"
     )
 
 
@@ -69,15 +71,23 @@ async def send_digest_once() -> None:
             if not BOT_TOKEN:
                 print("[digest] BOT_TOKEN not set, skipping send")
                 continue
+            url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
             async with httpx.AsyncClient(timeout=20.0) as tg:
-                await tg.post(
-                    f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage",
+                r = await tg.post(
+                    url,
                     json={
                         "chat_id": telegram_id,
                         "text": text,
-                        "parse_mode": "Markdown",
+                        "parse_mode": "HTML",
                     },
                 )
+                # При сбое парсинга HTML — повтор без разметки,
+                # чтобы дайджест не потерялся (как в bot.utils.send).
+                if r.status_code != 200:
+                    await tg.post(
+                        url,
+                        json={"chat_id": telegram_id, "text": to_plain(text)},
+                    )
         except Exception as e:
             print(f"[digest] Error for user {telegram_id}: {e}")
 
@@ -123,8 +133,18 @@ async def ingest_rss_once() -> None:
         print(f"[ingest:rss] error: {e}")
 
 
-def run_scheduler() -> None:
-    """Запустить блокирующий scheduler: дайджест + (опционально) ingestion."""
+def build_scheduler():
+    """Собрать (но не запускать) BlockingScheduler с дайджестом и ingestion.
+
+    Дайджест шлётся раз в 24 ч и НЕ запускается на старте (иначе при каждом
+    рестарте процесса подписчики получали бы повторную рассылку).
+
+    `ingest_habr` / `ingest_rss` при `INGEST_ENABLED=true` запускаются сразу
+    при старте процесса (`next_run_time`), а затем повторяются каждые
+    `INGEST_INTERVAL_HOURS` часов — лента наполняется немедленно, а не через
+    N часов после рестарта. RSS сдвинут на 30 c, чтобы не стартовать
+    одновременно с habr.
+    """
     from apscheduler.schedulers.blocking import BlockingScheduler
 
     scheduler = BlockingScheduler()
@@ -134,31 +154,40 @@ def run_scheduler() -> None:
         hours=24,
         id="daily_digest",
     )
-    print("[scheduler] daily_digest: every 24h")
+    print("[scheduler] daily_digest: every 24h (no run on startup)")
 
     if settings.ingest_enabled:
         interval = max(1, settings.ingest_interval_hours)
+        now = datetime.now()
         scheduler.add_job(
             lambda: asyncio.run(ingest_habr_once()),
             "interval",
             hours=interval,
             id="ingest_habr",
+            next_run_time=now,
         )
         scheduler.add_job(
             lambda: asyncio.run(ingest_rss_once()),
             "interval",
             hours=interval,
             id="ingest_rss",
-            # сдвиг в полчаса, чтобы не стартовать одновременно с habr
+            next_run_time=now + timedelta(seconds=30),
+            # джиттер на последующих тиках, чтобы не совпадать с habr
             jitter=1800,
         )
         print(
-            f"[scheduler] ingest_habr + ingest_rss: every {interval}h "
-            f"(rss feeds configured: {len(settings.rss_feeds_list)})"
+            f"[scheduler] ingest_habr + ingest_rss: run on startup, then every "
+            f"{interval}h (rss feeds configured: {len(settings.rss_feeds_list)})"
         )
     else:
         print("[scheduler] INGEST_ENABLED=false — periodic ingestion disabled")
 
+    return scheduler
+
+
+def run_scheduler() -> None:
+    """Запустить блокирующий scheduler: дайджест + (опционально) ingestion."""
+    scheduler = build_scheduler()
     print("[scheduler] starting...")
     scheduler.start()
 

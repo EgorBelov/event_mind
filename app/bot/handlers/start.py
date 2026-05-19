@@ -16,6 +16,7 @@ from app.bot.keyboards.inline import (
 )
 from app.bot.services.api_client import EventMindAPIClient
 from app.bot.keyboards.reply import setup_keyboard, main_menu_keyboard
+from app.bot.utils import send
 
 router = Router()
 api_client = EventMindAPIClient()
@@ -41,15 +42,15 @@ def get_state(user_id: int) -> SetupState:
 async def cmd_start(message: Message):
     user_setup_state[message.from_user.id] = SetupState()
 
-    await message.answer(
-        "Привет! Я *EventMind* — бот для подбора IT-событий по твоим интересам.\n\n"
+    await send(
+        message,
+        "Привет! Я <b>EventMind</b> — бот для подбора IT-событий по твоим интересам.\n\n"
         "Я могу:\n"
         "- подобрать мероприятия по темам и формату;\n"
         "- показать наиболее подходящие события;\n"
         "- учитывать твои предпочтения для персональных рекомендаций.\n\n"
         "Давай быстро настроим профиль.",
         reply_markup=setup_keyboard(),
-        parse_mode="Markdown",
     )
 
     await message.answer(

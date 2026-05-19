@@ -7,7 +7,7 @@ from app.db.models.event import Event
 from app.db.models.user import User
 from app.db.models.interaction import Interaction
 from app.recommender.scoring import score_event_for_user, _get_event_topic_codes
-from app.recommender.explain import explain_event_for_user, explain_event_detailed
+from app.recommender.explain import explain_event_detailed
 from app.recommender.user_model import (
     parse_topic_weights,
     dump_topic_weights,
@@ -39,6 +39,18 @@ def get_recommendations_for_user(db: Session, telegram_id: int) -> list[dict]:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
 
     events = db.query(Event).all()
+
+    # Один раз на запрос: закэшировать вектор пользователя (user.embedding)
+    # и досчитать батчем недостающие векторы событий с записью в БД.
+    # Иначе hybrid_score/explain пересчитывали эмбеддинги для КАЖДОГО из
+    # десятков событий — это и давало ~16 c на список.
+    refresh_user_embedding(db, user)
+    try:
+        from app.recommender.embeddings import ensure_event_embeddings
+        ensure_event_embeddings(db, events)
+    except Exception:
+        pass
+
     results = []
 
     for event in events:

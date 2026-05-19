@@ -9,11 +9,9 @@ from app.db.models.user import User
 from app.db.models.event import Event
 from app.db.models.interaction import Interaction
 from app.db.models.topic import Topic, UserTopic, EventTopic
-from app.db.models.raw_event import RawEvent
 from app.recommender.explain import explain_event_for_user, explain_event_detailed
 from app.recommender.user_model import dump_topic_weights, build_initial_topic_weights
 from app.api.services.search_service import search_events, semantic_search_events
-from app.api.routers.analytics import analytics_trending
 
 
 @pytest.fixture
@@ -190,10 +188,8 @@ def test_trending_returns_structure(db):
 
     # Call the service directly (skip FastAPI dependency injection)
     from collections import Counter
-    from datetime import datetime, timedelta
     from app.recommender.scoring import _get_event_topic_codes
 
-    cutoff = datetime.utcnow() - timedelta(days=7)
     interactions = db.query(Interaction).all()
     event_score: dict = {}
     topic_counter: Counter = Counter()

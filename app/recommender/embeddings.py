@@ -30,13 +30,6 @@ def cosine_similarity(a: list[float], b: list[float]) -> float:
     return float(np.dot(a_arr, b_arr) / denom)
 
 
-def build_user_embedding(user_topics: list[str], topic_weights: dict) -> list[float]:
-    """Базовый embedding пользователя из описаний тем + весов."""
-    parts = [f"{t}: {topic_weights.get(t, 1)}" for t in user_topics]
-    text = " ".join(parts) if parts else "general technology events"
-    return embed_text(text)
-
-
 def build_rich_user_embedding(user, interactions: list | None = None) -> list[float]:
     """Расширенный embedding: веса тем + город/формат + история взаимодействий.
 
@@ -97,3 +90,27 @@ def get_or_build_event_embedding(event) -> list[float]:
         except Exception:
             pass
     return build_event_embedding(event)
+
+
+def ensure_event_embeddings(db, events) -> int:
+    """Досчитать и СОХРАНИТЬ embedding для событий, у которых его нет.
+
+    Узкое место /recommendations — пересчёт векторов всех событий на каждый
+    запрос. Здесь недостающие кодируются одним батчем (а не N вызовами) и
+    пишутся в `events.embedding`, после чего запросы попадают в кэш и
+    кодирование не повторяется. Возвращает число досчитанных событий.
+    """
+    missing = [e for e in events if not getattr(e, "embedding", None)]
+    if not missing:
+        return 0
+    try:
+        model = get_model()
+        texts = [f"{e.title} {e.description}" for e in missing]
+        vectors = model.encode(texts)  # один батч вместо N отдельных encode
+        for e, vec in zip(missing, vectors):
+            e.embedding = json.dumps(vec.tolist())
+        db.commit()
+        return len(missing)
+    except Exception:
+        db.rollback()
+        return 0

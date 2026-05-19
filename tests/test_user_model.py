@@ -1,12 +1,8 @@
 """Tests for app/recommender/user_model.py"""
-import json
-import pytest
-
 from app.recommender.user_model import (
     build_initial_topic_weights,
     apply_feedback_to_weights,
     parse_topics,
-    dump_topic_weights,
 )
 
 
