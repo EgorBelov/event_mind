@@ -118,21 +118,54 @@ def load_rss_events(
 def load_habr_events(db: Session, limit: int = 20) -> dict:
     """Скачать события с Habr, сложить в raw_events, нормализовать AI-агентом и записать в events."""
     from app.ingestion.sources.habr import fetch_habr_events
-
     items = fetch_habr_events(limit=limit)
+    return _load_and_normalize(db, items, source="habr")
+
+
+def load_kudago_events(db: Session, limit: int = 20) -> dict:
+    """Скачать события из KudaGo (открытый JSON API) и нормализовать."""
+    from app.ingestion.sources.kudago import fetch_kudago_events
+    items = fetch_kudago_events(limit=limit)
+    return _load_and_normalize(db, items, source="kudago")
+
+
+def load_luma_events(db: Session, limit_per_calendar: int = 20) -> dict:
+    """Скачать события с Lu.ma (ICS-фиды из settings.luma_calendars)."""
+    from app.ingestion.sources.luma import fetch_luma_events
+    items = fetch_luma_events(limit_per_calendar=limit_per_calendar)
+    return _load_and_normalize(db, items, source="luma")
+
+
+def load_meetup_events(db: Session, limit_per_group: int = 20) -> dict:
+    """Скачать события с Meetup (требуется MEETUP_TOKEN/MEETUP_GROUPS)."""
+    from app.ingestion.sources.meetup import fetch_meetup_events
+    items = fetch_meetup_events(limit_per_group=limit_per_group)
+    return _load_and_normalize(db, items, source="meetup")
+
+
+def load_telegram_events(db: Session, limit_per_channel: int = 20) -> dict:
+    """Скачать события из Telegram-каналов (требуется telethon + креды)."""
+    from app.ingestion.sources.tg_channels import fetch_telegram_events
+    items = fetch_telegram_events(limit_per_channel=limit_per_channel)
+    return _load_and_normalize(db, items, source="telegram")
+
+
+def _load_and_normalize(db: Session, items: list[dict], source: str) -> dict:
+    """Универсальная обёртка: items → raw_events → normalize → events."""
     loaded = 0
     skipped = 0
     pending_ids: list[int] = []
 
     for item in items:
-        title = item.get("title", "")
+        title = (item.get("title") or "").strip()
+        if not title:
+            continue
         existing = db.query(RawEvent).filter(RawEvent.title == title).first()
         if existing:
             skipped += 1
             if existing.status == "raw":
                 pending_ids.append(existing.id)
             continue
-
         raw_event = RawEvent(
             title=title,
             raw_description=item.get("raw_description", ""),
@@ -145,11 +178,9 @@ def load_habr_events(db: Session, limit: int = 20) -> dict:
         loaded += 1
 
     db.commit()
-
     normalized, non_it, failed = _normalize_by_ids(db, pending_ids)
-
     return {
-        "source": "habr",
+        "source": source,
         "fetched": loaded + skipped,
         "new": loaded,
         "skipped": skipped,
@@ -181,6 +212,17 @@ def _normalize_single(db: Session, raw: RawEvent) -> str:
             return "non_it"
 
         existing = db.query(Event).filter(Event.title == item["title"]).first()
+
+        # Семантическая дедупликация: если по title не нашли, проверим
+        # по эмбеддингу. Это ловит парафразы и кросс-источниковые дубли.
+        if not existing:
+            try:
+                from app.recommender.dedup import find_semantic_duplicate
+                candidate_text = f"{item['title']} {item['description']}"
+                existing = find_semantic_duplicate(db, candidate_text)
+            except Exception:
+                existing = None
+
         if not existing:
             import json as _json
             tech_stack = item.get("tech_stack", [])

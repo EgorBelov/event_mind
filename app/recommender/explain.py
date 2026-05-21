@@ -9,7 +9,13 @@ def explain_event_for_user(user, event, db=None) -> str:
     return result["text"]
 
 
-def explain_event_detailed(user, event, db=None) -> dict:
+def explain_event_detailed(
+    user,
+    event,
+    db=None,
+    *,
+    precomputed_breakdown: dict[str, float] | None = None,
+) -> dict:
     """Вернуть структурированное объяснение: текст + детали.
 
     Ключи:
@@ -79,6 +85,55 @@ def explain_event_detailed(user, event, db=None) -> dict:
             reasons.extend(history)
         except Exception:
             pass
+
+    # Bayesian-сигнал: если у пользователя накопилась статистика по теме
+    # и posterior mean > prior (0.5) — добавляем как признак.
+    if db is not None and getattr(user, "id", None) is not None:
+        try:
+            from app.recommender.bayesian import load_user_stats, posterior_mean, PRIOR_ALPHA, PRIOR_BETA
+            stats = load_user_stats(db, user.id)
+            if stats:
+                pm = posterior_mean(stats, event_topics)
+                details["bayesian_posterior"] = round(pm, 3)
+                if pm > PRIOR_ALPHA / (PRIOR_ALPHA + PRIOR_BETA) + 0.1:
+                    reasons.append(f"подтверждено историей feedback'а (p≈{pm:.2f})")
+        except Exception:
+            pass
+
+    # Counterfactual: какой компонент сильнее всего повлиял?
+    # Считаем breakdown и сравниваем с «если бы этого компонента не было».
+    try:
+        if precomputed_breakdown is not None:
+            breakdown = precomputed_breakdown
+        else:
+            from app.recommender.hybrid import compute_score_breakdown
+            breakdown = compute_score_breakdown(user, event, db=db)
+        total = sum(breakdown.values())
+        details["score_breakdown"] = {k: round(v, 3) for k, v in breakdown.items()}
+        if total > 0:
+            ranked = sorted(breakdown.items(), key=lambda kv: kv[1], reverse=True)
+            top_component, top_value = ranked[0]
+            second_value = ranked[1][1] if len(ranked) > 1 else 0.0
+            # Если ведущий компонент даёт >50% разрыва — counterfactual
+            if top_value > 0 and (top_value - second_value) / max(total, 1e-9) > 0.3:
+                labels = {
+                    "rule": "правил профиля",
+                    "cosine": "семантической близости",
+                    "bayesian": "истории feedback'а",
+                    "quality": "высокого quality_score",
+                    "hype": "актуальности темы",
+                    "freshness": "близости даты",
+                    "skill_gap": "соответствия твоим карьерным целям",
+                    "bandit": "exploration-сигнала bandit'а",
+                    "gnn": "collaborative-сигнала",
+                }
+                details["counterfactual"] = (
+                    f"Без {labels.get(top_component, top_component)} это событие потеряло бы "
+                    f"~{top_value / total * 100:.0f}% веса и опустилось бы ниже в списке."
+                )
+                reasons.append(details["counterfactual"])
+    except Exception:
+        pass
 
     text = "Почему рекомендовано: " + "; ".join(reasons) if reasons else "Подобрано по базовому совпадению профиля."
     details["text"] = text

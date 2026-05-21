@@ -10,6 +10,9 @@ from app.scheduler import digest
 def enable_ingest(monkeypatch):
     monkeypatch.setattr(digest.settings, "ingest_enabled", True)
     monkeypatch.setattr(digest.settings, "ingest_interval_hours", 6)
+    # TG-источник может быть в .env — гасим его для базовых тестов,
+    # отдельный тест ниже проверяет добавление job'а.
+    monkeypatch.setattr(digest.settings, "tg_ingest_channels", "")
 
 
 def _jobs(scheduler) -> dict:
@@ -19,7 +22,7 @@ def _jobs(scheduler) -> dict:
 def test_ingest_jobs_present_when_enabled(enable_ingest):
     jobs = _jobs(digest.build_scheduler())
 
-    assert set(jobs) == {"daily_digest", "ingest_habr", "ingest_rss"}
+    assert set(jobs) == {"daily_digest", "ingest_habr", "ingest_rss", "compact_memories"}
 
 
 def test_ingest_jobs_run_on_startup(enable_ingest):
@@ -51,4 +54,21 @@ def test_ingestion_disabled_leaves_only_digest(monkeypatch):
 
     jobs = _jobs(digest.build_scheduler())
 
-    assert set(jobs) == {"daily_digest"}
+    # compact_memories независим от INGEST_ENABLED — он про memory-агент.
+    assert set(jobs) == {"daily_digest", "compact_memories"}
+
+
+def test_compact_memories_job_does_not_run_on_startup(enable_ingest):
+    jobs = _jobs(digest.build_scheduler())
+    assert getattr(jobs["compact_memories"], "next_run_time", None) is None
+
+
+def test_telegram_ingest_job_appears_when_channels_set(monkeypatch):
+    monkeypatch.setattr(digest.settings, "ingest_enabled", True)
+    monkeypatch.setattr(digest.settings, "ingest_interval_hours", 6)
+    monkeypatch.setattr(digest.settings, "tg_ingest_channels", "iteventsru,ITMeeting")
+
+    jobs = _jobs(digest.build_scheduler())
+    assert "ingest_telegram" in jobs
+    assert jobs["ingest_telegram"].next_run_time is not None
+

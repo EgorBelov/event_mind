@@ -91,6 +91,10 @@ htmlcov/
 
 *.sqlite3
 *.db
+# SQLite WAL/shm-файлы (создаются при journal_mode=WAL)
+*.db-wal
+*.db-shm
+*.db-journal
 
 
 # ======================

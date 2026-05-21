@@ -133,6 +133,56 @@ async def ingest_rss_once() -> None:
         print(f"[ingest:rss] error: {e}")
 
 
+def compact_memories_once() -> None:
+    """Прогнать compaction по всем пользователям с разросшейся памятью.
+
+    Sync (не async): дёргает БД напрямую через общий SessionLocal —
+    важно, чтобы применились WAL/busy_timeout PRAGMA из app.db.session.
+    """
+    try:
+        from app.db.session import SessionLocal
+        from app.db.models.user import User
+        from app.recommender.memory import compact_user_memories
+
+        db = SessionLocal()
+        try:
+            total_removed = total_added = 0
+            for user in db.query(User).all():
+                r = compact_user_memories(db, user.id)
+                if r["status"] == "ok":
+                    total_removed += r["removed"]
+                    total_added += r["added"]
+            db.commit()
+            print(f"[compact:memory] removed={total_removed} added={total_added}")
+        finally:
+            db.close()
+    except Exception as e:
+        print(f"[compact:memory] error: {e}")
+
+
+async def ingest_telegram_once() -> None:
+    """Дёрнуть API `/ingestion/load-telegram` для пополнения из TG-каналов."""
+    channels = (getattr(settings, "tg_ingest_channels", "") or "").strip()
+    if not channels:
+        print("[ingest:tg] TG_INGEST_CHANNELS пуст, пропускаю")
+        return
+    limit = settings.ingest_rss_limit_per_feed  # переиспользуем тот же лимит
+    try:
+        async with httpx.AsyncClient(base_url=API_HOST, timeout=180.0) as client:
+            r = await client.post(f"/ingestion/load-telegram?limit_per_channel={limit}")
+            if r.status_code != 200:
+                print(f"[ingest:tg] non-200: {r.status_code}")
+                return
+            data = r.json()
+        print(
+            f"[ingest:tg] new={data.get('new', 0)} "
+            f"normalized={data.get('normalized', 0)} "
+            f"non_it={data.get('non_it', 0)} failed={data.get('failed', 0)}"
+        )
+    except Exception as e:
+        print(f"[ingest:tg] error: {e}")
+
+
 def build_scheduler():
     """Собрать (но не запускать) BlockingScheduler с дайджестом и ingestion.
 
@@ -175,12 +225,34 @@ def build_scheduler():
             # джиттер на последующих тиках, чтобы не совпадать с habr
             jitter=1800,
         )
+        tg_channels = (getattr(settings, "tg_ingest_channels", "") or "").strip()
+        if tg_channels:
+            scheduler.add_job(
+                lambda: asyncio.run(ingest_telegram_once()),
+                "interval",
+                hours=interval,
+                id="ingest_telegram",
+                next_run_time=now + timedelta(seconds=60),
+                jitter=1800,
+            )
         print(
-            f"[scheduler] ingest_habr + ingest_rss: run on startup, then every "
-            f"{interval}h (rss feeds configured: {len(settings.rss_feeds_list)})"
+            f"[scheduler] ingest_habr + ingest_rss"
+            f"{' + ingest_telegram' if tg_channels else ''}: "
+            f"run on startup, then every {interval}h "
+            f"(rss feeds: {len(settings.rss_feeds_list)}, "
+            f"tg channels: {len([c for c in tg_channels.split(',') if c.strip()])})"
         )
     else:
         print("[scheduler] INGEST_ENABLED=false — periodic ingestion disabled")
+
+    # Memory compaction — раз в неделю; не на старте, чтобы не блокировать boot.
+    scheduler.add_job(
+        compact_memories_once,
+        "interval",
+        hours=24 * 7,
+        id="compact_memories",
+    )
+    print("[scheduler] compact_memories: every 7d (no run on startup)")
 
     return scheduler
 

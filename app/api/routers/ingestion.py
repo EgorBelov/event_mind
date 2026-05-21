@@ -6,6 +6,10 @@ from app.api.services.ingestion_service import (
     load_raw_events,
     load_habr_events,
     load_rss_events,
+    load_kudago_events,
+    load_luma_events,
+    load_meetup_events,
+    load_telegram_events,
     normalize_raw_events,
     get_ingestion_status,
 )
@@ -30,6 +34,30 @@ def load_habr(limit: int = 20, db: Session = Depends(get_db)):
 def load_rss(limit_per_feed: int = 20, db: Session = Depends(get_db)):
     """Скачать события из всех настроенных RSS-лент (settings.RSS_FEEDS) и нормализовать."""
     return load_rss_events(db, limit_per_feed=limit_per_feed)
+
+
+@router.post("/load-kudago")
+def load_kudago(limit: int = 20, db: Session = Depends(get_db)):
+    """Скачать события из KudaGo (открытый JSON API)."""
+    return load_kudago_events(db, limit=limit)
+
+
+@router.post("/load-luma")
+def load_luma(limit_per_calendar: int = 20, db: Session = Depends(get_db)):
+    """Скачать события с Lu.ma по ICS-фидам из LUMA_CALENDARS."""
+    return load_luma_events(db, limit_per_calendar=limit_per_calendar)
+
+
+@router.post("/load-meetup")
+def load_meetup(limit_per_group: int = 20, db: Session = Depends(get_db)):
+    """Скачать события с Meetup (требуется MEETUP_TOKEN + MEETUP_GROUPS)."""
+    return load_meetup_events(db, limit_per_group=limit_per_group)
+
+
+@router.post("/load-telegram")
+def load_tg(limit_per_channel: int = 20, db: Session = Depends(get_db)):
+    """Скачать события из Telegram-каналов (требуется telethon + TG_*)."""
+    return load_telegram_events(db, limit_per_channel=limit_per_channel)
 
 
 @router.post("/normalize")

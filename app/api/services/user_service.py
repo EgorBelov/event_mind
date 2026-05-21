@@ -113,10 +113,63 @@ def get_user_stats(db: Session, telegram_id: int) -> dict:
 
 
 def analyze_bio_and_update_topics(db: Session, telegram_id: int, bio_text: str) -> dict:
+    """LLM-bootstrap профиля по bio: темы + cold-start Bayesian + skill profile."""
     user = db.query(User).filter(User.telegram_id == telegram_id).first()
     if not user:
         return {"success": False, "message": "User not found"}
 
+    # 1) Полный bio-профиль через структурированный LLM.
+    cold_start_applied = {}
+    try:
+        from app.recommender.cold_start import extract_bio_profile, apply_cold_start
+        profile = extract_bio_profile(bio_text)
+    except Exception:
+        profile = None
+
+    if profile and profile.topics:
+        # Нормализуем все темы через _get_or_create_topic, чтобы новые slug'и
+        # появились в `topics` до Bayesian-апдейтов.
+        for code in profile.topics:
+            _get_or_create_topic(db, code)
+        db.flush()
+        _replace_user_topics(db, user, profile.topics)
+        cold_start_applied = apply_cold_start(db, user, profile)
+
+        # Skill-профиль (отдельная таблица, см. v2.5)
+        try:
+            from app.recommender.skill_gap import upsert_skill_profile
+            upsert_skill_profile(db, user.id, profile)
+        except Exception:
+            pass
+
+        # Long-term memory: цели из bio — высокая salience.
+        try:
+            from app.recommender.memory import write_memory
+            for goal in (profile.goals or [])[:3]:
+                write_memory(
+                    db, user.id, goal,
+                    category="goal", salience=8.0, source="bio_extract",
+                )
+            if profile.priority_topics:
+                write_memory(
+                    db, user.id,
+                    f"Приоритетные интересы: {', '.join(profile.priority_topics)}",
+                    category="interest", salience=7.0, source="bio_extract",
+                )
+        except Exception:
+            pass
+
+        db.commit()
+        db.refresh(user)
+        return {
+            "success": True,
+            "extracted_topics": profile.topics,
+            "priority_topics": profile.priority_topics,
+            "cold_start": cold_start_applied,
+            "message": "Профиль обновлён (LLM cold-start).",
+        }
+
+    # 2) Fallback: старый keyword-эвристический путь.
     extracted = _extract_topics_from_bio(bio_text, db=db)
     if not extracted:
         return {"success": False, "message": "Не удалось извлечь темы из текста.", "extracted_topics": []}
@@ -130,7 +183,7 @@ def analyze_bio_and_update_topics(db: Session, telegram_id: int, bio_text: str) 
     _replace_user_topics(db, user, extracted)
     db.commit()
     db.refresh(user)
-    return {"success": True, "extracted_topics": extracted, "message": "Темы обновлены на основе bio."}
+    return {"success": True, "extracted_topics": extracted, "message": "Темы обновлены (keyword-fallback)."}
 
 
 def _extract_topics_from_bio(bio_text: str, db: Session | None = None) -> list[str]:

@@ -1,98 +1,118 @@
-"""AI Event Copilot — однонодовый LangGraph-агент.
+"""AI Event Copilot — Supervisor-Worker multi-agent граф.
 
-На вход — цель пользователя + его профиль + список событий. Copilot:
-1. Анализирует цель в контексте профиля.
-2. Выбирает наиболее релевантные события.
-3. Возвращает дружелюбный roadmap/план с рекомендациями.
+Pipeline:
+  retrieve → supervisor → conditional edge to one of specialists:
+    ├── recommendation_specialist  (intent=recommend)
+    ├── career_coach               (intent=career)
+    ├── roadmap_planner            (intent=roadmap)
+    ├── event_explainer            (intent=explain)
+    └── summary_specialist         (intent=summary)
+  → finalize → END
+
+Каждый специалист — отдельная нода со своим system-prompt'ом и подмножеством
+function-calling tools. Supervisor классифицирует входящий запрос в один из
+intent'ов через структурированный LLM-вызов (pydantic-валидация + keyword
+fallback при сбое).
+
+Backward compatibility: интерфейс copilot_graph.invoke({...}) сохранён.
 """
-import json
-import re
+from __future__ import annotations
 
-from langchain_core.prompts import ChatPromptTemplate
 from langgraph.graph import StateGraph, START, END
 
-from app.agents.recommendation.llm import llm
 from app.agents.copilot.state import CopilotState
+from app.agents.copilot.supervisor import supervisor_node, route_after_supervisor
+from app.agents.copilot.specialists import (
+    recommendation_specialist_node,
+    career_coach_node,
+    roadmap_planner_node,
+    event_explainer_node,
+    summary_specialist_node,
+)
 
 
-_SYSTEM_PROMPT = """
-Ты AI Event Copilot — умный помощник по выбору IT-событий.
-
-Твоя задача:
-1. Понять цель пользователя.
-2. Учесть его профиль: темы, предпочтения, историю взаимодействий.
-3. Подобрать подходящие события из списка.
-4. Составить краткий план/roadmap: какие события посетить и в каком порядке.
-5. Объяснить, почему каждое событие поможет в достижении цели.
-
-Стиль: дружелюбный, конкретный, Telegram-friendly.
-Без лишней воды и академизма.
-
-В конце обязательно верни JSON с ID рекомендованных событий в формате:
-RECOMMENDED_IDS: [id1, id2, id3]
-"""
-
-_USER_PROMPT = """
-Цель пользователя: {goal}
-
-Профиль пользователя:
-{user_profile}
-
-История взаимодействий:
-{interaction_summary}
-
-Доступные события (используй только id из этого списка):
-{events}
-
-Составь план и порекомендуй события.
-В конце добавь строку: RECOMMENDED_IDS: [id1, id2, ...]
-"""
+# ─── Pre-supervisor retrieve (общий для всех специалистов) ───────────────
 
 
-def _parse_recommended_ids(text: str, valid_ids: set[int]) -> list[int]:
-    match = re.search(r"RECOMMENDED_IDS:\s*\[([^\]]*)\]", text)
-    if not match:
-        return []
-    try:
-        ids = [int(x.strip()) for x in match.group(1).split(",") if x.strip().isdigit()]
-        return [i for i in ids if i in valid_ids]
-    except Exception:
-        return []
+def retrieve_node(state: CopilotState) -> dict:
+    """Общая retrieve-нода. Все специалисты получают одинаковый retrieved-набор
+    и срез истории. Если специалист сам решит, что нужно ещё — он вызовет
+    `search_events` tool.
+    """
+    from app.recommender.retrieval import retrieve_events_for_query, build_interaction_context
+    from app.agents.copilot.common import build_user_profile_snapshot
+    from app.db.models.user import User
 
+    db = state["db"]
+    user = db.query(User).filter(User.telegram_id == state["telegram_id"]).first()
+    if not user:
+        return {
+            "events": [],
+            "interaction_context": {"summary": "профиль не найден", "liked": [], "saved": [], "disliked": []},
+            "user_profile": {},
+            "tool_calls_log": [],
+        }
 
-def copilot_node(state: CopilotState) -> dict:
-    prompt = ChatPromptTemplate.from_messages([
-        ("system", _SYSTEM_PROMPT),
-        ("user", _USER_PROMPT),
-    ])
-
-    result = llm.invoke(
-        prompt.format_messages(
-            goal=state["goal"],
-            user_profile=json.dumps(state["user_profile"], ensure_ascii=False),
-            interaction_summary=state.get("interaction_summary", "нет данных"),
-            events=json.dumps(state["events"], ensure_ascii=False),
-        )
-    )
-
-    valid_ids = {e["id"] for e in state["events"]}
-    recommended_ids = _parse_recommended_ids(result.content, valid_ids)
-
-    # Вырезаем строку RECOMMENDED_IDS из текста, который покажем пользователю
-    answer = re.sub(r"RECOMMENDED_IDS:.*", "", result.content).strip()
+    k = int(state.get("k") or 10)
+    retrieved = retrieve_events_for_query(db, user, state.get("goal", ""), k=k)
+    interaction_ctx = build_interaction_context(db, user)
+    profile = build_user_profile_snapshot(db, user)
 
     return {
-        "answer": answer,
-        "recommended_event_ids": recommended_ids,
+        "events": retrieved,
+        "interaction_context": interaction_ctx,
+        "user_profile": profile,
+        "tool_calls_log": [],
     }
 
 
+# ─── Finalize ────────────────────────────────────────────────────────────
+
+
+def finalize_node(state: CopilotState) -> dict:
+    """Финальная нода: проверяет, что answer и recommended_event_ids заполнены."""
+    return {
+        "answer": state.get("answer") or "",
+        "recommended_event_ids": state.get("recommended_event_ids") or [],
+        "specialist": state.get("specialist") or "unknown",
+    }
+
+
+# ─── Build graph ─────────────────────────────────────────────────────────
+
+
 def _build_copilot_graph():
-    graph = StateGraph(CopilotState)
-    graph.add_node("copilot", copilot_node)
-    graph.add_edge(START, "copilot")
-    graph.add_edge("copilot", END)
-    return graph.compile()
+    g = StateGraph(CopilotState)
+
+    g.add_node("retrieve", retrieve_node)
+    g.add_node("supervisor", supervisor_node)
+    g.add_node("recommendation_specialist", recommendation_specialist_node)
+    g.add_node("career_coach", career_coach_node)
+    g.add_node("roadmap_planner", roadmap_planner_node)
+    g.add_node("event_explainer", event_explainer_node)
+    g.add_node("summary_specialist", summary_specialist_node)
+    g.add_node("finalize", finalize_node)
+
+    g.add_edge(START, "retrieve")
+    g.add_edge("retrieve", "supervisor")
+    g.add_conditional_edges(
+        "supervisor",
+        route_after_supervisor,
+        {
+            "recommendation_specialist": "recommendation_specialist",
+            "career_coach": "career_coach",
+            "roadmap_planner": "roadmap_planner",
+            "event_explainer": "event_explainer",
+            "summary_specialist": "summary_specialist",
+        },
+    )
+    for specialist in (
+        "recommendation_specialist", "career_coach", "roadmap_planner",
+        "event_explainer", "summary_specialist",
+    ):
+        g.add_edge(specialist, "finalize")
+    g.add_edge("finalize", END)
+    return g.compile()
 
 
 copilot_graph = _build_copilot_graph()

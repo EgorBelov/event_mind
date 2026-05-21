@@ -30,6 +30,76 @@ def cosine_similarity(a: list[float], b: list[float]) -> float:
     return float(np.dot(a_arr, b_arr) / denom)
 
 
+def build_session_embedding(db, user, window: int = 5) -> list[float] | None:
+    """Эмбеддинг последних `window` взаимодействий пользователя.
+
+    Усреднение эмбеддингов событий с весами:
+        like  → +1.0
+        save  → +1.5
+        dislike → −0.7  (вычитается; «не хочу про X»)
+
+    Возвращает None при отсутствии истории или сбое.
+    """
+    from app.db.models.interaction import Interaction
+    from app.db.models.event import Event
+    import numpy as np
+
+    weights_per_action = {"like": 1.0, "save": 1.5, "dislike": -0.7}
+
+    try:
+        rows = (
+            db.query(Interaction)
+            .filter(Interaction.user_id == user.id)
+            .order_by(Interaction.id.desc())
+            .limit(window)
+            .all()
+        )
+        if not rows:
+            return None
+        event_ids = [r.event_id for r in rows]
+        events_map = {e.id: e for e in db.query(Event).filter(Event.id.in_(event_ids)).all()}
+
+        vecs = []
+        weights = []
+        for r in rows:
+            ev = events_map.get(r.event_id)
+            if ev is None or not ev.embedding:
+                continue
+            try:
+                vecs.append(np.array(json.loads(ev.embedding)))
+                weights.append(weights_per_action.get(r.action, 0.0))
+            except Exception:
+                continue
+        if not vecs:
+            return None
+        w = np.array(weights).reshape(-1, 1)
+        total = (np.array(vecs) * w).sum(axis=0)
+        norm = np.linalg.norm(total)
+        if norm < 1e-9:
+            return None
+        return (total / norm).tolist()
+    except Exception:
+        return None
+
+
+def blend_user_embedding(
+    long_term: list[float],
+    session: list[float] | None,
+    session_weight: float = 0.3,
+) -> list[float]:
+    """Линейная комбинация long-term и сессионного эмбеддинга, нормализованная."""
+    import numpy as np
+    if session is None:
+        return long_term
+    a = np.array(long_term)
+    b = np.array(session)
+    mixed = (1.0 - session_weight) * a + session_weight * b
+    norm = np.linalg.norm(mixed)
+    if norm < 1e-9:
+        return long_term
+    return (mixed / norm).tolist()
+
+
 def build_rich_user_embedding(user, interactions: list | None = None) -> list[float]:
     """Расширенный embedding: веса тем + город/формат + история взаимодействий.
 

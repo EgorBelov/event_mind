@@ -13,12 +13,15 @@ from app.recommender.user_model import (
     dump_topic_weights,
     apply_feedback_to_weights,
 )
+from app.recommender.bayesian import update_stats_from_feedback
 
 try:
     from app.recommender.hybrid import hybrid_score as _hybrid_score
+    from app.recommender.hybrid import compute_score_breakdown as _compute_breakdown
     _HAS_HYBRID = True
 except Exception:
     _HAS_HYBRID = False
+    _compute_breakdown = None  # type: ignore
 
 
 def refresh_user_embedding(db: Session, user: User) -> None:
@@ -51,15 +54,73 @@ def get_recommendations_for_user(db: Session, telegram_id: int) -> list[dict]:
     except Exception:
         pass
 
+    # Bayesian-параметры пользователя — грузим один раз на запрос.
+    bayesian_stats = None
+    try:
+        from app.recommender.bayesian import load_user_stats
+        bayesian_stats = load_user_stats(db, user.id)
+    except Exception:
+        bayesian_stats = None
+
+    # Skill-профиль, если есть — переиспользуется в breakdown.
+    try:
+        from app.recommender.skill_gap import load_skill_profile
+        skill_profile = load_skill_profile(db, user.id)
+    except Exception:
+        skill_profile = None
+
+    # Precompute user embedding с session-blend — ОДИН раз на запрос,
+    # а не на каждое из N событий (раньше build_session_embedding ходил
+    # в БД на каждое событие — это ловило timeout на холодном запуске).
+    precomputed_user_emb = None
+    try:
+        from app.recommender.embeddings import (
+            get_or_build_user_embedding,
+            build_session_embedding,
+            blend_user_embedding,
+        )
+        precomputed_user_emb = get_or_build_user_embedding(user)
+        session_emb = build_session_embedding(db, user, window=5)
+        if session_emb is not None:
+            precomputed_user_emb = blend_user_embedding(
+                precomputed_user_emb, session_emb, session_weight=0.3,
+            )
+    except Exception:
+        precomputed_user_emb = None
+
+    # LinUCB-state — один раз на запрос (вместо N SELECT'ов из user_bandit_states).
+    bandit_state = None
+    try:
+        from app.core.config import settings as _settings
+        if _settings.bandit_enabled:
+            from app.recommender.bandit import load_user_bandit
+            bandit_state = load_user_bandit(db, user.id)
+    except Exception:
+        bandit_state = None
+
     results = []
 
     for event in events:
         try:
-            score = float(_hybrid_score(user, event)) if _HAS_HYBRID else float(score_event_for_user(user, event))
+            if _HAS_HYBRID and _compute_breakdown is not None:
+                breakdown = _compute_breakdown(
+                    user, event, db=db, bayesian_stats=bayesian_stats,
+                    user_skill_profile=skill_profile,
+                    precomputed_user_emb=precomputed_user_emb,
+                    bandit_state=bandit_state,
+                )
+                score = float(sum(breakdown.values()))
+            else:
+                breakdown = {}
+                score = float(score_event_for_user(user, event))
         except Exception:
+            breakdown = {}
             score = float(score_event_for_user(user, event))
 
-        explanation = explain_event_detailed(user, event, db=db)
+        explanation = explain_event_detailed(
+            user, event, db=db,
+            precomputed_breakdown=breakdown or None,
+        )
 
         results.append({
             "event_id": event.id,
@@ -78,6 +139,7 @@ def get_recommendations_for_user(db: Session, telegram_id: int) -> list[dict]:
             "quality_score": getattr(event, "quality_score", None),
             "hype_score": getattr(event, "hype_score", None),
             "score": round(score, 2),
+            "score_breakdown": {k: round(v, 3) for k, v in breakdown.items()},
             "explanation": explanation["text"],
             "explanation_details": {
                 "topic_match": explanation["topic_match"],
@@ -89,6 +151,15 @@ def get_recommendations_for_user(db: Session, telegram_id: int) -> list[dict]:
         })
 
     results.sort(key=lambda x: x["score"], reverse=True)
+
+    # MMR-диверсификация (см. v1.2) — пост-процессинг top-N.
+    try:
+        if settings.mmr_enabled and len(results) > 1:
+            from app.recommender.diversity import mmr_rerank
+            results = mmr_rerank(results, db, lambda_=settings.mmr_lambda)
+    except Exception:
+        pass
+
     return results
 
 
@@ -130,6 +201,8 @@ def create_interaction(db: Session, telegram_id: int, event_id: int, action: str
             user.topic_weights = dump_topic_weights(
                 apply_feedback_to_weights(current_weights, event_topics, action, direction=-1)
             )
+            _safe_bayes_update(db, user.id, event_topics, action, direction=-1)
+            _safe_bandit_update(db, user, event, action, direction=-1)
             db.commit()
             return {"success": True, "message": f"Interaction '{action}' removed", "topic_weights": parse_topic_weights(user.topic_weights)}
 
@@ -141,6 +214,8 @@ def create_interaction(db: Session, telegram_id: int, event_id: int, action: str
         if existing_opposite:
             db.delete(existing_opposite)
             current_weights = apply_feedback_to_weights(current_weights, event_topics, opposite_action, direction=-1)
+            _safe_bayes_update(db, user.id, event_topics, opposite_action, direction=-1)
+            _safe_bandit_update(db, user, event, opposite_action, direction=-1)
 
     elif action == "save":
         existing_save = (
@@ -153,15 +228,64 @@ def create_interaction(db: Session, telegram_id: int, event_id: int, action: str
             user.topic_weights = dump_topic_weights(
                 apply_feedback_to_weights(current_weights, event_topics, "save", direction=-1)
             )
+            _safe_bayes_update(db, user.id, event_topics, "save", direction=-1)
+            _safe_bandit_update(db, user, event, "save", direction=-1)
             db.commit()
             return {"success": True, "message": "Interaction 'save' removed", "topic_weights": parse_topic_weights(user.topic_weights)}
 
     db.add(Interaction(user_id=user.id, event_id=event_id, action=action))
     updated_weights = apply_feedback_to_weights(current_weights, event_topics, action)
     user.topic_weights = dump_topic_weights(updated_weights)
+    _safe_bayes_update(db, user.id, event_topics, action, direction=1)
+    _safe_bandit_update(db, user, event, action, direction=1)
+    _safe_memory_extract(db, user, event, action, direction=1)
     db.commit()
 
     return {"success": True, "message": f"Interaction '{action}' saved", "topic_weights": updated_weights}
+
+
+def _safe_bayes_update(db, user_id: int, event_topics, action: str, direction: int = 1) -> None:
+    """Best-effort: не падать на feedback'е, если Bayesian-таблица недоступна."""
+    try:
+        update_stats_from_feedback(db, user_id, event_topics, action, direction=direction)
+    except Exception:
+        pass
+
+
+def _safe_bandit_update(db, user, event, action: str, direction: int = 1) -> None:
+    """Best-effort: обновить LinUCB-параметры по feedback."""
+    try:
+        from app.core.config import settings
+        if not settings.bandit_enabled:
+            return
+        from app.recommender.bandit import context_vector, update_from_feedback, reward_from_action
+        from app.recommender.hybrid import freshness_score, _parse_event_date
+        fresh = freshness_score(_parse_event_date(getattr(event, "date", None)))
+        x = context_vector(user, event, fresh)
+        reward = reward_from_action(action) * direction
+        if reward == 0.0:
+            return
+        update_from_feedback(db, user.id, x, reward)
+    except Exception:
+        pass
+
+
+def _safe_memory_extract(db, user, event, action: str, direction: int = 1) -> None:
+    """Best-effort: long-term memory extract из feedback'а.
+
+    Только для POSITIVE direction — на откат мы ничего не пишем (отдельная
+    логика «забыть» не нужна; compaction позже выкинет устаревшее).
+    """
+    if direction != 1:
+        return
+    try:
+        from app.core.config import settings
+        if not getattr(settings, "memory_enabled", True):
+            return
+        from app.recommender.memory import extract_from_interaction
+        extract_from_interaction(db, user, event, action)
+    except Exception:
+        pass
 
 
 def get_event_interactions_for_user(db: Session, telegram_id: int, event_id: int) -> list[str]:
