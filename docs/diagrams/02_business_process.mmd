@@ -1,0 +1,49 @@
+%%{init: {'theme':'default'}}%%
+flowchart TD
+    classDef ext fill:#fff3e0,stroke:#e65100,color:#000
+    classDef sys fill:#e8f5e9,stroke:#2e7d32,color:#000
+    classDef ai fill:#f3e5f5,stroke:#6a1b9a,color:#000
+    classDef user fill:#e3f2fd,stroke:#1565c0,color:#000
+    classDef db fill:#fafafa,stroke:#616161,color:#000
+
+    SRC[("Внешние источники<br/>RSS, Telegram, KudaGo, Lu.ma")]:::ext
+    INGEST["Сбор данных<br/>(адаптеры источников)"]:::sys
+    RAW[("Staging-таблица<br/>raw_events")]:::db
+    NORM["AI-нормализация<br/>(LLM + Pydantic)"]:::ai
+    DEDUP["Семантический<br/>дедуп"]:::ai
+    ENRICH["AI-обогащение<br/>(quality, hype, summary)"]:::ai
+    EVDB[("Каталог<br/>events")]:::db
+
+    USER(["👤 Пользователь"]):::user
+    BOT["Telegram-бот"]:::sys
+    API["REST API"]:::sys
+    RECO["Рекомендатель<br/>(hybrid + MMR)"]:::ai
+    COPILOT["Мультиагентный<br/>Copilot"]:::ai
+
+    USERMODEL[("Модель пользователя<br/>profile + Beta + LinUCB + memory")]:::db
+
+    SRC --> INGEST
+    INGEST --> RAW
+    RAW --> NORM
+    NORM --> DEDUP
+    DEDUP --> ENRICH
+    ENRICH --> EVDB
+
+    USER -->|запрос| BOT
+    BOT -->|HTTP| API
+    API --> RECO
+    RECO --> EVDB
+    RECO --> USERMODEL
+    RECO -->|ранжированный список| API
+    API -->|JSON| BOT
+    BOT -->|карточки| USER
+
+    USER -.->|лайк/дизлайк/сейв| BOT
+    BOT -.-> API
+    API -.->|обновление| USERMODEL
+
+    USER -.->|вопрос| BOT
+    BOT -.-> COPILOT
+    COPILOT --> EVDB
+    COPILOT --> USERMODEL
+    COPILOT -.->|ответ| USER

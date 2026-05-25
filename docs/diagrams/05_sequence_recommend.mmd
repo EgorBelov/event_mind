@@ -1,0 +1,45 @@
+%%{init: {'theme':'default'}}%%
+sequenceDiagram
+    autonumber
+    participant U as 👤 Пользователь
+    participant B as Telegram-бот
+    participant API as REST API
+    participant SVC as Сервисный слой
+    participant DB as База данных
+    participant EMB as sentence-<br/>transformers
+    participant REC as Гибридный<br/>ранжировщик
+    participant MMR as MMR-<br/>диверсификация
+
+    U->>B: Нажимает «Рекомендации»
+    B->>API: GET /recommendations/{telegram_id}
+    API->>SVC: get_recommendations_for_user()
+    SVC->>DB: загрузить пользователя
+
+    rect rgb(245, 245, 255)
+        Note over SVC,EMB: Предрасчёт один раз за запрос
+        SVC->>EMB: построить user_embedding<br/>(долгосрочный + сессионный)
+        SVC->>DB: загрузить bandit_state (A, b)
+        SVC->>DB: загрузить параметры Beta
+        SVC->>DB: загрузить все события
+    end
+
+    loop для каждого события (batch)
+        SVC->>REC: compute_score_breakdown(user, event)
+        REC-->>SVC: {rule, cosine, bayesian, quality,<br/>hype, freshness, skill_gap, bandit, gnn}
+    end
+
+    SVC->>SVC: сортировка по сумме компонент
+    SVC->>MMR: переранжировать top-30
+    MMR->>DB: batch-загрузка эмбеддингов
+    MMR-->>SVC: диверсифицированный список
+
+    SVC-->>API: список карточек с объяснениями
+    API-->>B: JSON-ответ
+    B-->>U: отображает карточки с inline-клавиатурой
+
+    U->>B: ❤️ лайк по событию
+    B->>API: POST /interactions
+    API->>DB: сохранить Interaction
+    API->>DB: обновить topic_weights, Beta(α,β)
+    API->>DB: обновить LinUCB (A, b)
+    API->>EMB: извлечь заметку в memory (LLM)

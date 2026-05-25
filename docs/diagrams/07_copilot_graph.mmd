@@ -1,0 +1,44 @@
+%%{init: {'theme':'default'}}%%
+flowchart TD
+    classDef start fill:#000,stroke:#000,color:#fff
+    classDef node fill:#e3f2fd,stroke:#1565c0,color:#000
+    classDef spec fill:#f3e5f5,stroke:#6a1b9a,color:#000
+    classDef tool fill:#fff9c4,stroke:#f57f17,color:#000
+    classDef endn fill:#000,stroke:#000,color:#fff
+
+    START(("START")):::start
+    RETRIEVE["retrieve<br/>━━━━━━━━━<br/>• профиль<br/>• релевантные события<br/>• срез истории"]:::node
+    SUPERVISOR["supervisor<br/>━━━━━━━━━<br/>LLM + Pydantic<br/>SupervisorDecision<br/>(keyword fallback)"]:::node
+
+    S1["recommendation<br/>━━━━━━━━━<br/>выдача с критикой"]:::spec
+    S2["career_coach<br/>━━━━━━━━━<br/>карьерные советы"]:::spec
+    S3["roadmap_planner<br/>━━━━━━━━━<br/>план развития"]:::spec
+    S4["event_explainer<br/>━━━━━━━━━<br/>подробно о событии"]:::spec
+    S5["summary_specialist<br/>━━━━━━━━━<br/>сводки/обобщения"]:::spec
+
+    TOOLS[("Tools (function calling)<br/>━━━━━━━━━<br/>search_events<br/>get_user_profile<br/>get_interactions_summary<br/>explain_event<br/>recall_about_user<br/>mark_saved")]:::tool
+
+    FINALIZE["finalize<br/>━━━━━━━━━<br/>• сборка ответа<br/>• extract memory<br/>• сохранение сессии"]:::node
+    END_N(("END")):::endn
+
+    START --> RETRIEVE
+    RETRIEVE --> SUPERVISOR
+
+    SUPERVISOR -.->|"intent=recommend"| S1
+    SUPERVISOR -.->|"intent=career"| S2
+    SUPERVISOR -.->|"intent=roadmap"| S3
+    SUPERVISOR -.->|"intent=explain"| S4
+    SUPERVISOR -.->|"intent=summary"| S5
+
+    S1 <-->|"подмножество"| TOOLS
+    S2 <-->|"подмножество"| TOOLS
+    S3 <-->|"подмножество"| TOOLS
+    S4 <-->|"подмножество"| TOOLS
+    S5 <-->|"подмножество"| TOOLS
+
+    S1 --> FINALIZE
+    S2 --> FINALIZE
+    S3 --> FINALIZE
+    S4 --> FINALIZE
+    S5 --> FINALIZE
+    FINALIZE --> END_N

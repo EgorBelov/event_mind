@@ -1,0 +1,37 @@
+%%{init: {'theme':'default', 'flowchart':{'htmlLabels':true}}}%%
+graph LR
+    classDef actor fill:#e3f2fd,stroke:#1976d2,stroke-width:2px,color:#0d47a1
+    classDef uc fill:#fff,stroke:#555,stroke-width:1px,rx:25,ry:25,color:#000
+    classDef sys fill:#f5f5f5,stroke:#999,stroke-width:1px,color:#000
+
+    USER(["👤 Пользователь"]):::actor
+    ADMIN(["👤 Администратор"]):::actor
+    SCHED(["⏰ Планировщик"]):::actor
+
+    subgraph System["Система EventMind"]
+        UC1(["Зарегистрироваться<br/>и настроить профиль"]):::uc
+        UC2(["Получить персональные<br/>рекомендации"]):::uc
+        UC3(["Получить AI-рекомендации<br/>с объяснением"]):::uc
+        UC4(["Оценить или<br/>сохранить событие"]):::uc
+        UC5(["Вести диалог<br/>с Copilot"]):::uc
+        UC6(["Подписаться<br/>на дайджест"]):::uc
+        UC7(["Искать события<br/>по фильтрам"]):::uc
+        UC8(["Загрузить данные<br/>из источников"]):::uc
+        UC9(["Просмотреть<br/>аналитику"]):::uc
+        UC10(["Рассылка<br/>AI-дайджеста"]):::uc
+        UC11(["Периодический<br/>ингест"]):::uc
+    end
+
+    USER --- UC1
+    USER --- UC2
+    USER --- UC3
+    USER --- UC4
+    USER --- UC5
+    USER --- UC6
+    USER --- UC7
+
+    ADMIN --- UC8
+    ADMIN --- UC9
+
+    SCHED --- UC10
+    SCHED --- UC11

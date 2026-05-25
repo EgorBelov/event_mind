@@ -1,0 +1,39 @@
+%%{init: {'theme':'default'}}%%
+flowchart TB
+    classDef person fill:#1565c0,stroke:#0d47a1,color:#fff
+    classDef container fill:#1976d2,stroke:#0d47a1,color:#fff
+    classDef db fill:#388e3c,stroke:#1b5e20,color:#fff
+    classDef ext fill:#757575,stroke:#424242,color:#fff
+    classDef bg fill:#fafafa,stroke:#bdbdbd,color:#000
+
+    USER(("👤 Пользователь<br/>IT-специалист"))
+    class USER person
+
+    subgraph EVMIND["Система EventMind"]
+        BOT["Telegram-бот<br/>━━━━━━━━━━━<br/>aiogram 3<br/><br/>Обрабатывает команды<br/>и сообщения пользователя"]
+        API["REST API<br/>━━━━━━━━━━━<br/>FastAPI + Uvicorn<br/><br/>Основная бизнес-логика,<br/>рекомендатель, агенты"]
+        SCHED["Планировщик задач<br/>━━━━━━━━━━━<br/>APScheduler<br/><br/>Дайджест, ингест,<br/>уплотнение памяти"]
+        DB[("База данных<br/>━━━━━━━━━━━<br/>SQLite (WAL mode)<br/><br/>users, events, interactions,<br/>memory, bandit, sessions")]
+    end
+
+    class BOT,API,SCHED container
+    class DB db
+
+    TG["Telegram<br/>Bot API"]
+    LLM["Groq Cloud<br/>(LLM provider)"]
+    SRC1["RSS-ленты,<br/>t.me/s/каналы"]
+    SRC2["KudaGo API,<br/>Lu.ma iCal"]
+
+    class TG,LLM,SRC1,SRC2 ext
+
+    USER -->|"взаимодействует через"| TG
+    TG <-->|"HTTPS (long polling)"| BOT
+    BOT -->|"HTTP REST"| API
+    SCHED -->|"HTTP REST"| API
+    API <-->|"SQL"| DB
+    BOT -.->|"общая БД"| DB
+    SCHED -.->|"общая БД"| DB
+
+    API -->|"OpenAI-совместимый API"| LLM
+    SCHED -->|"парсинг"| SRC1
+    SCHED -->|"API/iCal"| SRC2

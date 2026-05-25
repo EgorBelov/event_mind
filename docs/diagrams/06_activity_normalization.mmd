@@ -1,0 +1,42 @@
+%%{init: {'theme':'default'}}%%
+flowchart TD
+    classDef start fill:#000,stroke:#000,color:#fff
+    classDef proc fill:#e3f2fd,stroke:#1565c0,color:#000
+    classDef ai fill:#f3e5f5,stroke:#6a1b9a,color:#000
+    classDef dec fill:#fff9c4,stroke:#f57f17,color:#000
+    classDef db fill:#e8f5e9,stroke:#2e7d32,color:#000
+    classDef err fill:#ffebee,stroke:#c62828,color:#000
+    classDef endn fill:#000,stroke:#000,color:#fff
+
+    START(("●")):::start
+    GET["Получить запись<br/>из raw_events"]:::proc
+    LLM["Вызвать LLM<br/>(нормализация)"]:::ai
+    PARSE["Распарсить ответ<br/>как Pydantic-схему"]:::proc
+    VALID{"Парсинг<br/>успешен?"}:::dec
+    FAIL["status = 'failed'<br/>сохранить ошибку"]:::err
+    ISIT{"is_it_event<br/>== True?"}:::dec
+    NONIT["status = 'non_it'"]:::err
+    EMBED["Построить<br/>embedding события"]:::ai
+    SIMSEARCH["Поиск похожих<br/>событий в окне"]:::proc
+    DUP{"cos_sim ><br/>порог?"}:::dec
+    SKIP["status = 'duplicate'"]:::err
+    ENRICH["AI-обогащение:<br/>quality, hype, summary,<br/>tech_stack, audience"]:::ai
+    SAVE["Создать запись<br/>в таблице events"]:::db
+    MARK["status = 'normalized'<br/>в raw_events"]:::db
+    END_N(("●")):::endn
+
+    START --> GET
+    GET --> LLM
+    LLM --> PARSE
+    PARSE --> VALID
+    VALID -->|"нет"| FAIL --> END_N
+    VALID -->|"да"| ISIT
+    ISIT -->|"нет"| NONIT --> END_N
+    ISIT -->|"да"| EMBED
+    EMBED --> SIMSEARCH
+    SIMSEARCH --> DUP
+    DUP -->|"да"| SKIP --> END_N
+    DUP -->|"нет"| ENRICH
+    ENRICH --> SAVE
+    SAVE --> MARK
+    MARK --> END_N
