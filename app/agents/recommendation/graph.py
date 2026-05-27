@@ -1,10 +1,10 @@
-from langgraph.graph import StateGraph, START, END
+from langgraph.graph import END, START, StateGraph
 
+from app.agents.recommendation.event_analyzer_agent import event_analyzer_agent
+from app.agents.recommendation.explanation_agent import explanation_agent
+from app.agents.recommendation.recommendation_agent import recommendation_agent_node
 from app.agents.recommendation.state import RecommendationState
 from app.agents.recommendation.user_profile_agent import user_profile_agent
-from app.agents.recommendation.event_analyzer_agent import event_analyzer_agent
-from app.agents.recommendation.recommendation_agent import recommendation_agent_node
-from app.agents.recommendation.explanation_agent import explanation_agent
 
 
 def build_recommendation_graph():

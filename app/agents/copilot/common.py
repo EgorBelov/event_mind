@@ -7,10 +7,9 @@ import json
 import re
 from typing import Any
 
-from langchain_core.messages import SystemMessage, HumanMessage, ToolMessage
+from langchain_core.messages import HumanMessage, SystemMessage, ToolMessage
 
 from app.agents.copilot.tools import dispatch_tool, filter_tools
-
 
 MAX_TOOL_HOPS = 3
 
@@ -73,7 +72,7 @@ def invoke_with_tools(
 
     messages: list = [SystemMessage(content=system_prompt), HumanMessage(content=user_prompt)]
 
-    for hop in range(max_hops + 1):
+    for _hop in range(max_hops + 1):
         response = bound.invoke(messages)
         tool_calls = getattr(response, "tool_calls", None) or []
         if not tool_calls or not tool_names:

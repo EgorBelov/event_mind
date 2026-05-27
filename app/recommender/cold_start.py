@@ -24,13 +24,12 @@ from sqlalchemy.orm import Session
 
 from app.core.topics import slugify_code
 from app.db.models.user import User
-from app.recommender.bayesian import update_stats_from_feedback, LIKE_WEIGHT
+from app.recommender.bayesian import update_stats_from_feedback
 from app.recommender.user_model import (
-    parse_topic_weights,
     dump_topic_weights,
+    parse_topic_weights,
     sync_topic_weights_with_topics,
 )
-
 
 logger = logging.getLogger(__name__)
 
@@ -66,6 +65,7 @@ def extract_bio_profile(bio_text: str) -> BioProfile | None:
     """Best-effort LLM-извлечение; None если не получилось."""
     try:
         from langchain_core.prompts import ChatPromptTemplate
+
         from app.agents.recommendation.llm import llm
         prompt = ChatPromptTemplate.from_messages([
             ("system", _SYSTEM_PROMPT),

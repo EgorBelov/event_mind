@@ -9,22 +9,23 @@ Endpoints:
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
-
-
-def _utcnow() -> datetime:
-    return datetime.now(timezone.utc).replace(tzinfo=None)
+from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
-from app.db.dependencies import get_db
-from app.db.models.user import User
-from app.db.models.event import Event
-from app.db.models.copilot_session import CopilotSession
-from app.recommender.scoring import _get_event_topic_codes
 from app.api.services.recommendation_service import get_recommendations_for_user
+from app.db.dependencies import get_db
+from app.db.models.copilot_session import CopilotSession
+from app.db.models.event import Event
+from app.db.models.user import User
+from app.recommender.scoring import _get_event_topic_codes
+
+
+def _utcnow() -> datetime:
+    return datetime.now(UTC).replace(tzinfo=None)
+
 
 router = APIRouter(prefix="/copilot", tags=["copilot"])
 

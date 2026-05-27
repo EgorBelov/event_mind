@@ -1,11 +1,11 @@
-from aiogram import Router, F
+from aiogram import F, Router
 from aiogram.filters import Command, CommandObject
 from aiogram.types import Message
 
+from app.bot.keyboards.inline import CITY_LABELS, FORMAT_LABELS, TOPIC_LABELS
 from app.bot.services.api_client import EventMindAPIClient
-from app.bot.keyboards.inline import TOPIC_LABELS, FORMAT_LABELS, CITY_LABELS
 from app.bot.utils import esc, send
-from app.core.topics import topic_title, format_label, city_label
+from app.core.topics import city_label, format_label, topic_title
 
 router = Router()
 api_client = EventMindAPIClient()

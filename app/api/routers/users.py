@@ -2,8 +2,8 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
-from app.db.dependencies import get_db
 from app.api.schemas.user import UserCreate
+from app.api.services.recommendation_service import refresh_user_embedding
 from app.api.services.user_service import (
     analyze_bio_and_update_topics,
     create_or_update_user,
@@ -11,7 +11,7 @@ from app.api.services.user_service import (
     get_user_stats,
     get_user_topic_codes,
 )
-from app.api.services.recommendation_service import refresh_user_embedding
+from app.db.dependencies import get_db
 
 router = APIRouter(prefix="/users", tags=["users"])
 

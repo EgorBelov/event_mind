@@ -1,25 +1,32 @@
-from contextlib import asynccontextmanager
 import logging
+import time
+from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI
+from sqlalchemy import text
+from sqlalchemy.orm import Session
 
-from app.core.logging import setup_logging
-from app.core.config import settings
 from app.api.routers import (
-    users,
-    events,
-    recommendations,
-    agent_recommendations,
-    subscriptions,
-    ingestion,
     admin,
+    agent_recommendations,
     analytics,
     copilot,
+    events,
+    ingestion,
+    recommendations,
+    subscriptions,
+    users,
     vocabulary,
 )
+from app.core.config import settings
+from app.core.logging import setup_logging
+from app.db.dependencies import get_db
 
 setup_logging(debug=settings.debug)
 logger = logging.getLogger(__name__)
+
+# Глобальный флаг прогрева — выставляется в lifespan и читается /health.
+_EMBEDDING_READY = False
 
 
 @asynccontextmanager
@@ -34,10 +41,12 @@ async def lifespan(_app: FastAPI):
     Best-effort: если sentence-transformers недоступен — пропускаем
     без падения API.
     """
+    global _EMBEDDING_READY
     try:
         from app.recommender.embeddings import embed_text
         logger.info("Warming up sentence-transformers model…")
         embed_text("warmup")
+        _EMBEDDING_READY = True
         logger.info("Embeddings model ready")
     except Exception as e:
         logger.warning("Embedding model warmup failed (will lazy-load on first request): %s", e)
@@ -63,11 +72,68 @@ app.include_router(copilot.router)
 app.include_router(vocabulary.router)
 
 
+def _check_db(db: Session) -> dict:
+    """SELECT 1 + длительность в миллисекундах."""
+    t0 = time.monotonic()
+    try:
+        db.execute(text("SELECT 1"))
+        return {"ok": True, "latency_ms": round((time.monotonic() - t0) * 1000, 2)}
+    except Exception as e:
+        return {"ok": False, "error": str(e)[:200]}
+
+
+def _check_embeddings() -> dict:
+    """Эмбеддинг-модель прогрета? Если нет — пробуем загрузить, не падая."""
+    if _EMBEDDING_READY:
+        return {"ok": True, "warmed_up": True}
+    # Не прогрелись на старте — мягко пробуем сейчас, но не блокируем health.
+    try:
+        from app.recommender.embeddings import get_model
+        get_model()
+        return {"ok": True, "warmed_up": False, "lazy_loaded": True}
+    except Exception as e:
+        return {"ok": False, "error": str(e)[:200]}
+
+
+def _check_llm() -> dict:
+    """LLM (Groq) — проверяем наличие ключа и саму обёртку с fallback'ом.
+
+    Полноценный ping (invoke) дорогой и потенциально платный, поэтому
+    верифицируем только конфигурацию: ключ задан, обёртка строится.
+    """
+    if not settings.groq_api_key:
+        return {"ok": False, "error": "GROQ_API_KEY is empty"}
+    try:
+        from app.agents.recommendation.llm import llm
+        return {
+            "ok": True,
+            "primary_model": settings.groq_model,
+            "fallback_model": settings.groq_fallback_model,
+            "wrapper": type(llm).__name__,
+        }
+    except Exception as e:
+        return {"ok": False, "error": str(e)[:200]}
+
+
 @app.get("/health", tags=["system"])
-def healthcheck():
-    return {"status": "ok"}
+def healthcheck(db: Session = Depends(get_db)):
+    """Композитный healthcheck.
+
+    Возвращает {status: ok|degraded, components: {...}}.
+    Status=ok если все компоненты ok, иначе degraded (с деталями).
+    """
+    components = {
+        "db": _check_db(db),
+        "embeddings": _check_embeddings(),
+        "llm": _check_llm(),
+    }
+    overall_ok = all(c.get("ok") for c in components.values())
+    return {
+        "status": "ok" if overall_ok else "degraded",
+        "components": components,
+    }
 
 
 @app.get("/", tags=["system"])
 def root():
-    return {"message": "EventMind API", "docs": "/docs"}
+    return {"message": "EventMind API", "docs": "/docs", "health": "/health"}

@@ -1,18 +1,18 @@
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
-from app.db.dependencies import get_db
 from app.api.services.ingestion_service import (
-    load_raw_events,
+    get_ingestion_status,
     load_habr_events,
-    load_rss_events,
     load_kudago_events,
     load_luma_events,
     load_meetup_events,
+    load_raw_events,
+    load_rss_events,
     load_telegram_events,
     normalize_raw_events,
-    get_ingestion_status,
 )
+from app.db.dependencies import get_db
 
 router = APIRouter(prefix="/ingestion", tags=["ingestion"])
 

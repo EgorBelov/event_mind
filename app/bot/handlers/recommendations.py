@@ -1,6 +1,6 @@
-from aiogram import Router, F
+from aiogram import F, Router
 from aiogram.filters import Command
-from aiogram.types import Message, CallbackQuery
+from aiogram.types import CallbackQuery, Message
 
 from app.bot.keyboards.inline import (
     recommendation_keyboard,
@@ -17,8 +17,40 @@ user_ai_recommendation_index: dict[int, int] = {}
 user_ai_recommendation_cards: dict[int, list[dict]] = {}
 
 
+_COMPONENT_LABELS = {
+    "rule": "темы",
+    "cosine": "смысл",
+    "bayesian": "история",
+    "quality": "качество",
+    "hype": "хайп",
+    "freshness": "свежесть",
+    "skill_gap": "под скиллы",
+    "bandit": "бандит",
+    "gnn": "соседи",
+}
+
+
+def _why_line(event: dict) -> str:
+    """Компактное «почему» — 2 строки, основано на score_breakdown.
+
+    Берём топ-3 по вкладу компонента и переводим в человекочитаемые ярлыки.
+    Если breakdown пустой (старые карточки) — возвращаем пустую строку.
+    """
+    breakdown = event.get("score_breakdown") or {}
+    if not breakdown:
+        return ""
+    positive = [(name, val) for name, val in breakdown.items() if val and val > 0.05]
+    if not positive:
+        return ""
+    positive.sort(key=lambda kv: kv[1], reverse=True)
+    top = positive[:3]
+    parts = [f"{_COMPONENT_LABELS.get(name, name)}+{val:.1f}" for name, val in top]
+    return f"💡 Почему: {' · '.join(parts)}"
+
+
 def format_event_card(event: dict) -> str:
     topics = ", ".join(event.get("topics", []))
+    why = _why_line(event)
 
     return (
         f"<b>{esc(event['title'])}</b>\n\n"
@@ -28,7 +60,8 @@ def format_event_card(event: dict) -> str:
         f"Уровень: {esc(event['level'])}\n"
         f"Дата: {esc(event['date'])}\n\n"
         f"{esc(event['description'])}\n\n"
-        f"{esc(event['explanation'])}\n"
+        + (f"{esc(why)}\n" if why else "")
+        + f"{esc(event['explanation'])}\n"
         f"Score: {esc(event['score'])}"
     )
 
@@ -87,6 +120,17 @@ def _parse_action_cb(data: str) -> tuple[str, int]:
 async def cmd_recommend(message: Message):
     user_recommendation_index[message.from_user.id] = 0
     await send_recommendation(message, message.from_user.id)
+
+
+@router.message(Command("undo"))
+async def cmd_undo(message: Message):
+    """Откатить последнее like / dislike / save."""
+    result = await api_client.undo_last_interaction(message.from_user.id)
+    if not result:
+        await message.answer("Не удалось связаться с API.")
+        return
+    msg = result.get("message") or ("Готово." if result.get("success") else "Нет действий для отката.")
+    await message.answer(msg)
 
 
 @router.callback_query(F.data == "show_recommendations")
@@ -192,6 +236,8 @@ async def cb_recs_ai(callback: CallbackQuery):
 
 def format_ai_event_card(event: dict) -> str:
     topics = ", ".join(event.get("topics", []))
+    why = _why_line(event)
+    description = (event.get("description") or "")
 
     return (
         f"🤖 <b>AI-рекомендация</b>\n\n"
@@ -201,9 +247,10 @@ def format_ai_event_card(event: dict) -> str:
         f"Город: {esc(event['city'])}\n"
         f"Уровень: {esc(event['level'])}\n"
         f"Дата: {esc(event['date'])}\n\n"
-        f"{esc(event['description'])}\n\n"
-        f"{esc(event['explanation'])}\n"
-        f"Релевантность: {esc(event['score'])}"
+        f"{esc(description)}\n\n"
+        + (f"{esc(why)}\n" if why else "")
+        + f"{esc(event['explanation'])}\n"
+        f"Релевантность: {esc(event.get('score', '?'))}"
     )
 
 

@@ -22,6 +22,11 @@ class Settings(BaseSettings):
     # Groq / LLM
     groq_api_key: str = ""
     groq_model: str = "llama-3.3-70b-versatile"
+    # Резервная модель: если основная упала/недоступна, llm.invoke автоматически
+    # переключается на неё. Меньше параметров → дешевле/доступнее.
+    groq_fallback_model: str = "llama-3.1-8b-instant"
+    groq_temperature: float = 0.4
+    groq_max_retries: int = 2
 
     # Dev-флаги
     debug: bool = False

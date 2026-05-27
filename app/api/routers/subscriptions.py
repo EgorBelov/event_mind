@@ -1,13 +1,13 @@
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
-from app.db.dependencies import get_db
 from app.api.services.subscription_service import (
+    get_subscribed_users,
     subscribe_user,
     unsubscribe_user,
-    get_subscribed_users,
 )
 from app.api.services.user_service import get_user_topic_codes
+from app.db.dependencies import get_db
 
 router = APIRouter(prefix="/subscriptions", tags=["subscriptions"])
 

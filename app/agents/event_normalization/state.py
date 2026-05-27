@@ -1,6 +1,6 @@
-from typing import TypedDict, Dict, Any
+from typing import Any, TypedDict
 
 
 class EventNormalizationState(TypedDict):
-    raw_event: Dict[str, Any]
-    normalized_event: Dict[str, Any]
+    raw_event: dict[str, Any]
+    normalized_event: dict[str, Any]

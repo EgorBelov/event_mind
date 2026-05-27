@@ -1,22 +1,26 @@
+import contextlib
 import json
+import logging
 
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
 
+from app.core.config import settings
 from app.db.models.event import Event
-from app.db.models.user import User
 from app.db.models.interaction import Interaction
-from app.recommender.scoring import score_event_for_user, _get_event_topic_codes
-from app.recommender.explain import explain_event_detailed
-from app.recommender.user_model import (
-    parse_topic_weights,
-    dump_topic_weights,
-    apply_feedback_to_weights,
-)
+from app.db.models.user import User
 from app.recommender.bayesian import update_stats_from_feedback
+from app.recommender.explain import explain_event_detailed
+from app.recommender.scoring import _get_event_topic_codes, score_event_for_user
+from app.recommender.user_model import (
+    apply_feedback_to_weights,
+    dump_topic_weights,
+    parse_topic_weights,
+)
+
+logger = logging.getLogger(__name__)
 
 try:
-    from app.recommender.hybrid import hybrid_score as _hybrid_score
     from app.recommender.hybrid import compute_score_breakdown as _compute_breakdown
     _HAS_HYBRID = True
 except Exception:
@@ -75,9 +79,9 @@ def get_recommendations_for_user(db: Session, telegram_id: int) -> list[dict]:
     precomputed_user_emb = None
     try:
         from app.recommender.embeddings import (
-            get_or_build_user_embedding,
-            build_session_embedding,
             blend_user_embedding,
+            build_session_embedding,
+            get_or_build_user_embedding,
         )
         precomputed_user_emb = get_or_build_user_embedding(user)
         session_emb = build_session_embedding(db, user, window=5)
@@ -90,13 +94,13 @@ def get_recommendations_for_user(db: Session, telegram_id: int) -> list[dict]:
 
     # LinUCB-state — один раз на запрос (вместо N SELECT'ов из user_bandit_states).
     bandit_state = None
-    try:
-        from app.core.config import settings as _settings
-        if _settings.bandit_enabled:
+    if settings.bandit_enabled:
+        try:
             from app.recommender.bandit import load_user_bandit
             bandit_state = load_user_bandit(db, user.id)
-    except Exception:
-        bandit_state = None
+        except Exception as e:
+            logger.warning("LinUCB state load failed for user %s: %s", user.id, e)
+            bandit_state = None
 
     results = []
 
@@ -152,13 +156,13 @@ def get_recommendations_for_user(db: Session, telegram_id: int) -> list[dict]:
 
     results.sort(key=lambda x: x["score"], reverse=True)
 
-    # MMR-диверсификация (см. v1.2) — пост-процессинг top-N.
-    try:
-        if settings.mmr_enabled and len(results) > 1:
+    # MMR-диверсификация — пост-процессинг top-N.
+    if settings.mmr_enabled and len(results) > 1:
+        try:
             from app.recommender.diversity import mmr_rerank
             results = mmr_rerank(results, db, lambda_=settings.mmr_lambda)
-    except Exception:
-        pass
+        except Exception as e:
+            logger.warning("MMR rerank failed: %s", e)
 
     return results
 
@@ -244,30 +248,59 @@ def create_interaction(db: Session, telegram_id: int, event_id: int, action: str
     return {"success": True, "message": f"Interaction '{action}' saved", "topic_weights": updated_weights}
 
 
+def undo_last_interaction(db: Session, telegram_id: int) -> dict:
+    """Откатить самое свежее взаимодействие пользователя.
+
+    Под капотом — повторный create_interaction (toggle off): сама ветка
+    «existing_same → delete + direction=-1» уже отменяет all-эффекты
+    (веса, Bayesian, LinUCB). Поэтому undo сводится к одному вызову.
+    """
+    user = db.query(User).filter(User.telegram_id == telegram_id).first()
+    if not user:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+
+    last = (
+        db.query(Interaction)
+        .filter(Interaction.user_id == user.id)
+        .order_by(Interaction.id.desc())
+        .first()
+    )
+    if not last:
+        return {"success": False, "message": "Нет действий для отката."}
+
+    action = last.action
+    event_id = last.event_id
+    # create_interaction сам выполнит toggle off (delete + direction=-1).
+    result = create_interaction(db, telegram_id, event_id, action)
+    return {
+        "success": True,
+        "message": f"Откатил последнее: {action} → event {event_id}.",
+        "undone": {"action": action, "event_id": event_id},
+        "details": result,
+    }
+
+
 def _safe_bayes_update(db, user_id: int, event_topics, action: str, direction: int = 1) -> None:
     """Best-effort: не падать на feedback'е, если Bayesian-таблица недоступна."""
-    try:
+    with contextlib.suppress(Exception):
         update_stats_from_feedback(db, user_id, event_topics, action, direction=direction)
-    except Exception:
-        pass
 
 
 def _safe_bandit_update(db, user, event, action: str, direction: int = 1) -> None:
     """Best-effort: обновить LinUCB-параметры по feedback."""
+    if not settings.bandit_enabled:
+        return
     try:
-        from app.core.config import settings
-        if not settings.bandit_enabled:
-            return
-        from app.recommender.bandit import context_vector, update_from_feedback, reward_from_action
-        from app.recommender.hybrid import freshness_score, _parse_event_date
+        from app.recommender.bandit import context_vector, reward_from_action, update_from_feedback
+        from app.recommender.hybrid import _parse_event_date, freshness_score
         fresh = freshness_score(_parse_event_date(getattr(event, "date", None)))
         x = context_vector(user, event, fresh)
         reward = reward_from_action(action) * direction
         if reward == 0.0:
             return
         update_from_feedback(db, user.id, x, reward)
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning("LinUCB update failed: %s", e)
 
 
 def _safe_memory_extract(db, user, event, action: str, direction: int = 1) -> None:
@@ -278,14 +311,13 @@ def _safe_memory_extract(db, user, event, action: str, direction: int = 1) -> No
     """
     if direction != 1:
         return
+    if not getattr(settings, "memory_enabled", True):
+        return
     try:
-        from app.core.config import settings
-        if not getattr(settings, "memory_enabled", True):
-            return
         from app.recommender.memory import extract_from_interaction
         extract_from_interaction(db, user, event, action)
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning("Memory extract failed: %s", e)
 
 
 def get_event_interactions_for_user(db: Session, telegram_id: int, event_id: int) -> list[str]:

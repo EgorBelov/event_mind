@@ -1,5 +1,5 @@
 from collections import Counter
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
@@ -8,8 +8,8 @@ from app.db.dependencies import get_db
 from app.db.models.event import Event
 from app.db.models.interaction import Interaction
 from app.db.models.user import User
-from app.recommender.user_model import parse_topic_weights
 from app.recommender.scoring import _get_event_topic_codes
+from app.recommender.user_model import parse_topic_weights
 
 router = APIRouter(prefix="/analytics", tags=["analytics"])
 
@@ -87,7 +87,7 @@ def analytics_trending(
 
     Формула score: likes×3 + saves×2 + dislikes×0 (с учётом свежести).
     """
-    cutoff = datetime.utcnow() - timedelta(days=days)
+    cutoff = datetime.now(UTC).replace(tzinfo=None) - timedelta(days=days)
 
     # Только свежие интеракции (created_at >= cutoff)
     interactions = (

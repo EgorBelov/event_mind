@@ -2,16 +2,38 @@
 
 `compute_score_breakdown` возвращает декомпозированный словарь компонентов —
 используется в feature-attribution-объяснениях и в `hybrid_score` суммой.
+
+Архитектура:
+- Каждая компонента — отдельная функция `_component_*`, возвращающая
+  float (вклад) или None (если сигнал недоступен/упал). Это позволяет
+  вызывающей стороне отличать «честный 0.0» от «не сработало».
+- В словарь breakdown проваленные компоненты складываются как 0.0,
+  но в логи уходит причина — это убирает «тихую» гибель сигналов,
+  которая раньше прятала баги вроде MMR-NameError.
 """
 from __future__ import annotations
 
 import json
+import logging
 import math
-from datetime import datetime, date, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 from app.core.config import settings
-from app.recommender.scoring import score_event_for_user, _get_event_topic_codes
+from app.recommender.bandit import context_vector, load_user_bandit, ucb_score
+from app.recommender.bayesian import load_user_stats, thompson_score
+from app.recommender.embeddings import (
+    blend_user_embedding,
+    build_event_embedding,
+    build_session_embedding,
+    cosine_similarity,
+    get_or_build_user_embedding,
+)
+from app.recommender.gnn import gnn_score
+from app.recommender.scoring import _get_event_topic_codes, score_event_for_user
+from app.recommender.skill_gap import compute_skill_gap_score
+
+logger = logging.getLogger(__name__)
 
 
 def _parse_event_date(raw: str | None) -> datetime | None:
@@ -36,9 +58,8 @@ def freshness_score(event_date: datetime | None, half_life_days: float | None = 
     if event_date is None:
         return 0.5
     half_life = half_life_days or settings.freshness_half_life_days
-    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    now = datetime.now(UTC).replace(tzinfo=None)
     days = abs((event_date - now).total_seconds()) / 86400.0
-    # exp(-ln(2) * days / half_life) — классический half-life decay
     return float(math.exp(-math.log(2.0) * days / max(half_life, 1.0)))
 
 
@@ -49,6 +70,133 @@ def _safe_int(value: Any, default: float = 0.0) -> float:
         return float(value)
     except (TypeError, ValueError):
         return default
+
+
+# ─── Компоненты ─────────────────────────────────────────────────────────
+
+
+def _component_rule(user, event) -> float | None:
+    try:
+        return float(score_event_for_user(user, event)) * settings.score_rule_weight
+    except Exception as e:
+        logger.warning("rule component failed: %s", e)
+        return None
+
+
+def _component_cosine(
+    user,
+    event,
+    db=None,
+    precomputed_user_emb: list[float] | None = None,
+) -> float | None:
+    try:
+        if precomputed_user_emb is not None:
+            user_emb = precomputed_user_emb
+        else:
+            user_emb = get_or_build_user_embedding(user)
+            if db is not None and getattr(user, "id", None) is not None:
+                session_emb = build_session_embedding(db, user, window=5)
+                if session_emb is not None:
+                    user_emb = blend_user_embedding(user_emb, session_emb, session_weight=0.3)
+        raw = getattr(event, "embedding", None)
+        event_emb: list[float] | None = None
+        if raw:
+            try:
+                event_emb = json.loads(raw)
+            except Exception:
+                event_emb = None
+        if event_emb is None:
+            event_emb = build_event_embedding(event)
+        return cosine_similarity(user_emb, event_emb) * settings.score_cosine_weight
+    except Exception as e:
+        logger.warning("cosine component failed for event=%s: %s", getattr(event, "id", "?"), e)
+        return None
+
+
+def _component_bayesian(
+    user,
+    event,
+    db=None,
+    bayesian_stats: dict | None = None,
+) -> float | None:
+    try:
+        stats = bayesian_stats
+        if stats is None and db is not None and getattr(user, "id", None) is not None:
+            stats = load_user_stats(db, user.id)
+        if not stats:
+            return 0.0
+        event_codes = _get_event_topic_codes(event)
+        return thompson_score(stats, event_codes) * settings.score_bayes_weight
+    except Exception as e:
+        logger.warning("bayesian component failed: %s", e)
+        return None
+
+
+def _component_quality(event) -> float:
+    q = _safe_int(getattr(event, "quality_score", None))
+    if q <= 0:
+        return 0.0
+    return (q / 10.0) * settings.score_quality_weight * 10.0
+
+
+def _component_hype(event) -> float:
+    h = _safe_int(getattr(event, "hype_score", None))
+    if h <= 0:
+        return 0.0
+    return (h / 10.0) * settings.score_hype_weight * 10.0
+
+
+def _component_freshness(event) -> float:
+    ev_dt = _parse_event_date(getattr(event, "date", None))
+    return freshness_score(ev_dt) * settings.score_freshness_weight
+
+
+def _component_skill_gap(event, user_skill_profile: dict | None) -> float | None:
+    if user_skill_profile is None:
+        return 0.0
+    try:
+        return compute_skill_gap_score(user_skill_profile, event) * settings.score_skill_gap_weight
+    except Exception as e:
+        logger.warning("skill_gap component failed: %s", e)
+        return None
+
+
+def _component_bandit(
+    user,
+    event,
+    db=None,
+    freshness_normalized: float = 0.5,
+    bandit_state: tuple | None = None,
+) -> float | None:
+    if not settings.bandit_enabled:
+        return 0.0
+    if db is None or getattr(user, "id", None) is None:
+        return 0.0
+    try:
+        x = context_vector(user, event, freshness_normalized)
+        if bandit_state is not None:
+            A, b = bandit_state
+        else:
+            A, b = load_user_bandit(db, user.id)
+        ucb = ucb_score(A, b, x, alpha=settings.bandit_alpha)
+        squashed = 1.0 / (1.0 + math.exp(-ucb))
+        return squashed * settings.bandit_weight
+    except Exception as e:
+        logger.warning("bandit component failed: %s", e)
+        return None
+
+
+def _component_gnn(user, event) -> float | None:
+    if not settings.gnn_enabled:
+        return 0.0
+    try:
+        return gnn_score(user, event) * settings.gnn_weight
+    except Exception as e:
+        logger.warning("gnn component failed: %s", e)
+        return None
+
+
+# ─── Сборка breakdown ────────────────────────────────────────────────────
 
 
 def compute_score_breakdown(
@@ -63,123 +211,34 @@ def compute_score_breakdown(
 ) -> dict[str, float]:
     """Покомпонентный breakdown итогового score.
 
-    Все компоненты best-effort: если что-то падает (нет модели, нет БД,
-    нет skill-профиля) — соответствующий вклад 0.0.
+    Все компоненты возвращают None при сбое — здесь это нормализуется в 0.0.
+    Логи о сбоях пишутся уровнем WARNING внутри самих компонентов.
     """
-    out: dict[str, float] = {
-        "rule": 0.0,
-        "cosine": 0.0,
-        "bayesian": 0.0,
-        "quality": 0.0,
-        "hype": 0.0,
-        "freshness": 0.0,
-        "skill_gap": 0.0,
-        "bandit": 0.0,
-        "gnn": 0.0,
+    rule = _component_rule(user, event)
+    cosine = _component_cosine(user, event, db=db, precomputed_user_emb=precomputed_user_emb)
+    bayesian = _component_bayesian(user, event, db=db, bayesian_stats=bayesian_stats)
+    quality = _component_quality(event)
+    hype = _component_hype(event)
+    freshness = _component_freshness(event)
+    skill_gap = _component_skill_gap(event, user_skill_profile)
+
+    fresh_norm = freshness / max(settings.score_freshness_weight, 1e-9)
+    bandit = _component_bandit(
+        user, event, db=db, freshness_normalized=fresh_norm, bandit_state=bandit_state,
+    )
+    gnn = _component_gnn(user, event)
+
+    return {
+        "rule": rule or 0.0,
+        "cosine": cosine or 0.0,
+        "bayesian": bayesian or 0.0,
+        "quality": quality,
+        "hype": hype,
+        "freshness": freshness,
+        "skill_gap": skill_gap or 0.0,
+        "bandit": bandit or 0.0,
+        "gnn": gnn or 0.0,
     }
-
-    # Rule
-    try:
-        out["rule"] = float(score_event_for_user(user, event)) * settings.score_rule_weight
-    except Exception:
-        out["rule"] = 0.0
-
-    # Cosine (с сессионным блендом, если есть db)
-    try:
-        from app.recommender.embeddings import (
-            cosine_similarity,
-            get_or_build_user_embedding,
-            build_event_embedding,
-            build_session_embedding,
-            blend_user_embedding,
-        )
-        # User-emb может быть передан уже посчитанным (см. precomputed_user_emb),
-        # чтобы не пересчитывать сессионный bleнд на каждое событие.
-        if precomputed_user_emb is not None:
-            user_emb = precomputed_user_emb
-        else:
-            user_emb = get_or_build_user_embedding(user)
-            if db is not None and getattr(user, "id", None) is not None:
-                session_emb = build_session_embedding(db, user, window=5)
-                if session_emb is not None:
-                    user_emb = blend_user_embedding(user_emb, session_emb, session_weight=0.3)
-        raw = getattr(event, "embedding", None)
-        if raw:
-            try:
-                event_emb = json.loads(raw)
-            except Exception:
-                event_emb = build_event_embedding(event)
-        else:
-            event_emb = build_event_embedding(event)
-        out["cosine"] = cosine_similarity(user_emb, event_emb) * settings.score_cosine_weight
-    except Exception:
-        out["cosine"] = 0.0
-
-    # Bayesian (Thompson)
-    try:
-        from app.recommender.bayesian import load_user_stats, thompson_score
-        stats = bayesian_stats
-        if stats is None and db is not None and getattr(user, "id", None) is not None:
-            stats = load_user_stats(db, user.id)
-        if stats:
-            event_codes = _get_event_topic_codes(event)
-            out["bayesian"] = thompson_score(stats, event_codes) * settings.score_bayes_weight
-    except Exception:
-        out["bayesian"] = 0.0
-
-    # Quality (1..10 → нормализовано 0..1, помножено на вес)
-    q = _safe_int(getattr(event, "quality_score", None))
-    if q > 0:
-        out["quality"] = (q / 10.0) * settings.score_quality_weight * 10.0  # max +5 при weight=0.5
-
-    # Hype (аналогично)
-    h = _safe_int(getattr(event, "hype_score", None))
-    if h > 0:
-        out["hype"] = (h / 10.0) * settings.score_hype_weight * 10.0
-
-    # Freshness
-    ev_dt = _parse_event_date(getattr(event, "date", None))
-    out["freshness"] = freshness_score(ev_dt) * settings.score_freshness_weight
-
-    # Skill-gap (если профиль скиллов есть)
-    if user_skill_profile is not None:
-        try:
-            from app.recommender.skill_gap import compute_skill_gap_score
-            out["skill_gap"] = (
-                compute_skill_gap_score(user_skill_profile, event)
-                * settings.score_skill_gap_weight
-            )
-        except Exception:
-            out["skill_gap"] = 0.0
-
-    # LinUCB bandit
-    if settings.bandit_enabled and db is not None and getattr(user, "id", None) is not None:
-        try:
-            from app.recommender.bandit import context_vector, ucb_score, load_user_bandit
-            fresh = out["freshness"] / max(settings.score_freshness_weight, 1e-9)
-            x = context_vector(user, event, fresh)
-            # Принимаем заранее загруженное (A, b), если есть — экономия N
-            # отдельных SELECT'ов из user_bandit_states.
-            if bandit_state is not None:
-                A, b = bandit_state
-            else:
-                A, b = load_user_bandit(db, user.id)
-            ucb = ucb_score(A, b, x, alpha=settings.bandit_alpha)
-            # Сжимаем сигмоидой в [0..1] для стабильности.
-            squashed = 1.0 / (1.0 + math.exp(-ucb))
-            out["bandit"] = squashed * settings.bandit_weight
-        except Exception:
-            out["bandit"] = 0.0
-
-    # GNN embedding (best-effort)
-    if settings.gnn_enabled:
-        try:
-            from app.recommender.gnn import gnn_score
-            out["gnn"] = gnn_score(user, event) * settings.gnn_weight
-        except Exception:
-            out["gnn"] = 0.0
-
-    return out
 
 
 def hybrid_score(

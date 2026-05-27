@@ -12,9 +12,8 @@ from __future__ import annotations
 import json
 import re
 
+from app.agents.copilot.common import format_history, invoke_with_tools
 from app.agents.copilot.state import CopilotState
-from app.agents.copilot.common import invoke_with_tools, format_history
-
 
 SPECIALIST_NAME = "event_explainer"
 

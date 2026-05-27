@@ -1,21 +1,23 @@
+import contextlib
 from dataclasses import dataclass, field
 
-from aiogram import Router, F
-from aiogram.filters import CommandStart, Command
-from aiogram.types import Message, CallbackQuery
+from aiogram import F, Router
+from aiogram.filters import Command, CommandObject, CommandStart
+from aiogram.types import CallbackQuery, Message
 
 from app.bot.keyboards.inline import (
+    CITY_LABELS,
+    FORMAT_LABELS,
+    TOPIC_LABELS,
+    after_setup_keyboard,
+    city_keyboard,
+    format_keyboard,
     start_keyboard,
     topics_keyboard,
-    format_keyboard,
-    city_keyboard,
-    after_setup_keyboard,
-    TOPIC_LABELS,
-    FORMAT_LABELS,
-    CITY_LABELS,
+    tour_keyboard,
 )
+from app.bot.keyboards.reply import main_menu_keyboard, setup_keyboard
 from app.bot.services.api_client import EventMindAPIClient
-from app.bot.keyboards.reply import setup_keyboard, main_menu_keyboard
 from app.bot.utils import send
 
 router = Router()
@@ -38,8 +40,102 @@ def get_state(user_id: int) -> SetupState:
     return user_setup_state[user_id]
 
 
+# ─── Тур по командам ─────────────────────────────────────────────────────
+
+
+_TOUR_PAGES: list[tuple[str, str]] = [
+    (
+        "🎯 Шаг 1/4 — Персональные рекомендации",
+        "<b>/recommend</b> — лента событий, отсортированных под тебя.\n"
+        "Нажми «🤖 AI» в пикере, чтобы получить карточки от LangGraph-агентов "
+        "с пояснением «почему именно это».\n\n"
+        "В каждой карточке: 👍 / 👎 / ⭐ / Похожие / Следующее.",
+    ),
+    (
+        "🔍 Шаг 2/4 — Поиск",
+        "<b>/search &lt;запрос&gt;</b> — поиск по тексту: темы, формат, город.\n"
+        "<b>/semantic &lt;запрос&gt;</b> — семантический поиск через embeddings: "
+        "находит близкие по смыслу события, даже если слова другие.\n\n"
+        "Пример: <code>/semantic машинное обучение для бэкендера</code>",
+    ),
+    (
+        "🤖 Шаг 3/4 — AI Copilot и тренды",
+        "<b>/copilot &lt;цель&gt;</b> — мультиагентный помощник: roadmap, "
+        "анализ карьеры, объяснение событий. Поддерживает многоtuровый диалог.\n\n"
+        "<b>/trending</b> — горячие темы за неделю с ASCII-графиком.\n"
+        "<b>/subscribe</b> — ежедневный AI-дайджест в личку.",
+    ),
+    (
+        "⚙️ Шаг 4/4 — Профиль и быстрые действия",
+        "<b>/profile</b> — текущие интересы и веса.\n"
+        "<b>/edit</b> — перенастроить темы/формат/город.\n"
+        "<b>/bio &lt;текст&gt;</b> — холодный старт по описанию о себе.\n"
+        "<b>/undo</b> — откатить последний лайк/дизлайк/сохранение.\n\n"
+        "Готов начать настройку?",
+    ),
+]
+
+
+def _tour_text(step: int) -> str:
+    title, body = _TOUR_PAGES[step - 1]
+    return f"<b>{title}</b>\n\n{body}"
+
+
+async def _send_tour(message_or_callback, step: int) -> None:
+    total = len(_TOUR_PAGES)
+    text = _tour_text(step)
+    kb = tour_keyboard(step, total)
+    if isinstance(message_or_callback, CallbackQuery):
+        try:
+            await message_or_callback.message.edit_text(text, parse_mode="HTML", reply_markup=kb)
+        except Exception:
+            await message_or_callback.message.answer(text, parse_mode="HTML", reply_markup=kb)
+    else:
+        await message_or_callback.answer(text, parse_mode="HTML", reply_markup=kb)
+
+
+# ─── /start с deep-linking ──────────────────────────────────────────────
+
+
+@router.message(CommandStart(deep_link=True))
+async def cmd_start_deep_link(message: Message, command: CommandObject):
+    """Поддержка t.me/<bot>?start=event_<id> — открывает карточку события.
+
+    Полезно для шеринга: ссылку из веба можно бросить в чат, и пользователь
+    попадает сразу на событие, минуя меню.
+    """
+    payload = (command.args or "").strip()
+    if payload.startswith("event_"):
+        try:
+            event_id = int(payload.split("_", 1)[1])
+        except ValueError:
+            event_id = None
+        if event_id is not None:
+            try:
+                event = await api_client.get_event(event_id)
+            except Exception:
+                event = None
+            if event:
+                text = (
+                    f"<b>{event.get('title', '')}</b>\n\n"
+                    f"📅 {event.get('date', '')}\n"
+                    f"📍 {event.get('city', '')} · {event.get('format', '')}\n\n"
+                    f"{(event.get('description') or '')[:600]}"
+                )
+                if event.get("source_url"):
+                    text += f"\n\n<a href=\"{event['source_url']}\">Подробнее</a>"
+                await message.answer(text, parse_mode="HTML", disable_web_page_preview=False)
+                return
+    # Неизвестный payload — обычный приветственный экран.
+    await _greet(message)
+
+
 @router.message(CommandStart())
 async def cmd_start(message: Message):
+    await _greet(message)
+
+
+async def _greet(message: Message) -> None:
     user_setup_state[message.from_user.id] = SetupState()
 
     await send(
@@ -57,6 +153,35 @@ async def cmd_start(message: Message):
         "Также можно использовать inline-кнопки ниже:",
         reply_markup=start_keyboard(),
     )
+
+    # Краткий тур по командам — 4 экрана с инлайн-навигацией.
+    await _send_tour(message, step=1)
+
+
+# ─── Навигация по туру ──────────────────────────────────────────────────
+
+
+@router.message(Command("tour"))
+async def cmd_tour(message: Message):
+    await _send_tour(message, step=1)
+
+
+@router.callback_query(F.data.startswith("tour:"))
+async def cb_tour_nav(callback: CallbackQuery):
+    payload = callback.data.split(":", 1)[1]
+    if payload == "skip":
+        await callback.answer("Тур пропущен.")
+        with contextlib.suppress(Exception):
+            await callback.message.delete()
+        return
+    try:
+        step = int(payload)
+    except ValueError:
+        await callback.answer()
+        return
+    step = max(1, min(step, len(_TOUR_PAGES)))
+    await callback.answer()
+    await _send_tour(callback, step)
 
 
 @router.callback_query(F.data == "how_it_works")
@@ -163,7 +288,7 @@ async def cb_city_selected(callback: CallbackQuery):
         topics=list(state.topics),
     )
 
-    from app.core.topics import topic_title, format_label, city_label
+    from app.core.topics import city_label, format_label, topic_title
     topics_text = ", ".join(
         TOPIC_LABELS.get(topic) or topic_title(topic) for topic in state.topics
     )

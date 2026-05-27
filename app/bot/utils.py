@@ -10,8 +10,8 @@
 import html
 import re
 
-from aiogram.types import Message, CallbackQuery
 from aiogram.exceptions import TelegramBadRequest
+from aiogram.types import CallbackQuery, Message
 
 
 def esc(value) -> str:

@@ -2,8 +2,8 @@ from aiogram.types import InlineKeyboardMarkup
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from app.core.topics import (
-    SEED_TOPIC_TITLES,
     SEED_CITY_LABELS,
+    SEED_TOPIC_TITLES,
     city_label,
     format_label,
     topic_title,
@@ -155,4 +155,24 @@ def more_menu_keyboard() -> InlineKeyboardMarkup:
     builder.button(text="🎯 Copilot", callback_data="more:copilot")
     builder.button(text="❓ Помощь", callback_data="more:help")
     builder.adjust(2, 1)
+    return builder.as_markup()
+
+
+# ─── Onboarding tour ─────────────────────────────────────────────────────
+
+
+def tour_keyboard(step: int, total: int) -> InlineKeyboardMarkup:
+    """Кнопки навигации в /start-туре по командам.
+
+    Шаг 1..total. На последнем шаге — «Начать настройку».
+    """
+    builder = InlineKeyboardBuilder()
+    if step > 1:
+        builder.button(text="← Назад", callback_data=f"tour:{step - 1}")
+    if step < total:
+        builder.button(text=f"Дальше ({step}/{total}) →", callback_data=f"tour:{step + 1}")
+    else:
+        builder.button(text="🚀 Начать настройку", callback_data="start_setup")
+    builder.button(text="Пропустить тур", callback_data="tour:skip")
+    builder.adjust(2, 1) if step > 1 and step < total else builder.adjust(1, 1)
     return builder.as_markup()

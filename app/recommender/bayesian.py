@@ -9,15 +9,14 @@
 как Bayesian-score (Thompson sampling по темам-«рукам»).
 """
 import random
-from datetime import datetime, timezone
-from typing import Iterable
+from collections.abc import Iterable
+from datetime import UTC, datetime
 
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.db.models.topic import Topic
 from app.db.models.user_topic_stat import UserTopicStat
-
 
 LIKE_WEIGHT = 3.0
 SAVE_WEIGHT = 1.0
@@ -39,7 +38,7 @@ def _apply_decay(alpha: float, beta: float, updated_at: datetime | None) -> tupl
     if gamma >= 1.0:
         return alpha, beta
     try:
-        now = datetime.now(timezone.utc).replace(tzinfo=None)
+        now = datetime.now(UTC).replace(tzinfo=None)
         days = max(0.0, (now - updated_at).total_seconds() / 86400.0)
     except Exception:
         return alpha, beta

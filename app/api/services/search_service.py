@@ -76,7 +76,11 @@ def semantic_search_events(db: Session, query: str, limit: int = 5) -> list[dict
     При недоступности embedding'ов откатывается к keyword-поиску.
     """
     try:
-        from app.recommender.embeddings import embed_text, cosine_similarity, get_or_build_event_embedding
+        from app.recommender.embeddings import (
+            cosine_similarity,
+            embed_text,
+            get_or_build_event_embedding,
+        )
 
         query_emb = embed_text(query)
         events = db.query(Event).all()

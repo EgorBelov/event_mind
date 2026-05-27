@@ -63,10 +63,7 @@ def mmr_rerank(
     """
     if not results:
         return results
-    if top_n is None:
-        top_n = min(DEFAULT_MMR_TOP_N, len(results))
-    else:
-        top_n = min(top_n, len(results))
+    top_n = min(DEFAULT_MMR_TOP_N, len(results)) if top_n is None else min(top_n, len(results))
 
     head = results[:top_n]
     tail = results[top_n:]
@@ -76,7 +73,7 @@ def mmr_rerank(
     s_max = max(scores) or 1.0
     s_min = min(scores)
     rng = (s_max - s_min) or 1.0
-    norm_rel = {r["event_id"]: (s - s_min) / rng for r, s in zip(head, scores)}
+    norm_rel = {r["event_id"]: (s - s_min) / rng for r, s in zip(head, scores, strict=True)}
 
     embeddings = _batch_load_embeddings(db, [r["event_id"] for r in head])
 

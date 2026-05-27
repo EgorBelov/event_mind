@@ -2,12 +2,12 @@ import asyncio
 
 from aiogram import Bot, Dispatcher
 
-from app.core.config import BOT_TOKEN
-from app.bot.handlers.start import router as start_router
 from app.bot.handlers.profile import router as profile_router
 from app.bot.handlers.recommendations import router as recommendations_router
-from app.bot.handlers.subscriptions import router as subscriptions_router
 from app.bot.handlers.search import router as search_router
+from app.bot.handlers.start import router as start_router
+from app.bot.handlers.subscriptions import router as subscriptions_router
+from app.core.config import BOT_TOKEN
 
 
 async def main():

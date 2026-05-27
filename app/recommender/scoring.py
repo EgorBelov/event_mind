@@ -1,4 +1,4 @@
-from app.recommender.user_model import parse_topics, parse_topic_weights
+from app.recommender.user_model import parse_topic_weights, parse_topics
 
 
 def _get_user_topic_codes(user) -> set[str]:

@@ -1,13 +1,18 @@
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 
-from app.db.dependencies import get_db
 from app.api.services.event_service import (
     get_all_events,
     get_event_topic_codes,
     load_events_from_json,
 )
-from app.api.services.search_service import search_events, get_similar_events, semantic_search_events
+from app.api.services.search_service import (
+    get_similar_events,
+    search_events,
+    semantic_search_events,
+)
+from app.db.dependencies import get_db
+from app.db.models.event import Event
 
 router = APIRouter(prefix="/events", tags=["events"])
 
@@ -76,6 +81,15 @@ def semantic_search(
 ):
     """Семантический поиск: ранжирование событий по embedding-сходству с запросом."""
     return semantic_search_events(db, query=q, limit=limit)
+
+
+@router.get("/{event_id}")
+def get_event_by_id(event_id: int, db: Session = Depends(get_db)):
+    """Получить одну карточку события — нужно для deep-link'а в боте."""
+    event = db.query(Event).filter(Event.id == event_id).first()
+    if not event:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Event not found")
+    return _serialize(event)
 
 
 @router.get("/{event_id}/similar")

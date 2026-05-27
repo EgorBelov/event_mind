@@ -2,13 +2,13 @@ import json
 
 from langchain_core.prompts import ChatPromptTemplate
 
-from app.agents.recommendation.llm import llm
 from app.agents.event_normalization.state import EventNormalizationState
+from app.agents.recommendation.llm import llm
 from app.core.topics import (
-    SEED_TOPICS,
     SEED_CITY_LABELS,
-    SEED_LEVEL_LABELS,
     SEED_FORMAT_LABELS,
+    SEED_LEVEL_LABELS,
+    SEED_TOPICS,
     slugify_code,
 )
 

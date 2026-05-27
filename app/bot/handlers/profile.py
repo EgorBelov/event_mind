@@ -1,19 +1,20 @@
+import contextlib
 import json
 
-from aiogram import Router, F
+from aiogram import F, Router
 from aiogram.filters import Command, CommandObject
-from aiogram.types import Message, CallbackQuery
+from aiogram.types import CallbackQuery, Message
 
-from app.bot.services.api_client import EventMindAPIClient
 from app.bot.keyboards.inline import (
-    TOPIC_LABELS,
-    FORMAT_LABELS,
     CITY_LABELS,
-    profile_actions_keyboard,
+    FORMAT_LABELS,
+    TOPIC_LABELS,
     more_menu_keyboard,
+    profile_actions_keyboard,
 )
+from app.bot.services.api_client import EventMindAPIClient
 from app.bot.utils import esc, send
-from app.core.topics import topic_title, format_label, city_label
+from app.core.topics import city_label, format_label, topic_title
 
 
 def _topic(code: str) -> str:
@@ -156,6 +157,24 @@ async def cmd_bio(message: Message, command: CommandObject):
     await message.answer(f"Готово. По описанию обновил твои темы: {topic_text}.")
 
 
+def _ascii_bar_chart(topic_counts: list[tuple[str, int]], width: int = 18) -> str:
+    """ASCII-горизонтальная гистограмма по топу тем за неделю.
+
+    `topic_counts` — список (название, score) уже в порядке убывания.
+    width — максимальное число символов в самом длинном баре.
+    """
+    if not topic_counts:
+        return ""
+    max_val = max(n for _, n in topic_counts) or 1
+    name_w = max(len(name) for name, _ in topic_counts)
+    lines: list[str] = []
+    for name, val in topic_counts:
+        bar_len = max(1, round(width * val / max_val))
+        bar = "█" * bar_len
+        lines.append(f"{name.ljust(name_w)} │ {bar} {val}")
+    return "<pre>" + "\n".join(lines) + "</pre>"
+
+
 async def _send_trending(target: Message | CallbackQuery):
     result = await api_client.get_trending()
     if not result:
@@ -165,9 +184,13 @@ async def _send_trending(target: Message | CallbackQuery):
     hot_events = result.get("hot_events", [])
     trending_topics = result.get("trending_topics", [])
 
-    topics_text = ", ".join(
-        f"{esc(_topic(t))} ({esc(n)})" for t, n in trending_topics[:5]
-    ) or "пока нет данных"
+    # ASCII-бар-чарт по топ-5 темам — заменяет старую запятую-строку.
+    topic_chart = _ascii_bar_chart(
+        [(_topic(t), int(n)) for t, n in trending_topics[:5]],
+        width=18,
+    )
+    if not topic_chart:
+        topic_chart = "<i>пока нет данных</i>"
 
     if hot_events:
         events_text = "\n\n".join(
@@ -182,8 +205,8 @@ async def _send_trending(target: Message | CallbackQuery):
 
     await send(
         target,
-        f"<b>Тренды IT-событий</b>\n\n"
-        f"<b>Горячие темы:</b> {topics_text}\n\n"
+        f"<b>🔥 Тренды IT-событий за 7 дней</b>\n\n"
+        f"<b>Горячие темы:</b>\n{topic_chart}\n\n"
         f"<b>Популярные события:</b>\n\n{events_text}",
     )
 
@@ -270,12 +293,10 @@ async def cb_profile_toggle_digest(callback: CallbackQuery):
 
     is_subscribed_now = not was_subscribed
     await callback.answer(result.get("message", "Готово."))
-    try:
+    with contextlib.suppress(Exception):
         await callback.message.edit_reply_markup(
             reply_markup=profile_actions_keyboard(is_subscribed_now)
         )
-    except Exception:
-        pass
 
 
 @router.callback_query(F.data == "more:trending")

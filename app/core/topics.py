@@ -19,8 +19,7 @@ EventMind стартует с курируемого «seed»-словаря (з
 from __future__ import annotations
 
 import re
-from typing import Iterable
-
+from collections.abc import Iterable
 
 # ---------------------------------------------------------------------------
 # Seed-словари — значения по умолчанию, с которыми проект поставляется.

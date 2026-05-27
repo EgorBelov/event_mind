@@ -1,14 +1,15 @@
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
-from app.db.dependencies import get_db
 from app.api.schemas.recommendation import InteractionCreate
 from app.api.services.recommendation_service import (
-    get_recommendations_for_user,
     create_interaction,
     get_event_interactions_for_user,
+    get_recommendations_for_user,
     get_saved_events_for_user,
+    undo_last_interaction,
 )
+from app.db.dependencies import get_db
 
 router = APIRouter(prefix="/recommendations", tags=["recommendations"])
 
@@ -39,3 +40,9 @@ def get_interactions(telegram_id: int, event_id: int, db: Session = Depends(get_
 @router.get("/{telegram_id}/saved")
 def get_saved_events(telegram_id: int, db: Session = Depends(get_db)):
     return get_saved_events_for_user(db, telegram_id)
+
+
+@router.post("/{telegram_id}/undo")
+def undo_interaction(telegram_id: int, db: Session = Depends(get_db)):
+    """Откатить последнее like/dislike/save пользователя."""
+    return undo_last_interaction(db, telegram_id)

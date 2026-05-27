@@ -3,10 +3,10 @@ from fastapi.responses import HTMLResponse
 from sqlalchemy.orm import Session
 
 from app.db.dependencies import get_db
-from app.db.models.user import User
 from app.db.models.event import Event
-from app.db.models.raw_event import RawEvent
 from app.db.models.interaction import Interaction
+from app.db.models.raw_event import RawEvent
+from app.db.models.user import User
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 

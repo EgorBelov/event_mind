@@ -8,8 +8,9 @@
 """
 from __future__ import annotations
 
+import contextlib
 import json
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from sqlalchemy.orm import Session
 
@@ -36,12 +37,12 @@ def find_semantic_duplicate(
     th = threshold if threshold is not None else settings.dedup_threshold
 
     try:
-        from app.recommender.embeddings import embed_text, cosine_similarity
+        from app.recommender.embeddings import cosine_similarity, embed_text
         cand_vec = embed_text(candidate_text)
     except Exception:
         return None
 
-    cutoff = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=lookback_days)
+    cutoff = datetime.now(UTC).replace(tzinfo=None) - timedelta(days=lookback_days)
     query = (
         db.query(Event)
         .filter(Event.embedding.isnot(None))
@@ -50,10 +51,8 @@ def find_semantic_duplicate(
     )
     # Pre-filter по created_at если есть колонка (она есть) — но не делаем это
     # обязательным, чтобы тесты с in-memory БД и server_default-now() работали.
-    try:
+    with contextlib.suppress(Exception):
         query = query.filter(Event.created_at >= cutoff)
-    except Exception:
-        pass
 
     best: tuple[float, Event] | None = None
     for ev in query.all():

@@ -3,9 +3,9 @@ from pathlib import Path
 
 from sqlalchemy.orm import Session
 
+from app.core.topics import slugify_code, topic_title
 from app.db.models.event import Event
-from app.db.models.topic import Topic, EventTopic
-from app.core.topics import topic_title, slugify_code
+from app.db.models.topic import EventTopic, Topic
 
 
 def _get_or_create_topic(db: Session, code: str) -> Topic:

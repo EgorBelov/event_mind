@@ -1,6 +1,6 @@
+from app.core.topics import format_label, topic_title
+from app.recommender.scoring import _get_event_topic_codes, _get_user_topic_codes
 from app.recommender.user_model import parse_topic_weights
-from app.recommender.scoring import _get_user_topic_codes, _get_event_topic_codes
-from app.core.topics import topic_title, format_label
 
 
 def explain_event_for_user(user, event, db=None) -> str:
@@ -65,9 +65,9 @@ def explain_event_detailed(
     # Семантическое сходство (best-effort)
     try:
         from app.recommender.embeddings import (
-            get_or_build_user_embedding,
-            get_or_build_event_embedding,
             cosine_similarity,
+            get_or_build_event_embedding,
+            get_or_build_user_embedding,
         )
         user_emb = get_or_build_user_embedding(user)
         event_emb = get_or_build_event_embedding(event)
@@ -90,7 +90,12 @@ def explain_event_detailed(
     # и posterior mean > prior (0.5) — добавляем как признак.
     if db is not None and getattr(user, "id", None) is not None:
         try:
-            from app.recommender.bayesian import load_user_stats, posterior_mean, PRIOR_ALPHA, PRIOR_BETA
+            from app.recommender.bayesian import (
+                PRIOR_ALPHA,
+                PRIOR_BETA,
+                load_user_stats,
+                posterior_mean,
+            )
             stats = load_user_stats(db, user.id)
             if stats:
                 pm = posterior_mean(stats, event_topics)
@@ -141,8 +146,8 @@ def explain_event_detailed(
 
 
 def _explain_from_interactions(user, event, db) -> list[str]:
-    from app.db.models.interaction import Interaction
     from app.db.models.event import Event
+    from app.db.models.interaction import Interaction
 
     reasons: list[str] = []
     event_topics = _get_event_topic_codes(event)

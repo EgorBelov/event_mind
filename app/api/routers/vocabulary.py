@@ -8,7 +8,6 @@
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
-from app.db.dependencies import get_db
 from app.core.topics import (
     city_label,
     format_label,
@@ -19,6 +18,7 @@ from app.core.topics import (
     level_label,
     topic_title,
 )
+from app.db.dependencies import get_db
 
 router = APIRouter(prefix="/vocabulary", tags=["vocabulary"])
 

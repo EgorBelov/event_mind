@@ -3,9 +3,9 @@ from pathlib import Path
 
 from sqlalchemy.orm import Session
 
-from app.db.models.raw_event import RawEvent
-from app.db.models.event import Event
 from app.api.services.event_service import _attach_event_topics
+from app.db.models.event import Event
+from app.db.models.raw_event import RawEvent
 
 
 def load_raw_events(db: Session, file_path: str = "data/events_raw.json") -> dict:

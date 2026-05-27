@@ -41,26 +41,38 @@ hybrid-рекомендера (rule + embeddings) и планировщика е
 
 Реализованный функционал:
 - настройка профиля через Telegram inline-меню (темы, формат, город);
+- 4-экранный onboarding-тур (`/start` / `/tour`) с inline-навигацией;
+- deep-linking `t.me/<bot>?start=event_<id>` — открывает карточку события сразу;
 - регистрация / обновление пользователя через API;
 - загрузка событий из JSON, парсинг событий с Habr (HTML, BeautifulSoup);
 - AI-нормализация сырых событий через LangGraph + Groq LLM;
 - генерация `summary`, `tech_stack`, `seniority`, `quality_score`, `hype_score`;
 - detection дубликатов событий (`SequenceMatcher`, порог 0.85);
-- hybrid-рекомендации: rule + cosine similarity по `sentence-transformers`
-  (`paraphrase-multilingual-MiniLM-L12-v2`);
-- LangGraph-граф рекомендаций (`user_profile → event_analyzer → recommendation → explanation`);
+- hybrid-рекомендации: rule + cosine + Bayesian Thompson + LinUCB + LightGCN +
+  quality + hype + freshness + skill-gap + MMR-диверсификация;
+- быстрые AI-рекомендации (`/agent-recommendations/{tid}/cards?limit=N`):
+  hybrid отбирает top-N, один LLM-вызов пишет объяснения батчем (~3 c против
+  старых ~15 c, `limit` 1..10 реально работает);
 - объяснения рекомендаций с учётом history-signals (лайков, сохранений, формата);
+- компактная строка «💡 Почему» в карточке (топ-3 компонента из score_breakdown);
 - семантический поиск (`/semantic`, `/events/semantic-search`);
 - keyword-поиск (`/search`, `/events/search`);
 - похожие события (по пересечению тем);
 - персональная статистика пользователя (`/stats`);
+- `/undo` — откат последнего like/dislike/save с отменой всех side-effects
+  (веса, Bayesian, LinUCB);
 - холодный старт через `/bio` (LLM или keyword-rules);
-- AI Copilot (`/copilot <цель>`) — roadmap-агент по цели пользователя;
-- trending-аналитика (`/trending`) — горячие события и темы;
+- AI Copilot (`/copilot <цель>`) — Supervisor-Worker граф из 5 специалистов;
+- trending-аналитика (`/trending`) с ASCII-bar-графиком тем за 7 дней;
 - подписки и ежедневный AI-дайджест (APScheduler, интервал 24 ч);
 - HTML admin-дашборд (`/admin/`);
 - аналитика по темам и взаимодействиям (`/analytics/*`);
-- Alembic-миграции (initial + summary/embedding + enriched fields).
+- композитный `/health` (БД, прогрев эмбеддингов, доступность Groq LLM);
+- Alembic-миграции (9 ревизий, включая pgvector для PostgreSQL);
+- хранение эмбеддингов: JSON-Text для SQLite-dev, `vector(384)` + IVFFlat
+  для PostgreSQL-prod (включается миграцией `9a1b2c3d4e5f_add_pgvector`);
+- автоматический fallback Groq LLM на резервную модель при rate-limit'е
+  primary (`_GroqWithFallback`).
 
 ---
 
@@ -384,6 +396,46 @@ curl -X POST http://localhost:8000/ingestion/normalize
 
 ---
 
+## PostgreSQL + pgvector (опционально, для продакшена)
+
+Прод-вариант — PostgreSQL с расширением `pgvector`: top-k поиск событий
+выполняется на стороне БД через оператор `<=>` (cosine distance) с
+индексом IVFFlat, а не в Python-цикле. На датасете 10⁴–10⁵ событий это
+ускоряет `/copilot` и semantic-search на порядок.
+
+Переключение управляется одним только `DATABASE_URL`. Код автоматически
+определяет backend (`app/db/backend.py:has_pgvector`) и выбирает быстрый
+путь, если расширение доступно. На SQLite/без pgvector работает прежняя
+in-process сортировка по cosine — функциональность идентична.
+
+```bash
+# 1. Создать БД и расширение vector (один раз, требуются права superuser)
+psql -U postgres -c "CREATE DATABASE eventmind;"
+psql -U postgres -d eventmind -c "CREATE EXTENSION IF NOT EXISTS vector;"
+
+# 2. В .env переключиться на Postgres
+# DATABASE_URL=postgresql+psycopg2://user:pass@localhost:5432/eventmind
+
+# 3. Накатить миграции — последняя 9a1b2c3d4e5f добавит embedding_vec
+#    и IVFFlat-индекс по событиям
+alembic upgrade head
+
+# 4. (опционально) если данные приехали со SQLite — перенести JSON → vector
+DATABASE_URL=postgresql+psycopg2://... python -m scripts.backfill_pgvector
+```
+
+После этого `retrieve_events_for_query` и cosine-компонент hybrid'а
+используют pgvector-ветку. Новые события пишут в обе колонки
+(`embedding` JSON + `embedding_vec`) — это даёт безопасный rollback.
+
+Если `pgvector` не установлен на сервере (`CREATE EXTENSION` падает с
+«extension is not available»):
+- Postgres.app / brew — расширение в комплекте: `brew install pgvector`;
+- EnterpriseDB-инсталлер — собрать из исходников
+  (`make PG_CONFIG=/Library/PostgreSQL/15/bin/pg_config && sudo make install`).
+
+---
+
 ## Переменные окружения
 
 Все переменные читаются через `pydantic-settings` из файла `.env`
@@ -395,7 +447,10 @@ curl -X POST http://localhost:8000/ingestion/normalize
 | `DATABASE_URL`   | `sqlite:///./eventmind.db`    | SQLAlchemy URL. Для PostgreSQL: `postgresql://user:pass@host:5432/db`. |
 | `API_HOST`       | `http://localhost:8000`       | Базовый URL FastAPI, который дёргают bot и scheduler.          |
 | `GROQ_API_KEY`   | —                             | Ключ Groq Cloud для LLM-агентов. Без него агенты падают, система деградирует до rule-based. |
-| `GROQ_MODEL`     | `llama-3.3-70b-versatile`     | Имя модели Groq.                                               |
+| `GROQ_MODEL`     | `llama-3.3-70b-versatile`     | Имя primary-модели Groq.                                       |
+| `GROQ_FALLBACK_MODEL` | `llama-3.1-8b-instant`   | Резервная модель — при rate-limit'е/отзыве primary `_GroqWithFallback` автоматически переключается. |
+| `GROQ_TEMPERATURE` | `0.4`                       | Temperature для обоих моделей.                                  |
+| `GROQ_MAX_RETRIES` | `2`                         | Retries при сетевых ошибках Groq.                              |
 | `DEBUG`          | `false`                       | Включает verbose-логи и SQL echo.                              |
 | `RSS_FEEDS`            | `""`        | Список RSS/Atom-лент через запятую для `/ingestion/load-rss`.        |
 | `INGEST_ENABLED`       | `true`      | Включает периодический ingestion внутри scheduler-процесса.          |
@@ -475,19 +530,22 @@ docker compose down               # остановить
 
 | Команда / текст              | Что делает                                                                       |
 |------------------------------|----------------------------------------------------------------------------------|
-| `/start`                     | Запускает мастер настройки профиля (темы → формат → город). Сохраняет через API. |
+| `/start`                     | Запускает мастер настройки профиля (темы → формат → город) + 4-экранный onboarding-тур. |
+| `/start event_<id>`          | Deep-link: открывает карточку события по id (для шеринга из веба).                |
+| `/tour`                      | Повторить onboarding-тур по командам в любой момент.                              |
 | `/edit`                      | Перезапуск мастера, чтобы переопределить темы/формат/город.                      |
 | `/profile`                   | Показывает текущий профиль и веса интересов.                                     |
-| `/recommend`                 | Лента rule+embedding рекомендаций; общая карточка-клавиатура 👍 / 👎 / ⭐ / «Похожие» / «Следующее». |
-| **AI-рекомендации** (кнопка) | Та же карточка-клавиатура, но события готовит LangGraph-граф (Groq LLM); листание режимом `ai`. |
+| `/recommend`                 | Лента hybrid-рекомендаций; карточка-клавиатура 👍 / 👎 / ⭐ / «Похожие» / «Следующее». В карточке — строка «💡 Почему» с топ-3 компонентами score. |
+| **AI-рекомендации** (кнопка) | hybrid отбирает кандидатов, один LLM-вызов пишет AI-объяснения (вариант C). По умолчанию 5 карточек, параметр `?limit=N` 1..10. |
 | `/saved`                     | Список сохранённых событий.                                                      |
 | `/stats`                     | Личная статистика: лайки/дизлайки/сохранения, топ тем, последние действия.       |
+| `/undo`                      | Откатить последнее like / dislike / save (тогглит и сбрасывает Bayesian + LinUCB). |
 | `/search <запрос>`           | Keyword-поиск по `title` / `description` / темам / формату / городу.             |
 | `Найти: <запрос>`            | Reply-кнопка-эквивалент `/search`.                                               |
-| `/semantic <запрос>`         | Семантический поиск через embeddings (cosine similarity).                        |
+| `/semantic <запрос>`         | Семантический поиск через embeddings (на PostgreSQL — через pgvector).           |
 | `/bio <текст>`               | Холодный старт: LLM (или keyword-rules) извлекает темы из текста и обновляет профиль. |
-| `/trending`                  | Горячие события и темы за 7 дней (likes×3 + saves×2).                            |
-| `/copilot <цель>`            | AI Copilot: формирует roadmap-ответ + подбор событий под цель пользователя.      |
+| `/trending`                  | Горячие события и темы за 7 дней + ASCII-bar-график по топ-5 темам.              |
+| `/copilot <цель>`            | AI Copilot (Supervisor-Worker): roadmap / career coach / explainer / summary в зависимости от intent'а. |
 | `/subscribe`                 | Подписка на ежедневный AI-дайджест.                                              |
 | `/unsubscribe`               | Отписка от дайджеста.                                                            |
 
@@ -673,18 +731,32 @@ AI-дайджеста раз в `INGEST_INTERVAL_HOURS` часов (по умо�
 
 Три графа в `app/agents/`:
 
-### 1. Recommendation graph (`recommendation/graph.py`)
+### 1. AI-рекомендации (вариант C, без LangGraph)
+
+Старый 4-нодовый граф `user_profile → event_analyzer → recommendation →
+explanation` оставлен в репозитории (`app/agents/recommendation/graph.py`),
+но **не используется в endpoint'е** `/agent-recommendations/*`: он делал
+4 LLM-вызова с пересылкой всего каталога событий в каждый промпт и
+работал ~12-18 c, возвращая ровно 3 карточки.
+
+Сейчас в `app/api/services/ai_recommendation_service.py`:
 
 ```
-START → user_profile_agent → event_analyzer_agent
-      → recommendation_agent → explanation_agent → END
+hybrid_score (детерминированно, ~ms) → top-N кандидатов
+                ↓
+        один LLM-вызов с pydantic-схемой AIReasonBatch
+                ↓
+        {event_id: reason} → подмена `explanation` в карточках
 ```
 
-State: `RecommendationState` (`user_profile`, `events`, `user_analysis`,
-`events_analysis`, `ranked_event_ids`, `ranked_cards`, `final_answer`).
+Поля карточки совпадают с `/recommendations`, поэтому UI бота показывает
+их той же `format_event_card`-функцией, включая строку «💡 Почему».
+Параметр `limit` (1..10) реально работает.
 
-Возвращает финальный текст (`final_answer`) и набор карточек `ranked_cards`
-(используются в `/agent-recommendations/{tid}/cards`).
+При rate-limit'е или сбое LLM — обёртка `_GroqWithFallback`
+автоматически повторяет запрос на `groq_fallback_model`. Если упала и
+fallback-модель — карточки отдаются с rule-based-explanation
+(полный фолбэк без даунтайма).
 
 ### 2. Event normalization agent (`event_normalization/agent.py`)
 
@@ -795,10 +867,10 @@ LLM-провайдер: `ChatGroq` (см. `app/agents/recommendation/llm.py`), �
 
 ### System
 
-| Метод | URL        | Описание                                |
-|-------|------------|-----------------------------------------|
-| GET   | `/`        | Корневой ответ: `{"message", "docs"}`.  |
-| GET   | `/health`  | Healthcheck: `{"status": "ok"}`.        |
+| Метод | URL        | Описание                                                                |
+|-------|------------|-------------------------------------------------------------------------|
+| GET   | `/`        | Корневой ответ: `{"message", "docs", "health"}`.                        |
+| GET   | `/health`  | Композитный healthcheck: `{"status": "ok"|"degraded", "components": {"db": {ok, latency_ms}, "embeddings": {ok, warmed_up}, "llm": {ok, primary_model, fallback_model}}}`. |
 
 ### Users (`/users`)
 
@@ -817,7 +889,8 @@ LLM-провайдер: `ChatGroq` (см. `app/agents/recommendation/llm.py`), �
 | POST  | `/events/load`                     | —                                                                      | Загружает события из `data/events.json` (если не дубликат по title).  |
 | GET   | `/events/`                         | —                                                                      | Список всех событий с расширенным набором полей (summary, scores).    |
 | GET   | `/events/search`                   | `q`, `topics` (csv), `format`, `city` — все опциональны                | Keyword-поиск по `title/description` + фильтры.                       |
-| GET   | `/events/semantic-search`          | `q` (required), `limit` (1..20, по умолчанию 5)                        | Поиск по embedding-сходству.                                          |
+| GET   | `/events/semantic-search`          | `q` (required), `limit` (1..20, по умолчанию 5)                        | Поиск по embedding-сходству. На PostgreSQL — pgvector top-k через `<=>`. |
+| GET   | `/events/{event_id}`               | —                                                                      | Карточка одного события — нужно для deep-link'а из бота.              |
 | GET   | `/events/{event_id}/similar`       | `limit` (1..10, по умолчанию 3)                                        | События со схожими темами.                                            |
 
 ### Recommendations (`/recommendations`)
@@ -826,15 +899,21 @@ LLM-провайдер: `ChatGroq` (см. `app/agents/recommendation/llm.py`), �
 |-------|--------------------------------------------------------------|-------------------------------------------------|-----------------------------------------------------------|
 | GET   | `/recommendations/{telegram_id}`                             | —                                               | Hybrid-рекомендации, сортировка по `score` desc.          |
 | POST  | `/recommendations/interactions`                              | `{"telegram_id", "event_id", "action": "like|dislike|save"}` | Сохраняет действие, апдейтит веса тем.                    |
+| POST  | `/recommendations/{telegram_id}/undo`                        | —                                               | Откатить последнее действие пользователя (toggle off).    |
 | GET   | `/recommendations/{telegram_id}/event/{event_id}/interactions` | —                                             | Список действий пользователя по конкретному событию.      |
 | GET   | `/recommendations/{telegram_id}/saved`                       | —                                               | Сохранённые события пользователя.                         |
 
-### Agent recommendations (`/agent-recommendations`)
+### Agent recommendations (`/agent-recommendations`) — вариант C
+
+Старый 4-нодовый граф LangGraph убран из endpoint'а: он делал 4 LLM-вызова
+и работал ~12-18 c. Сейчас hybrid_score отбирает top-N кандидатов
+детерминированно, а ОДИН LLM-вызов пишет короткие AI-объяснения для всех
+карточек батчем (~3 c). Параметр `limit` (1..10) реально работает.
 
 | Метод | URL                                                | Параметры                       | Описание                                                                       |
 |-------|----------------------------------------------------|---------------------------------|--------------------------------------------------------------------------------|
-| GET   | `/agent-recommendations/{telegram_id}`             | —                               | Прогон LangGraph-графа, возвращает `{success, answer}` (текстовый ответ LLM).  |
-| GET   | `/agent-recommendations/{telegram_id}/cards`       | `limit` (1..10, по умолчанию 3) | Прогон графа + карточки. Fallback на rule-based, если LLM упал.                |
+| GET   | `/agent-recommendations/{telegram_id}`             | `limit` (1..10, default 5)      | Возвращает `{success, answer, cards}` — нарратив + карточки.                   |
+| GET   | `/agent-recommendations/{telegram_id}/cards`       | `limit` (1..10, default 5)      | Только карточки. Поля совпадают с `/recommendations` + AI-`explanation`. Фолбэк на rule-based, если LLM недоступна. |
 
 ### Copilot (`/copilot`)
 
@@ -930,15 +1009,32 @@ HTML-страницу с карточками:
 ## Тесты
 
 ```bash
-pytest                  # запустить весь набор
+pytest                  # 170 тестов, ~70 c
 pytest tests/test_scoring.py -v
+ruff check app/         # 0 ошибок (line-length=100, py312)
 ```
 
-Состав:
+Состав (170 тестов, 24 файла):
 - `test_scoring.py` — rule-based scoring (темы, веса, формат, город).
 - `test_user_model.py` — парсинг / сериализация весов, применение фидбэка.
 - `test_interactions.py` — like / dislike / save и обновление весов.
 - `test_new_features.py` — embeddings, hybrid, explain, ingestion-helpers.
+- `test_bayesian.py` / `test_bayes_decay.py` — Beta-апдейты, Thompson, decay.
+- `test_retrieval.py` — RAG retrieval + interaction context.
+- `test_multi_objective.py` — breakdown, freshness, quality+hype, MMR.
+- `test_dedup.py` — semantic dedup threshold + edge cases.
+- `test_cold_start.py` — `apply_cold_start`: веса + Bayesian.
+- `test_skill_gap.py` — UserSkillProfile + skill-gap scoring.
+- `test_bandit.py` — LinUCB context_vector + UCB + online update.
+- `test_gnn.py` — LightGCN train + score.
+- `test_copilot_tools.py` — function-calling tool dispatch.
+- `test_multi_source.py` — KudaGo/Lu.ma/Meetup/TG (офлайн-моки).
+- `test_supervisor.py` — intent classification + keyword fallback.
+- `test_specialists.py` — каждый специалист изолированно.
+- `test_copilot_graph_e2e.py` — полный граф Copilot.
+- `test_memory.py` / `test_memory_integration.py` — long-term memory.
+- `test_card_format.py`, `test_ingestion.py`, `test_scheduler.py`,
+  `test_db_session.py`.
 
 ---
 
@@ -955,11 +1051,19 @@ alembic revision --autogenerate -m "add some field"
 alembic downgrade -1
 ```
 
-История миграций в `alembic/versions/`:
+История миграций в `alembic/versions/` (9 ревизий):
 - `6af520bb31e0_initial_schema` — базовые таблицы;
 - `7b1c9d2e3a4f_add_summary_embedding_to_events` — поля `summary`, `embedding`;
 - `b3c4d5e6f7a8_add_enriched_fields` — `tech_stack`, `seniority`,
-  `quality_score`, `hype_score`.
+  `quality_score`, `hype_score`;
+- `c5d6e7f89012_add_user_topic_stats` — Bayesian Beta-параметры (α, β);
+- `d6e7f8901234_add_user_skill_profile` — skill-профиль для cold start;
+- `e7f890123456_add_copilot_sessions` — многоtuровая история Copilot;
+- `f8901234abcd_add_bandit_state` — LinUCB-матрицы;
+- `abcd1234ef56_add_user_memories` — long-term memory agent (mem0-style);
+- `9a1b2c3d4e5f_add_pgvector` — **только PostgreSQL**: `CREATE EXTENSION
+  vector`, колонки `events.embedding_vec` / `users.embedding_vec` типа
+  `vector(384)`, IVFFlat-индекс. На SQLite миграция no-op.
 
 ---
 

@@ -26,23 +26,25 @@ def retrieve_events_for_query(
     """Найти top-k событий, наиболее близких к запросу пользователя.
 
     Семантика: эмбеддинг(query) ⊕ эмбеддинг(user) (50/50) → cosine vs event.
-    Если sentence-transformers недоступен — отдаём fallback по ключевым словам.
+
+    Backend:
+    - PostgreSQL + pgvector: top-k через `embedding_vec <=> :query` (индекс IVFFlat).
+    - SQLite или нет pgvector: in-process сортировка по cosine_similarity.
+
+    Если sentence-transformers недоступен — отдаём fallback по подстроке.
     Возвращает список dict с полями для Copilot-промпта + `_score`.
     """
-    events = db.query(Event).limit(candidate_pool).all()
-    if not events:
-        return []
-
     try:
-        from app.recommender.embeddings import (
-            embed_text,
-            get_or_build_user_embedding,
-            ensure_event_embeddings,
-            cosine_similarity,
-        )
         import numpy as np
 
-        # Эмбеддинг запроса + персонализация: 50% запрос, 50% профиль.
+        from app.recommender.embeddings import (
+            cosine_similarity,
+            embed_text,
+            ensure_event_embeddings,
+            get_or_build_user_embedding,
+            pgvector_top_k_events,
+        )
+
         q_emb = np.array(embed_text(query), dtype=float)
         try:
             u_emb = np.array(get_or_build_user_embedding(user), dtype=float)
@@ -52,7 +54,19 @@ def retrieve_events_for_query(
         except Exception:
             combined = q_emb
 
-        # Все эмбеддинги событий должны быть посчитаны.
+        # Fast path: pgvector — оператор <=> сам отсортирует и ограничит до k.
+        pg_ids = pgvector_top_k_events(db, combined.tolist(), k=k)
+        if pg_ids:
+            id_to_event = {
+                e.id: e for e in db.query(Event).filter(Event.id.in_(pg_ids)).all()
+            }
+            ordered = [id_to_event[i] for i in pg_ids if i in id_to_event]
+            return [_serialize_event(e, score=None) for e in ordered]
+
+        # Slow path (SQLite / нет pgvector): подгружаем кандидатов, считаем cosine в Python.
+        events = db.query(Event).limit(candidate_pool).all()
+        if not events:
+            return []
         ensure_event_embeddings(db, events)
 
         scored: list[tuple[float, Event]] = []
@@ -73,6 +87,7 @@ def retrieve_events_for_query(
 
     except Exception:
         # Fallback: грубое совпадение по подстроке.
+        events = db.query(Event).limit(candidate_pool).all()
         q_low = query.lower()
         ranked = sorted(
             events,

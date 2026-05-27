@@ -9,12 +9,11 @@ from __future__ import annotations
 import json
 import logging
 import re
-from typing import Literal, Optional
+from typing import Literal
 
 from pydantic import BaseModel, Field, ValidationError
 
 from app.agents.copilot.state import CopilotState
-
 
 logger = logging.getLogger(__name__)
 
@@ -31,11 +30,11 @@ class SupervisorDecision(BaseModel):
         )
     )
     reasoning: str = Field(description="Одной фразой — почему именно этот intent.")
-    target_event_id: Optional[int] = Field(
+    target_event_id: int | None = Field(
         default=None,
         description="Если intent=explain и упомянут конкретный event_id — указать его.",
     )
-    horizon_months: Optional[int] = Field(
+    horizon_months: int | None = Field(
         default=None,
         description="Если intent=roadmap и упомянут срок — число месяцев.",
     )
@@ -77,7 +76,8 @@ def _llm_classify(goal: str, history_str: str) -> SupervisorDecision | None:
     шаблонизатор интерпретировал бы как переменные.
     """
     try:
-        from langchain_core.messages import SystemMessage, HumanMessage
+        from langchain_core.messages import HumanMessage, SystemMessage
+
         from app.agents.recommendation.llm import llm
         user_msg = f"Текущий запрос:\n{goal}\n\nИстория диалога:\n{history_str}\n\nВерни JSON-решение."
         response = llm.invoke([SystemMessage(content=_SUPERVISOR_SYSTEM), HumanMessage(content=user_msg)])

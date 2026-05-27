@@ -18,7 +18,6 @@ from sqlalchemy.orm import Session
 
 from app.db.models.user_skill_profile import UserSkillProfile
 
-
 logger = logging.getLogger(__name__)
 
 

@@ -19,17 +19,15 @@ from __future__ import annotations
 
 import json
 import logging
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field, ValidationError
-from sqlalchemy import desc
 from sqlalchemy.orm import Session
 
-from app.db.models.user import User
 from app.db.models.event import Event
+from app.db.models.user import User
 from app.db.models.user_memory import UserMemory
-
 
 logger = logging.getLogger(__name__)
 
@@ -44,7 +42,7 @@ COMPACT_TARGET_PER_CATEGORY = 5 # сколько оставить в каждо�
 
 
 def _utcnow() -> datetime:
-    return datetime.now(timezone.utc).replace(tzinfo=None)
+    return datetime.now(UTC).replace(tzinfo=None)
 
 
 # ─── Pydantic-схемы для LLM-извлечения ───────────────────────────────────
@@ -124,7 +122,7 @@ def recall(
 
     ranked: list[tuple[float, UserMemory]] = []
     try:
-        from app.recommender.embeddings import embed_text, cosine_similarity
+        from app.recommender.embeddings import cosine_similarity, embed_text
         q_vec = embed_text(query)
         for row in rows:
             sim = 0.0
@@ -210,7 +208,8 @@ def _parse_llm_json(content: str) -> dict | None:
 def _llm_extract(system_prompt: str, user_msg: str) -> MemoryExtractionResult:
     """Общий extract-шаг. При сбое возвращает пустой результат."""
     try:
-        from langchain_core.messages import SystemMessage, HumanMessage
+        from langchain_core.messages import HumanMessage, SystemMessage
+
         from app.agents.recommendation.llm import llm
         response = llm.invoke([SystemMessage(content=system_prompt), HumanMessage(content=user_msg)])
         data = _parse_llm_json(response.content or "")

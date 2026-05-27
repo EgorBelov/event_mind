@@ -1,11 +1,11 @@
 from sqlalchemy.orm import Session
 
-from app.db.models.user import User
+from app.api.schemas.user import UserCreate
+from app.core.topics import get_allowed_topics, slugify_code, topic_title
 from app.db.models.event import Event
 from app.db.models.interaction import Interaction
 from app.db.models.topic import Topic, UserTopic
-from app.api.schemas.user import UserCreate
-from app.core.topics import topic_title, slugify_code, get_allowed_topics
+from app.db.models.user import User
 from app.recommender.user_model import (
     build_initial_topic_weights,
     dump_topic_weights,
@@ -121,7 +121,7 @@ def analyze_bio_and_update_topics(db: Session, telegram_id: int, bio_text: str) 
     # 1) Полный bio-профиль через структурированный LLM.
     cold_start_applied = {}
     try:
-        from app.recommender.cold_start import extract_bio_profile, apply_cold_start
+        from app.recommender.cold_start import apply_cold_start, extract_bio_profile
         profile = extract_bio_profile(bio_text)
     except Exception:
         profile = None
@@ -198,6 +198,7 @@ def _extract_topics_from_bio(bio_text: str, db: Session | None = None) -> list[s
     allowed = get_allowed_topics(db)
     try:
         from langchain_core.prompts import ChatPromptTemplate
+
         from app.agents.recommendation.llm import llm
 
         prompt = ChatPromptTemplate.from_messages([

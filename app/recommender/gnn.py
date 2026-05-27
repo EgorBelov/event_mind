@@ -27,13 +27,11 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 from pathlib import Path
 
 import numpy as np
 
 from app.core.config import settings
-
 
 logger = logging.getLogger(__name__)
 
@@ -132,9 +130,9 @@ def train_gnn(db, layers: int = DEFAULT_LAYERS) -> dict:
 
     Возвращает мета: размеры графа, число шагов, путь к кэшу.
     """
-    from app.db.models.user import User
     from app.db.models.event import Event
     from app.db.models.interaction import Interaction
+    from app.db.models.user import User
 
     users = db.query(User).all()
     events = db.query(Event).all()

@@ -6,17 +6,16 @@ tool-calling API.
 """
 from __future__ import annotations
 
-import json
 from typing import Any
 
 from sqlalchemy.orm import Session
 
 from app.db.models.event import Event
-from app.db.models.user import User
 from app.db.models.interaction import Interaction
+from app.db.models.user import User
+from app.recommender.retrieval import retrieve_events_for_query
 from app.recommender.scoring import _get_event_topic_codes, _get_user_topic_codes
 from app.recommender.user_model import parse_topic_weights
-from app.recommender.retrieval import retrieve_events_for_query
 
 
 def tool_search_events(db: Session, telegram_id: int, query: str, k: int = 5) -> dict[str, Any]:

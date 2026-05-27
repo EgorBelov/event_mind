@@ -10,6 +10,12 @@ jinja2
 # --- DB ---
 sqlalchemy==2.0.29
 alembic==1.13.2
+# PostgreSQL driver — нужен только если DATABASE_URL начинается с postgresql.
+# Для dev на SQLite оставляется неиспользуемой зависимостью.
+psycopg2-binary==2.9.9
+# pgvector-extension для PostgreSQL: типы Vector + операторы <->, <=>, <#>.
+# Активируется alembic-миграцией 9a1b2c3d4e5f_add_pgvector только на PG.
+pgvector==0.3.2
 
 # --- Telegram ---
 aiogram==3.13.1

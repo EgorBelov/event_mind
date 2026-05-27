@@ -18,18 +18,17 @@ Backward compatibility: интерфейс copilot_graph.invoke({...}) сохр�
 """
 from __future__ import annotations
 
-from langgraph.graph import StateGraph, START, END
+from langgraph.graph import END, START, StateGraph
 
-from app.agents.copilot.state import CopilotState
-from app.agents.copilot.supervisor import supervisor_node, route_after_supervisor
 from app.agents.copilot.specialists import (
-    recommendation_specialist_node,
     career_coach_node,
-    roadmap_planner_node,
     event_explainer_node,
+    recommendation_specialist_node,
+    roadmap_planner_node,
     summary_specialist_node,
 )
-
+from app.agents.copilot.state import CopilotState
+from app.agents.copilot.supervisor import route_after_supervisor, supervisor_node
 
 # ─── Pre-supervisor retrieve (общий для всех специалистов) ───────────────
 
@@ -39,9 +38,9 @@ def retrieve_node(state: CopilotState) -> dict:
     и срез истории. Если специалист сам решит, что нужно ещё — он вызовет
     `search_events` tool.
     """
-    from app.recommender.retrieval import retrieve_events_for_query, build_interaction_context
     from app.agents.copilot.common import build_user_profile_snapshot
     from app.db.models.user import User
+    from app.recommender.retrieval import build_interaction_context, retrieve_events_for_query
 
     db = state["db"]
     user = db.query(User).filter(User.telegram_id == state["telegram_id"]).first()

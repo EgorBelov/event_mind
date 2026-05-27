@@ -1,6 +1,5 @@
 import json
 
-
 DEFAULT_TOPIC_WEIGHT = 3
 LIKE_BONUS = 3
 SAVE_BONUS = 1

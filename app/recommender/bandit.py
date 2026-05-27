@@ -20,14 +20,12 @@ from __future__ import annotations
 import json
 import logging
 import math
-from typing import Any
 
 import numpy as np
 from sqlalchemy.orm import Session
 
 from app.db.models.user_bandit_state import UserBanditState
 from app.recommender.scoring import _get_event_topic_codes, _get_user_topic_codes
-
 
 logger = logging.getLogger(__name__)
 

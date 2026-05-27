@@ -6,12 +6,11 @@
 - пишут в state: `answer`, `recommended_event_ids`, `specialist`, `tool_calls_log`;
 - best-effort: при сбое возвращают fallback-сообщение, но не ломают граф.
 """
-from app.agents.copilot.specialists.recommendation import recommendation_specialist_node
 from app.agents.copilot.specialists.career_coach import career_coach_node
-from app.agents.copilot.specialists.roadmap import roadmap_planner_node
 from app.agents.copilot.specialists.explainer import event_explainer_node
+from app.agents.copilot.specialists.recommendation import recommendation_specialist_node
+from app.agents.copilot.specialists.roadmap import roadmap_planner_node
 from app.agents.copilot.specialists.summary import summary_specialist_node
-
 
 __all__ = [
     "recommendation_specialist_node",

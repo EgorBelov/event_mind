@@ -34,6 +34,28 @@ class EventMindAPIClient:
         except httpx.HTTPError:
             return {}
 
+    async def get_event(self, event_id: int) -> dict:
+        try:
+            async with httpx.AsyncClient(timeout=_TIMEOUT) as c:
+                r = await c.get(f"{self.base_url}/events/{event_id}")
+                if r.status_code == 404:
+                    return {}
+                r.raise_for_status()
+                return r.json()
+        except httpx.HTTPError:
+            return {}
+
+    async def undo_last_interaction(self, telegram_id: int) -> dict:
+        try:
+            async with httpx.AsyncClient(timeout=_TIMEOUT) as c:
+                r = await c.post(f"{self.base_url}/recommendations/{telegram_id}/undo")
+                if r.status_code == 404:
+                    return {}
+                r.raise_for_status()
+                return r.json()
+        except httpx.HTTPError:
+            return {}
+
     async def get_recommendations(self, telegram_id: int) -> list[dict]:
         try:
             async with httpx.AsyncClient(timeout=_TIMEOUT) as c:
@@ -97,10 +119,13 @@ class EventMindAPIClient:
         except httpx.HTTPError:
             return {"message": "Не удалось отписаться. Попробуй позже."}
 
-    async def get_agent_recommendation_cards(self, telegram_id: int) -> dict:
+    async def get_agent_recommendation_cards(self, telegram_id: int, limit: int = 5) -> dict:
         try:
             async with httpx.AsyncClient(timeout=60.0) as c:
-                r = await c.get(f"{self.base_url}/agent-recommendations/{telegram_id}/cards")
+                r = await c.get(
+                    f"{self.base_url}/agent-recommendations/{telegram_id}/cards",
+                    params={"limit": limit},
+                )
                 r.raise_for_status()
                 return r.json()
         except httpx.HTTPError:

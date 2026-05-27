@@ -7,15 +7,13 @@ from __future__ import annotations
 
 import json
 
-from app.agents.copilot.state import CopilotState
 from app.agents.copilot.common import (
-    invoke_with_tools,
     format_history,
+    invoke_with_tools,
     parse_recommended_ids,
     strip_recommended_ids,
-    build_user_profile_snapshot,
 )
-
+from app.agents.copilot.state import CopilotState
 
 SPECIALIST_NAME = "recommendation_specialist"
 MAX_REVISIONS = 1
@@ -78,7 +76,8 @@ _CRITIC_SYSTEM = """\
 
 
 def _critique(plan: str, state: CopilotState) -> str:
-    from langchain_core.messages import SystemMessage, HumanMessage
+    from langchain_core.messages import HumanMessage, SystemMessage
+
     from app.agents.recommendation.llm import llm
     msg = (
         f"Цель: {state.get('goal', '')}\n\n"
@@ -96,7 +95,8 @@ _REVISE_SYSTEM = """\
 
 
 def _revise(plan: str, critique: str) -> str:
-    from langchain_core.messages import SystemMessage, HumanMessage
+    from langchain_core.messages import HumanMessage, SystemMessage
+
     from app.agents.recommendation.llm import llm
     msg = f"Предыдущий план:\n{plan}\n\nКритика:\n{critique}\n\nДай исправленный план полностью."
     response = llm.invoke([SystemMessage(content=_REVISE_SYSTEM), HumanMessage(content=msg)])

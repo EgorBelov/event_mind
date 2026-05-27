@@ -11,14 +11,13 @@ from __future__ import annotations
 
 import json
 
-from app.agents.copilot.state import CopilotState
 from app.agents.copilot.common import (
-    invoke_with_tools,
     format_history,
+    invoke_with_tools,
     parse_recommended_ids,
     strip_recommended_ids,
 )
-
+from app.agents.copilot.state import CopilotState
 
 SPECIALIST_NAME = "career_coach"
 

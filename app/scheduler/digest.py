@@ -16,9 +16,8 @@ from datetime import datetime, timedelta
 import httpx
 from dotenv import load_dotenv
 
-from app.core.config import API_HOST, settings
 from app.bot.utils import esc, to_plain
-
+from app.core.config import API_HOST, settings
 
 load_dotenv()
 BOT_TOKEN = os.getenv("BOT_TOKEN")
@@ -140,8 +139,8 @@ def compact_memories_once() -> None:
     важно, чтобы применились WAL/busy_timeout PRAGMA из app.db.session.
     """
     try:
-        from app.db.session import SessionLocal
         from app.db.models.user import User
+        from app.db.session import SessionLocal
         from app.recommender.memory import compact_user_memories
 
         db = SessionLocal()
