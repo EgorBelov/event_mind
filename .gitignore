@@ -95,6 +95,7 @@ htmlcov/
 *.db-wal
 *.db-shm
 *.db-journal
+*.db.bak
 
 
 # ======================

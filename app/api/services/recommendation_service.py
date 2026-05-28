@@ -280,9 +280,28 @@ def undo_last_interaction(db: Session, telegram_id: int) -> dict:
     }
 
 
+def _isolated(db, label: str):
+    """SAVEPOINT-обёртка для best-effort side-effects.
+
+    Без неё OperationalError из ненакаченной миграции (или сбой LLM/embedding
+    внутри write_memory.flush) переводил Session в aborted-state, и финальный
+    db.commit() основной транзакции падал с PendingRollbackError — запись
+    Interaction молча терялась, кнопка в боте не перерисовывалась.
+    """
+    @contextlib.contextmanager
+    def _cm():
+        sp = db.begin_nested()
+        try:
+            yield
+        except Exception as e:
+            logger.warning("%s failed (rolled back savepoint): %s", label, e)
+            sp.rollback()
+    return _cm()
+
+
 def _safe_bayes_update(db, user_id: int, event_topics, action: str, direction: int = 1) -> None:
     """Best-effort: не падать на feedback'е, если Bayesian-таблица недоступна."""
-    with contextlib.suppress(Exception):
+    with _isolated(db, "Bayesian update"):
         update_stats_from_feedback(db, user_id, event_topics, action, direction=direction)
 
 
@@ -290,7 +309,7 @@ def _safe_bandit_update(db, user, event, action: str, direction: int = 1) -> Non
     """Best-effort: обновить LinUCB-параметры по feedback."""
     if not settings.bandit_enabled:
         return
-    try:
+    with _isolated(db, "LinUCB update"):
         from app.recommender.bandit import context_vector, reward_from_action, update_from_feedback
         from app.recommender.hybrid import _parse_event_date, freshness_score
         fresh = freshness_score(_parse_event_date(getattr(event, "date", None)))
@@ -299,8 +318,6 @@ def _safe_bandit_update(db, user, event, action: str, direction: int = 1) -> Non
         if reward == 0.0:
             return
         update_from_feedback(db, user.id, x, reward)
-    except Exception as e:
-        logger.warning("LinUCB update failed: %s", e)
 
 
 def _safe_memory_extract(db, user, event, action: str, direction: int = 1) -> None:
@@ -313,11 +330,9 @@ def _safe_memory_extract(db, user, event, action: str, direction: int = 1) -> No
         return
     if not getattr(settings, "memory_enabled", True):
         return
-    try:
+    with _isolated(db, "Memory extract"):
         from app.recommender.memory import extract_from_interaction
         extract_from_interaction(db, user, event, action)
-    except Exception as e:
-        logger.warning("Memory extract failed: %s", e)
 
 
 def get_event_interactions_for_user(db: Session, telegram_id: int, event_id: int) -> list[str]:
