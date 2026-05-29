@@ -197,13 +197,22 @@ def build_scheduler():
     from apscheduler.schedulers.blocking import BlockingScheduler
 
     scheduler = BlockingScheduler()
+    digest_minutes = max(1, settings.digest_interval_minutes)
+    digest_kwargs: dict = {
+        "trigger": "interval",
+        "minutes": digest_minutes,
+        "id": "daily_digest",
+    }
+    if settings.digest_run_on_startup:
+        digest_kwargs["next_run_time"] = datetime.now()
     scheduler.add_job(
         lambda: asyncio.run(send_digest_once()),
-        "interval",
-        hours=24,
-        id="daily_digest",
+        **digest_kwargs,
     )
-    print("[scheduler] daily_digest: every 24h (no run on startup)")
+    print(
+        f"[scheduler] daily_digest: every {digest_minutes}m"
+        f"{' (run on startup)' if settings.digest_run_on_startup else ' (no run on startup)'}"
+    )
 
     if settings.ingest_enabled:
         interval = max(1, settings.ingest_interval_hours)

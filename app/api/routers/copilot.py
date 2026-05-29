@@ -9,11 +9,14 @@ Endpoints:
 from __future__ import annotations
 
 import json
+import logging
 from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
+
+logger = logging.getLogger(__name__)
 
 from app.api.services.recommendation_service import get_recommendations_for_user
 from app.db.dependencies import get_db
@@ -129,6 +132,7 @@ def copilot(
             "routing_reason": result.get("routing_reason"),
         }
     except Exception:
+        logger.exception("Copilot one-shot failed (telegram_id=%s)", telegram_id)
         try:
             recs = get_recommendations_for_user(db, telegram_id)[:limit]
             return {
@@ -137,6 +141,7 @@ def copilot(
                 "cards": recs,
             }
         except Exception:
+            logger.exception("Copilot fallback also failed (telegram_id=%s)", telegram_id)
             return {"success": False, "message": "Copilot временно недоступен."}
 
 
@@ -218,7 +223,10 @@ def copilot_turn(
             "turns": len([m for m in history if m["role"] == "user"]),
         }
     except Exception as e:
-        # Не теряем user-msg даже на сбое; пишем сессию.
+        logger.exception(
+            "Copilot turn failed (telegram_id=%s, session_id=%s): %s",
+            telegram_id, sess.id, e,
+        )
         history.append({"role": "assistant", "content": f"(ошибка: {e})", "ts": _utcnow().isoformat()})
         _save_history(db, sess, history)
         return {"success": False, "session_id": sess.id, "message": "Copilot временно недоступен."}

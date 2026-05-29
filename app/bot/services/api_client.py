@@ -77,6 +77,18 @@ class EventMindAPIClient:
         except httpx.HTTPError:
             return {}
 
+    async def get_why_explanation(self, telegram_id: int, event_id: int) -> dict:
+        """Получить объяснение «почему рекомендовано» — {short, full}."""
+        try:
+            async with httpx.AsyncClient(timeout=_TIMEOUT) as c:
+                r = await c.get(
+                    f"{self.base_url}/recommendations/{telegram_id}/why/{event_id}"
+                )
+                r.raise_for_status()
+                return r.json()
+        except httpx.HTTPError:
+            return {"short": "", "full": ""}
+
     async def get_event_interactions(self, telegram_id: int, event_id: int) -> dict:
         try:
             async with httpx.AsyncClient(timeout=_TIMEOUT) as c:
@@ -188,6 +200,28 @@ class EventMindAPIClient:
         except httpx.HTTPError:
             return []
 
+    async def combined_search(
+        self,
+        query: str,
+        keyword_limit: int = 3,
+        semantic_limit: int = 5,
+    ) -> dict:
+        """Объединённый поиск: keyword + semantic параллельно, с дедупом.
+
+        Возвращает {keyword: [...], semantic: [...]}. semantic уже отфильтрован
+        от event_id, попавших в keyword-блок.
+        """
+        params = {"q": query, "keyword_limit": keyword_limit, "semantic_limit": semantic_limit}
+        try:
+            async with httpx.AsyncClient(timeout=_TIMEOUT) as c:
+                r = await c.get(f"{self.base_url}/events/combined-search", params=params)
+                if r.status_code == 404:
+                    return {"keyword": [], "semantic": [], "goal_intent": False}
+                r.raise_for_status()
+                return r.json()
+        except httpx.HTTPError:
+            return {"keyword": [], "semantic": [], "goal_intent": False}
+
     async def semantic_search_events(self, query: str, limit: int = 5) -> list[dict]:
         try:
             async with httpx.AsyncClient(timeout=30.0) as c:
@@ -217,6 +251,31 @@ class EventMindAPIClient:
                 r = await c.post(
                     f"{self.base_url}/copilot/{telegram_id}",
                     json={"goal": goal},
+                )
+                r.raise_for_status()
+                return r.json()
+        except httpx.HTTPError:
+            return {"success": False, "message": "Copilot временно недоступен."}
+
+    async def copilot_turn(
+        self,
+        telegram_id: int,
+        message: str,
+        session_id: int | None = None,
+    ) -> dict:
+        """Мульти-туровый Copilot: новый message в (опц.) существующей сессии.
+
+        Возвращает {success, session_id, answer, cards, specialist, ...}.
+        Сессия сохраняется в copilot_sessions на бэкенде, контекст подхватывается.
+        """
+        payload: dict = {"message": message}
+        if session_id is not None:
+            payload["session_id"] = session_id
+        try:
+            async with httpx.AsyncClient(timeout=60.0) as c:
+                r = await c.post(
+                    f"{self.base_url}/copilot/{telegram_id}/turn",
+                    json=payload,
                 )
                 r.raise_for_status()
                 return r.json()

@@ -9,14 +9,12 @@ from app.bot.keyboards.inline import (
     CITY_LABELS,
     FORMAT_LABELS,
     TOPIC_LABELS,
-    after_setup_keyboard,
     city_keyboard,
     format_keyboard,
-    start_keyboard,
     topics_keyboard,
     tour_keyboard,
 )
-from app.bot.keyboards.reply import main_menu_keyboard, setup_keyboard
+from app.bot.keyboards.reply import main_menu_keyboard
 from app.bot.services.api_client import EventMindAPIClient
 from app.bot.utils import send
 
@@ -46,17 +44,21 @@ def get_state(user_id: int) -> SetupState:
 _TOUR_PAGES: list[tuple[str, str]] = [
     (
         "🎯 Шаг 1/4 — Персональные рекомендации",
-        "<b>/recommend</b> — лента событий, отсортированных под тебя.\n"
-        "Нажми «🤖 AI» в пикере, чтобы получить карточки от LangGraph-агентов "
-        "с пояснением «почему именно это».\n\n"
-        "В каждой карточке: 👍 / 👎 / ⭐ / Похожие / Следующее.",
+        "<b>/recommend</b> или кнопка «🎯 Рекомендации» — лента событий, "
+        "отсортированных под тебя hybrid-скорингом по 9 компонентам "
+        "(темы, смысл, история, скиллы и др.).\n\n"
+        "В каждой карточке: ❓ Почему / 👍 / 👎 / ⭐ / Похожие / Следующее.\n"
+        "Нажми «❓ Почему» — увидишь, какие факторы дали рейтинг; "
+        "потом «📖 Подробнее» — развёрнутый разбор от ИИ отдельным сообщением.",
     ),
     (
         "🔍 Шаг 2/4 — Поиск",
-        "<b>/search &lt;запрос&gt;</b> — поиск по тексту: темы, формат, город.\n"
-        "<b>/semantic &lt;запрос&gt;</b> — семантический поиск через embeddings: "
-        "находит близкие по смыслу события, даже если слова другие.\n\n"
-        "Пример: <code>/semantic машинное обучение для бэкендера</code>",
+        "Нажми кнопку «🔍 Поиск» или напиши <code>Найти: &lt;запрос&gt;</code>.\n\n"
+        "Один поиск делает два прохода сразу:\n"
+        "• 🎯 Точные совпадения по ключевым словам (до 3 событий)\n"
+        "• 🤖 Похожие по смыслу через эмбеддинги (до 5 событий)\n\n"
+        "Можно писать как угодно: <code>python митап</code> или "
+        "<code>хочу научиться деплоить микросервисы</code>.",
     ),
     (
         "🤖 Шаг 3/4 — AI Copilot и тренды",
@@ -138,23 +140,24 @@ async def cmd_start(message: Message):
 async def _greet(message: Message) -> None:
     user_setup_state[message.from_user.id] = SetupState()
 
-    await send(
-        message,
+    # На старте принудительно сбрасываем persistent reply-клавиатуру:
+    # у старых пользователей мог остаться setup_keyboard() из прошлой
+    # версии с кнопкой «Начать настройку», которая дублировала инлайн-кнопку
+    # в туре. ReplyKeyboardRemove форсирует Telegram её снять.
+    from aiogram.types import ReplyKeyboardRemove
+    await message.answer(
         "Привет! Я <b>EventMind</b> — бот для подбора IT-событий по твоим интересам.\n\n"
         "Я могу:\n"
         "- подобрать мероприятия по темам и формату;\n"
         "- показать наиболее подходящие события;\n"
         "- учитывать твои предпочтения для персональных рекомендаций.\n\n"
-        "Давай быстро настроим профиль.",
-        reply_markup=setup_keyboard(),
+        "Сейчас покажу короткий тур (4 экрана), а в конце предложу настроить профиль.",
+        parse_mode="HTML",
+        reply_markup=ReplyKeyboardRemove(),
     )
 
-    await message.answer(
-        "Также можно использовать inline-кнопки ниже:",
-        reply_markup=start_keyboard(),
-    )
-
-    # Краткий тур по командам — 4 экрана с инлайн-навигацией.
+    # Краткий тур по командам — 4 экрана с инлайн-навигацией. В конце —
+    # кнопка «🚀 Начать настройку» в самом туре.
     await _send_tour(message, step=1)
 
 
@@ -173,6 +176,18 @@ async def cb_tour_nav(callback: CallbackQuery):
         await callback.answer("Тур пропущен.")
         with contextlib.suppress(Exception):
             await callback.message.delete()
+        # Даже при пропуске тура нужна точка входа в настройку профиля —
+        # иначе у пользователя остаётся только reply-меню без кнопки запуска.
+        from aiogram.utils.keyboard import InlineKeyboardBuilder
+        builder = InlineKeyboardBuilder()
+        builder.button(text="🚀 Начать настройку", callback_data="start_setup")
+        builder.adjust(1)
+        await callback.message.answer(
+            "Окей, тур пропущен.\n\n"
+            "Чтобы я начал подбирать события, настрой профиль — это 3 коротких шага: "
+            "темы, формат, город.",
+            reply_markup=builder.as_markup(),
+        )
         return
     try:
         step = int(payload)
@@ -184,14 +199,6 @@ async def cb_tour_nav(callback: CallbackQuery):
     await _send_tour(callback, step)
 
 
-@router.callback_query(F.data == "how_it_works")
-async def cb_how_it_works(callback: CallbackQuery):
-    await callback.answer()
-    await callback.message.answer(
-        "Я подбираю IT-события на основе твоих интересов.\n\n"
-        "Сначала ты указываешь темы, формат и город, а затем я показываю подходящие мероприятия.\n"
-        "В дальнейшем рекомендации можно улучшать по твоим действиям."
-    )
 
 
 async def _extra_topic_codes() -> list[str]:
@@ -301,12 +308,7 @@ async def cb_city_selected(callback: CallbackQuery):
         f"- темы: {topics_text}\n"
         f"- формат: {format_text}\n"
         f"- город: {city_text}\n\n"
-        f"Теперь можно посмотреть рекомендации.",
-        reply_markup=after_setup_keyboard(),
-    )
-
-    await callback.message.answer(
-        "Главное меню обновлено.",
+        f"Готово! Нажми «🎯 Рекомендации» в меню внизу, чтобы посмотреть подборку.",
         reply_markup=main_menu_keyboard(),
     )
 
@@ -329,14 +331,4 @@ async def cb_profile_edit(callback: CallbackQuery):
         "Давай обновим профиль.\n\n"
         "Выбери интересующие темы. Можно выбрать несколько.",
         reply_markup=topics_keyboard(set(), extra_codes=await _extra_topic_codes()),
-    )
-
-
-@router.message(F.text == "Начать настройку")
-async def msg_start_setup(message: Message):
-    state = get_state(message.from_user.id)
-
-    await message.answer(
-        "Выбери интересующие темы. Можно выбрать несколько.",
-        reply_markup=topics_keyboard(state.topics, extra_codes=await _extra_topic_codes()),
     )

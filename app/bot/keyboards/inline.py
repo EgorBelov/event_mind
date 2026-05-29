@@ -35,14 +35,6 @@ def _label_for_city(code: str) -> str:
     return CITY_LABELS.get(code) or city_label(code)
 
 
-def start_keyboard() -> InlineKeyboardMarkup:
-    builder = InlineKeyboardBuilder()
-    builder.button(text="Начать", callback_data="start_setup")
-    builder.button(text="Как это работает", callback_data="how_it_works")
-    builder.adjust(1)
-    return builder.as_markup()
-
-
 def topics_keyboard(
     selected_topics: set[str],
     extra_codes: list[str] | None = None,
@@ -94,47 +86,32 @@ def city_keyboard(extra_codes: list[str] | None = None) -> InlineKeyboardMarkup:
     return builder.as_markup()
 
 
-def after_setup_keyboard() -> InlineKeyboardMarkup:
-    builder = InlineKeyboardBuilder()
-    builder.button(text="Показать рекомендации", callback_data="show_recommendations")
-    builder.adjust(1)
-    return builder.as_markup()
-
-
 def recommendation_keyboard(
     event_id: int,
     actions: set[str] | None = None,
-    mode: str = "rule",
 ) -> InlineKeyboardMarkup:
     """Клавиатура карточки события.
 
-    Единая для обычных и AI-рекомендаций: like/dislike/save идут в один и тот
-    же эндпойнт, поэтому отличается только листание (`mode`: "rule" | "ai"),
-    которое прокинуто в callback_data, чтобы перерисовка после реакции знала,
-    какую кнопку «Следующее» рендерить.
+    Единая выдача — hybrid по 9 компонентам (никакого отдельного AI-режима).
+    Объяснение «почему» — две независимые кнопки, всегда доступны:
+      ❓ Почему — короткий человеческий ответ в поп-апе.
+      📖 Подробнее — развёрнутый разбор + советы + метрики отдельным сообщением.
     """
     actions = actions or set()
 
     like_text = "✅ Интересно" if "like" in actions else "Интересно"
     dislike_text = "❌ Не интересно" if "dislike" in actions else "Не интересно"
     save_text = "⭐ Сохранено" if "save" in actions else "Сохранить"
-    next_text = "Следующее AI" if mode == "ai" else "Следующее"
 
     builder = InlineKeyboardBuilder()
-    builder.button(text=like_text, callback_data=f"like:{mode}:{event_id}")
-    builder.button(text=dislike_text, callback_data=f"dislike:{mode}:{event_id}")
-    builder.button(text=save_text, callback_data=f"save:{mode}:{event_id}")
+    builder.button(text="❓ Почему", callback_data=f"why:{event_id}")
+    builder.button(text="📖 Подробнее", callback_data=f"why_full:{event_id}")
+    builder.button(text=like_text, callback_data=f"like:{event_id}")
+    builder.button(text=dislike_text, callback_data=f"dislike:{event_id}")
+    builder.button(text=save_text, callback_data=f"save:{event_id}")
     builder.button(text="Похожие", callback_data=f"similar:{event_id}")
-    builder.button(text=next_text, callback_data=f"next:{mode}")
-    builder.adjust(2, 2, 1)
-    return builder.as_markup()
-
-
-def recommendations_picker_keyboard() -> InlineKeyboardMarkup:
-    builder = InlineKeyboardBuilder()
-    builder.button(text="📋 Обычные", callback_data="recs:rule")
-    builder.button(text="🤖 AI", callback_data="recs:ai")
-    builder.adjust(2)
+    builder.button(text="Следующее", callback_data="next")
+    builder.adjust(2, 2, 2, 1)
     return builder.as_markup()
 
 
@@ -152,9 +129,8 @@ def profile_actions_keyboard(is_subscribed: bool) -> InlineKeyboardMarkup:
 def more_menu_keyboard() -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     builder.button(text="🔥 Тренды", callback_data="more:trending")
-    builder.button(text="🎯 Copilot", callback_data="more:copilot")
     builder.button(text="❓ Помощь", callback_data="more:help")
-    builder.adjust(2, 1)
+    builder.adjust(2)
     return builder.as_markup()
 
 

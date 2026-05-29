@@ -216,48 +216,6 @@ async def cmd_trending(message: Message):
     await _send_trending(message)
 
 
-@router.message(Command("copilot"))
-async def cmd_copilot(message: Message, command: CommandObject):
-    """AI Copilot: расскажи цель — получишь персональный roadmap по событиям."""
-    goal = (command.args or "").strip()
-    if not goal:
-        await message.answer(
-            "Расскажи о своей цели, и я подберу события и составлю план.\n\n"
-            "Например:\n"
-            "/copilot хочу разобраться в DevOps и начать использовать Kubernetes\n"
-            "/copilot ищу события для перехода в ML-разработку"
-        )
-        return
-
-    await message.answer("Анализирую твою цель и подбираю события...")
-
-    result = await api_client.copilot(message.from_user.id, goal)
-
-    if not result.get("success"):
-        await message.answer(result.get("message", "Copilot временно недоступен. Попробуй позже."))
-        return
-
-    answer_text = esc(result.get("answer", ""))
-    cards = result.get("cards", [])
-
-    text = answer_text
-    if cards:
-        events_text = "\n\n".join(
-            f"📌 <b>{esc(c['title'])}</b>\n"
-            f"Формат: {esc(_format(c.get('format')))}\n"
-            f"Дата: {esc(c.get('date', ''))}"
-            + (f"\n🔗 {esc(c['source_url'])}" if c.get("source_url") else "")
-            for c in cards
-        )
-        text = f"{answer_text}\n\n<b>Рекомендованные события:</b>\n\n{events_text}"
-
-    # Лимит сообщения в Telegram — 4096 символов
-    if len(text) > 4000:
-        text = text[:4000] + "..."
-
-    await send(message, text)
-
-
 @router.message(F.text == "⚙️ Ещё")
 async def msg_more(message: Message):
     await message.answer(
@@ -305,14 +263,6 @@ async def cb_more_trending(callback: CallbackQuery):
     await _send_trending(callback)
 
 
-@router.callback_query(F.data == "more:copilot")
-async def cb_more_copilot(callback: CallbackQuery):
-    await callback.answer()
-    await callback.message.answer(
-        "AI Copilot подбирает события под твою цель.\n\n"
-        "Использование: /copilot <цель>\n"
-        "Например: /copilot хочу разобраться в Kubernetes и SRE"
-    )
 
 
 @router.callback_query(F.data == "more:help")
@@ -323,13 +273,13 @@ async def cb_more_help(callback: CallbackQuery):
         "<b>Команды EventMind:</b>\n\n"
         "/start — настроить профиль\n"
         "/profile — мой профиль и быстрые действия\n"
-        "/recommend — обычные рекомендации\n"
-        "/search &lt;запрос&gt; — поиск по ключевым словам\n"
-        "/semantic &lt;запрос&gt; — AI-поиск по смыслу\n"
+        "/recommend — лента рекомендаций (hybrid из 9 компонент)\n"
+        "🔍 Поиск (кнопка) — точные совпадения + похожие по смыслу одним ответом\n"
         "/copilot &lt;цель&gt; — AI Copilot под твою цель\n"
         "/bio &lt;текст&gt; — описать себя и обновить темы\n"
         "/trending — горячие события\n"
         "/saved — сохранённые события\n"
         "/stats — моя активность\n"
+        "/undo — откатить последний лайк/дизлайк/сохранение\n"
         "/subscribe, /unsubscribe — управлять AI-дайджестом",
     )

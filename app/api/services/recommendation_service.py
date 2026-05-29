@@ -29,15 +29,26 @@ except Exception:
 
 
 def refresh_user_embedding(db: Session, user: User) -> None:
-    """Посчитать и закэшировать персональный embedding пользователя (best-effort)."""
+    """Посчитать и закэшировать персональный embedding пользователя (best-effort).
+
+    КРИТИЧНО: при сбое flush'а (SQLite locked, concurrent writer) обязательно
+    rollback'аем сессию. Иначе она остаётся в "rollback required" state и
+    любое следующее обращение к user.id/user.* пробрасывает PendingRollbackError —
+    в результате весь GET /recommendations отваливался 500-кой, а бот показывал
+    «Пока нет рекомендаций» при настроенном профиле.
+    """
     try:
         from app.recommender.embeddings import build_rich_user_embedding
         interactions = db.query(Interaction).filter(Interaction.user_id == user.id).all()
         emb = build_rich_user_embedding(user, interactions)
         user.embedding = json.dumps(emb)
-        db.flush()
-    except Exception:
-        pass
+        db.commit()
+    except Exception as e:
+        logger.warning("refresh_user_embedding failed, rollback: %s", e)
+        try:
+            db.rollback()
+        except Exception:
+            pass
 
 
 def get_recommendations_for_user(db: Session, telegram_id: int) -> list[dict]:
@@ -333,6 +344,277 @@ def _safe_memory_extract(db, user, event, action: str, direction: int = 1) -> No
     with _isolated(db, "Memory extract"):
         from app.recommender.memory import extract_from_interaction
         extract_from_interaction(db, user, event, action)
+
+
+_COMPONENT_LABELS_RU = {
+    "rule": "совпадение по профилю (темы, формат, город)",
+    "cosine": "близость по смыслу описания",
+    "bayesian": "история твоих реакций на похожие события",
+    "quality": "оценка качества события (от 1 до 10)",
+    "hype": "оценка актуальности и интереса (от 1 до 10)",
+    "freshness": "свежесть даты — недавние события весят больше",
+    "skill_gap": "совпадение с твоими карьерными целями и стеком",
+    "bandit": "сигнал «попробуй что-то новое» для разнообразия",
+    "gnn": "что выбирают пользователи с похожими интересами",
+}
+
+
+def _build_why_short(breakdown: dict[str, float]) -> str:
+    """Короткое объяснение для поп-апа Telegram (≤200 символов)."""
+    positive = [(name, val) for name, val in breakdown.items() if val and val > 0.05]
+    if not positive:
+        return "Подобрано по совпадению темы и формата с твоим профилем."
+    positive.sort(key=lambda kv: kv[1], reverse=True)
+    short_labels = {
+        "rule": "темы", "cosine": "смысл", "bayesian": "история",
+        "quality": "качество", "hype": "актуальность", "freshness": "свежесть",
+        "skill_gap": "под цели", "bandit": "разнообразие", "gnn": "похожие люди",
+    }
+    top = positive[:3]
+    parts = [f"{short_labels.get(name, name)} +{val:.1f}" for name, val in top]
+    return "Главные факторы: " + " · ".join(parts)
+
+
+def _build_why_full_template(details: dict, event_title: str) -> str:
+    """Rule-based развёрнутое объяснение (fallback, без LLM)."""
+    lines: list[str] = []
+    breakdown = details.get("score_breakdown") or {}
+    positive = [(n, v) for n, v in breakdown.items() if v and v > 0.05]
+    positive.sort(key=lambda kv: kv[1], reverse=True)
+
+    if positive:
+        lines.append("Из чего сложилась рекомендация:")
+        for name, val in positive:
+            label = _COMPONENT_LABELS_RU.get(name, name)
+            lines.append(f"• {label} — вклад {val:.2f}")
+        lines.append("")
+
+    if details.get("topic_match"):
+        lines.append(f"Совпали темы: {', '.join(details['topic_match'])}.")
+    if details.get("format_match"):
+        lines.append("Совпал предпочитаемый формат.")
+    if details.get("city_match"):
+        lines.append("Совпал город.")
+    sim = details.get("semantic_similarity")
+    if sim is not None:
+        lines.append(f"Семантическая близость описания к твоему профилю: {sim:.2f} (от 0 до 1).")
+    if details.get("bayesian_posterior") is not None:
+        lines.append(
+            f"По истории твоих лайков/дизлайков темы события подтверждены с вероятностью "
+            f"{details['bayesian_posterior']:.2f}."
+        )
+    for sig in details.get("history_signals", []):
+        lines.append(f"• {sig}")
+    if details.get("counterfactual"):
+        lines.append("")
+        lines.append(details["counterfactual"])
+
+    return "\n".join(lines) if lines else "Подобрано по базовому совпадению профиля."
+
+
+def _gather_user_evidence(db, user) -> dict:
+    """Собрать «улики» о пользователе для конкретного объяснения.
+
+    Возвращает: топ-3 темы профиля, target-роль и целевые скиллы (если есть),
+    последние 2 лайкнутых/сохранённых события — чтобы LLM могла привязаться
+    к конкретике вроде «как митап X, который ты лайкнул на прошлой неделе».
+    """
+    out: dict = {
+        "top_topics": [], "target_role": None, "target_skills": [],
+        "recent_liked_titles": [],
+    }
+    try:
+        weights = parse_topic_weights(user.topic_weights)
+        sorted_topics = sorted(weights.items(), key=lambda kv: kv[1], reverse=True)
+        out["top_topics"] = [t for t, _ in sorted_topics[:3]]
+    except Exception:
+        pass
+    try:
+        from app.recommender.skill_gap import load_skill_profile
+        sp = load_skill_profile(db, user.id)
+        if sp:
+            out["target_role"] = getattr(sp, "target_role", None)
+            target = getattr(sp, "target_skills", None)
+            if target:
+                out["target_skills"] = target if isinstance(target, list) else []
+    except Exception:
+        pass
+    try:
+        recent = (
+            db.query(Interaction)
+            .filter(Interaction.user_id == user.id, Interaction.action.in_(["like", "save"]))
+            .order_by(Interaction.id.desc())
+            .limit(2).all()
+        )
+        if recent:
+            ids = [r.event_id for r in recent]
+            evs = {e.id: e.title for e in db.query(Event).filter(Event.id.in_(ids)).all()}
+            out["recent_liked_titles"] = [evs[i] for i in ids if i in evs]
+    except Exception:
+        pass
+    return out
+
+
+def _build_why_pair_llm(details: dict, event, user, db) -> tuple[str | None, str | None]:
+    """Один LLM-вызов через structured output → (short, full).
+
+    short: 1–2 КОНКРЕТНЫХ предложения для поп-апа (≤180 символов). LLM ОБЯЗАНА
+           привязаться к одному конкретному факту: пересекающаяся тема,
+           конкретный target_skill, конкретное лайкнутое событие.
+    full:  развёрнутый разбор + 1–2 практических совета.
+
+    Числа и метрики НЕ просим у LLM — их добавит rule-based template отдельно.
+    Возвращает (None, None) при сбое.
+    """
+    try:
+        from pydantic import BaseModel, Field
+
+        from app.agents.recommendation.llm import llm
+
+        class WhyExplanation(BaseModel):
+            short: str = Field(
+                ...,
+                description="1–2 КОНКРЕТНЫХ предложения, ≤180 символов. "
+                "Обязательно сослаться на ОДИН конкретный факт из данных: "
+                "название темы, навык, технологию из tech_stack ИЛИ название "
+                "лайкнутого события. БЕЗ цифр и БЕЗ слов 'cosine', "
+                "'embedding', 'bayesian', 'algorithm'.",
+            )
+            full: str = Field(
+                ...,
+                description="3–5 предложений: подробный разбор по нескольким "
+                "конкретным фактам, потом 1–2 практических совета (что взять "
+                "от события, на каких докладах сосредоточиться). "
+                "Без шаблонных фраз.",
+            )
+
+        # Достаём конкретику.
+        evidence = _gather_user_evidence(db, user)
+        common_topics = details.get("topic_match") or []
+        recent_titles = evidence.get("recent_liked_titles") or []
+
+        # tech_stack события — конкретные технологии для упоминания
+        ev_tech: list[str] = []
+        try:
+            if event.tech_stack:
+                ev_tech = json.loads(event.tech_stack) if isinstance(event.tech_stack, str) else []
+        except Exception:
+            ev_tech = []
+
+        intersect_skills = []
+        target_skills = evidence.get("target_skills") or []
+        if target_skills and ev_tech:
+            ts_lower = {s.lower() for s in target_skills}
+            intersect_skills = [t for t in ev_tech if t.lower() in ts_lower]
+
+        sys_prompt = (
+            "Ты — помощник EventMind. Объясняешь, почему пользователю "
+            "рекомендовано КОНКРЕТНОЕ событие.\n\n"
+            "СТРОГИЕ ПРАВИЛА:\n"
+            "1) Опирайся ТОЛЬКО на данные ниже. Не выдумывай спикеров, "
+            "программу, формат, дату или содержание докладов.\n"
+            "2) ОБЯЗАНО сослаться хотя бы на один КОНКРЕТНЫЙ факт из данных: "
+            "конкретная тема пользователя, конкретный target-навык, "
+            "конкретная технология из tech_stack события или конкретное "
+            "лайкнутое событие.\n"
+            "3) ЗАПРЕЩЕНЫ шаблонные фразы: «может быть полезным», «хорошая "
+            "возможность», «узнать что-то новое», «расширить кругозор», "
+            "«отличное мероприятие», «может быть интересно», «стоит "
+            "посетить». Если хочется такое написать — замени на конкретику.\n"
+            "4) Если данных мало (новый пользователь без истории) — честно "
+            "напиши «у меня пока мало данных о тебе, но темы X и Y из "
+            "твоего профиля совпали с этим событием».\n"
+            "5) Тон: прямой, дружелюбный, без маркетинга и без воды."
+        )
+
+        # Готовим максимально конкретный input
+        ev_lines = [
+            f"Название: {event.title}",
+            f"Формат: {event.format}, город: {event.city}, уровень: {event.level}",
+        ]
+        if (event.description or "").strip():
+            ev_lines.append(f"Описание (фрагмент): {(event.description or '')[:300]}")
+        if ev_tech:
+            ev_lines.append(f"Технологии в стеке события: {', '.join(ev_tech[:8])}")
+        if event.seniority:
+            ev_lines.append(f"Целевой опыт аудитории: {event.seniority}")
+
+        prof_lines = [f"Город: {user.city}, предпочитаемый формат: {user.preferred_format}"]
+        if evidence["top_topics"]:
+            prof_lines.append(f"Топ-3 темы профиля (по весам): {', '.join(evidence['top_topics'])}")
+        if evidence["target_role"]:
+            prof_lines.append(f"Целевая роль: {evidence['target_role']}")
+        if target_skills:
+            prof_lines.append(f"Целевые навыки: {', '.join(target_skills[:8])}")
+        if recent_titles:
+            prof_lines.append(
+                "Недавно лайкнул/сохранил: " + " | ".join(f'«{t}»' for t in recent_titles)
+            )
+
+        match_lines = []
+        if common_topics:
+            match_lines.append(f"Пересекающиеся темы: {', '.join(common_topics)}")
+        if intersect_skills:
+            match_lines.append(
+                f"Технологии события, совпавшие с твоими целями: {', '.join(intersect_skills)}"
+            )
+        if details.get("format_match"):
+            match_lines.append("Формат события совпадает с предпочитаемым")
+        if details.get("city_match"):
+            match_lines.append("Город события совпадает с твоим")
+        if details.get("history_signals"):
+            match_lines.extend(f"Из истории: {s}" for s in details["history_signals"])
+        if not match_lines:
+            match_lines.append("Прямых пересечений с явным профилем мало — "
+                               "сигнал в основном от семантической близости описания.")
+
+        user_prompt = (
+            "СОБЫТИЕ:\n" + "\n".join(ev_lines) + "\n\n"
+            "ПРОФИЛЬ ПОЛЬЗОВАТЕЛЯ:\n" + "\n".join(prof_lines) + "\n\n"
+            "ЧТО СОВПАЛО:\n" + "\n".join(match_lines)
+        )
+
+        result = llm.with_structured_output(WhyExplanation).invoke(
+            [{"role": "system", "content": sys_prompt},
+             {"role": "user", "content": user_prompt}]
+        )
+        if isinstance(result, dict):
+            short = (result.get("short") or "").strip()
+            full = (result.get("full") or "").strip()
+        else:
+            short = (getattr(result, "short", "") or "").strip()
+            full = (getattr(result, "full", "") or "").strip()
+        return (short or None, full or None)
+    except Exception as e:
+        logger.warning("Why-LLM (structured) failed: %s", e)
+        return (None, None)
+
+
+def get_why_explanation_for_user(db: Session, telegram_id: int, event_id: int) -> dict:
+    """Сформировать пару {short, full} для кнопки «Почему?» в боте.
+
+    short → поп-ап (1–2 живых предложения от LLM, при сбое — rule-based).
+    full → отдельное сообщение в чате: развёрнутый LLM-разбор + 1–2 совета
+           + детальная разбивка по компонентам с числами + counterfactual.
+    """
+    user = db.query(User).filter(User.telegram_id == telegram_id).first()
+    if not user:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+    event = db.query(Event).filter(Event.id == event_id).first()
+    if not event:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Event not found")
+
+    details = explain_event_detailed(user, event, db=db)
+    breakdown = details.get("score_breakdown") or {}
+
+    llm_short, llm_full = _build_why_pair_llm(details, event, user, db)
+    template = _build_why_full_template(details, event.title)
+
+    short = llm_short or _build_why_short(breakdown)
+    # full = живой LLM-нарратив с советами + сухая разбивка с числами/метриками.
+    full = f"{llm_full}\n\n— — —\n\n{template}" if llm_full else template
+
+    return {"short": short, "full": full}
 
 
 def get_event_interactions_for_user(db: Session, telegram_id: int, event_id: int) -> list[str]:

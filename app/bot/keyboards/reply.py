@@ -16,14 +16,3 @@ def main_menu_keyboard() -> ReplyKeyboardMarkup:
         resize_keyboard=True,
         input_field_placeholder="Выбери действие",
     )
-
-
-def setup_keyboard() -> ReplyKeyboardMarkup:
-    return ReplyKeyboardMarkup(
-        keyboard=[
-            [KeyboardButton(text="Начать настройку")],
-            [KeyboardButton(text="Как это работает")],
-        ],
-        resize_keyboard=True,
-        input_field_placeholder="Выбери действие",
-    )

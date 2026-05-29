@@ -7,6 +7,7 @@ from app.api.services.event_service import (
     load_events_from_json,
 )
 from app.api.services.search_service import (
+    combined_search,
     get_similar_events,
     search_events,
     semantic_search_events,
@@ -81,6 +82,23 @@ def semantic_search(
 ):
     """Семантический поиск: ранжирование событий по embedding-сходству с запросом."""
     return semantic_search_events(db, query=q, limit=limit)
+
+
+@router.get("/combined-search")
+def combined_search_endpoint(
+    q: str = Query(..., description="Поисковый запрос"),
+    keyword_limit: int = Query(default=3, ge=1, le=10),
+    semantic_limit: int = Query(default=5, ge=1, le=10),
+    db: Session = Depends(get_db),
+):
+    """Объединённый поиск: точные совпадения по словам + семантически похожие.
+
+    Возвращает {keyword: [...], semantic: [...]}.
+    Семантический блок дедуплицирован относительно keyword.
+    """
+    return combined_search(
+        db, query=q, keyword_limit=keyword_limit, semantic_limit=semantic_limit
+    )
 
 
 @router.get("/{event_id}")

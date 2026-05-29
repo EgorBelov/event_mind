@@ -47,6 +47,14 @@ class Settings(BaseSettings):
     ingest_interval_hours: int = 6
     # Включать ли периодический ingestion вместе с digest-планировщиком
     ingest_enabled: bool = True
+
+    # ── Digest scheduler ────────────────────────────────────────────────
+    # Интервал рассылки дайджеста в минутах. По умолчанию 24 ч.
+    # Для разработки можно поставить, например, DIGEST_INTERVAL_MINUTES=10.
+    digest_interval_minutes: int =  24 * 60
+    # Запускать ли первый дайджест сразу при старте scheduler'а.
+    # На проде = false, чтобы каждый рестарт не слал повторную рассылку.
+    digest_run_on_startup: bool = False
     # Лимит событий с Habr за один тик планировщика
     ingest_habr_limit: int = 20
     # Лимит событий на одну RSS-ленту за тик

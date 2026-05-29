@@ -1,11 +1,8 @@
 """Регресс на отрисовку карточек: произвольный текст события не должен
 ломать parse_mode Telegram (раньше Markdown падал на `*`/`_`/`[` и карточка
 пропадала, помогало только листание)."""
+from app.bot.handlers.recommendations import format_event_card
 from app.bot.utils import esc as _esc
-from app.bot.handlers.recommendations import (
-    format_event_card,
-    format_ai_event_card,
-)
 
 
 def _event():
@@ -39,8 +36,9 @@ def test_event_card_escapes_html_specials():
     assert "_курс_" in text and "*боль*" in text
 
 
-def test_ai_card_escapes_and_has_header():
-    text = format_ai_event_card(_event())
-    assert text.startswith("🤖 <b>AI-рекомендация</b>")
-    assert "&lt;hack&gt;" in text
-    assert "<hack>" not in text
+def test_event_card_no_longer_includes_explanation():
+    """После п.3 (выноса объяснения в кнопку «Почему?») карточка не содержит
+    LLM-explanation — он отдаётся отдельным сообщением по запросу."""
+    text = format_event_card(_event())
+    assert "Почему:" not in text
+    assert "Score:" not in text

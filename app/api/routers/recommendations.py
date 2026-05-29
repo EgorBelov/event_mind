@@ -7,6 +7,7 @@ from app.api.services.recommendation_service import (
     get_event_interactions_for_user,
     get_recommendations_for_user,
     get_saved_events_for_user,
+    get_why_explanation_for_user,
     undo_last_interaction,
 )
 from app.db.dependencies import get_db
@@ -36,6 +37,12 @@ def get_interactions(telegram_id: int, event_id: int, db: Session = Depends(get_
         "event_id": event_id,
         "actions": get_event_interactions_for_user(db, telegram_id, event_id),
     }
+
+
+@router.get("/{telegram_id}/why/{event_id}")
+def get_why(telegram_id: int, event_id: int, db: Session = Depends(get_db)):
+    """Объяснение «почему рекомендовано»: short (для поп-апа) + full (LLM-нарратив)."""
+    return get_why_explanation_for_user(db, telegram_id, event_id)
 
 @router.get("/{telegram_id}/saved")
 def get_saved_events(telegram_id: int, db: Session = Depends(get_db)):
