@@ -13,7 +13,7 @@ from pathlib import Path
 
 from docx import Document
 from docx.enum.text import WD_ALIGN_PARAGRAPH
-from docx.shared import Cm, Pt, RGBColor
+from docx.shared import Pt, RGBColor
 
 OUT = Path(__file__).resolve().parents[1] / "docs" / "План_показа_EventMind.docx"
 

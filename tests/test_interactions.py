@@ -1,13 +1,13 @@
 """Tests for interaction logic using in-memory SQLite."""
 import json
-import pytest
 
+import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-from app.db.base import Base
-from app.db.models import User, Event, Interaction, Topic, UserTopic, EventTopic
 from app.api.services.recommendation_service import create_interaction
+from app.db.base import Base
+from app.db.models import Event, EventTopic, Interaction, Topic, User, UserTopic
 
 
 @pytest.fixture(scope="function")

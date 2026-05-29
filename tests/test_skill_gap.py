@@ -8,12 +8,11 @@ from sqlalchemy.orm import sessionmaker
 from app.db.base import Base
 from app.db.models.event import Event
 from app.db.models.user import User
-from app.db.models.user_skill_profile import UserSkillProfile
 from app.recommender.cold_start import BioProfile
 from app.recommender.skill_gap import (
-    upsert_skill_profile,
-    load_skill_profile,
     compute_skill_gap_score,
+    load_skill_profile,
+    upsert_skill_profile,
 )
 
 

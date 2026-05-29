@@ -8,15 +8,15 @@ from sqlalchemy.orm import sessionmaker
 
 from app.db.base import Base
 from app.db.models.event import Event
+from app.db.models.topic import EventTopic, Topic, UserTopic
 from app.db.models.user import User
-from app.db.models.topic import Topic, UserTopic, EventTopic
 from app.db.models.user_bandit_state import UserBanditState
 from app.recommender.bandit import (
     LINUCB_DIM,
     context_vector,
-    update_from_feedback,
     load_user_bandit,
     ucb_score,
+    update_from_feedback,
 )
 
 

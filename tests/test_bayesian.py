@@ -5,22 +5,22 @@ import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
+from app.api.services.recommendation_service import create_interaction
 from app.db.base import Base
-from app.db.models.user import User
 from app.db.models.event import Event
-from app.db.models.topic import Topic, UserTopic, EventTopic
+from app.db.models.topic import EventTopic, Topic, UserTopic
+from app.db.models.user import User
 from app.db.models.user_topic_stat import UserTopicStat
 from app.recommender.bayesian import (
-    update_stats_from_feedback,
-    load_user_stats,
-    thompson_score,
-    posterior_mean,
+    DISLIKE_WEIGHT,
+    LIKE_WEIGHT,
     PRIOR_ALPHA,
     PRIOR_BETA,
-    LIKE_WEIGHT,
-    DISLIKE_WEIGHT,
+    load_user_stats,
+    posterior_mean,
+    thompson_score,
+    update_stats_from_feedback,
 )
-from app.api.services.recommendation_service import create_interaction
 
 
 @pytest.fixture

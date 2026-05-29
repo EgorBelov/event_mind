@@ -16,9 +16,7 @@ import argparse
 import json
 import statistics
 
-from app.core.config import settings
 from app.db.session import SessionLocal
-
 
 _JUDGE_SYSTEM = """\
 Ты — независимый эксперт по IT-конференциям и митапам. Тебе дают профиль
@@ -38,6 +36,7 @@ _JUDGE_SYSTEM = """\
 
 def _judge_via_llm(profile: dict, cards: list[dict]) -> list[dict]:
     from langchain_core.prompts import ChatPromptTemplate
+
     from app.agents.recommendation.llm import llm
     prompt = ChatPromptTemplate.from_messages([
         ("system", _JUDGE_SYSTEM),
@@ -107,8 +106,8 @@ def evaluate_user_variant(db, user, k: int, variant: str) -> list[dict]:
 
 
 def aggregate(judgements: list[dict]) -> dict:
-    rels = [int(j.get("relevance", 0)) for j in judgements if isinstance(j.get("relevance"), (int, float))]
-    divs = [int(j.get("diversity_contribution", 0)) for j in judgements if isinstance(j.get("diversity_contribution"), (int, float))]
+    rels = [int(j.get("relevance", 0)) for j in judgements if isinstance(j.get("relevance"), int | float)]
+    divs = [int(j.get("diversity_contribution", 0)) for j in judgements if isinstance(j.get("diversity_contribution"), int | float)]
     return {
         "n": len(judgements),
         "relevance_mean": round(statistics.fmean(rels), 3) if rels else 0.0,

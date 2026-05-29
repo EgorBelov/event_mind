@@ -189,12 +189,16 @@ IPv4) — pgvector 0.8.0 активен, retrieval идёт по `<=>`. `DATABAS
 
 **Свежие правки:**
 
-1. `/recommendations`: тяжёлый `explain_event_detailed` строится только для
-   возвращаемого top-N (+ параметр `limit`), а не для всего каталога.
+1. `/recommendations`: кандидатный отбор через pgvector (top-300 на PG,
+   fallback на весь каталог на SQLite) + `joinedload(event_topics)` против
+   N+1; тяжёлый `explain_event_detailed` — только для top-N (+ `limit`).
 2. Ingestion: `/load-all`, `/retry-failed`, батчинг нормализации + early-stop
    на rate-limit, запись `embedding_vec` при ingestion.
-3. Кроссплатформенные команды (macOS/Linux + Windows) в этом файле +
+3. Ops: scheduler переведён на `logging` (не `print`); `ruff` = 0 ошибок по
+   репо (+ per-file-ignores E402 для tests/alembic/scripts); CI на GitHub
+   Actions (`.github/workflows/ci.yml`: ruff + pytest на push/PR).
+4. Кроссплатформенные команды (macOS/Linux + Windows) в этом файле +
    `.env.example`; `ruff` и `python-docx` в `requirements.txt`.
-4. (ранее) rollback в `refresh_user_embedding`; `logger.exception` в
+5. (ранее) rollback в `refresh_user_embedding`; `logger.exception` в
    `/copilot` и `/agent-recommendations`; параметризуемый дайджест;
    чистка англицизмов в «Почему»; UX-правки `/start` и `tour:skip`.

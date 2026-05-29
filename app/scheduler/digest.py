@@ -10,6 +10,7 @@ AI-рекомендации через Telegram. Параллельно с эт�
 """
 
 import asyncio
+import logging
 import os
 from datetime import datetime, timedelta
 
@@ -21,6 +22,8 @@ from app.core.config import API_HOST, settings
 
 load_dotenv()
 BOT_TOKEN = os.getenv("BOT_TOKEN")
+
+logger = logging.getLogger(__name__)
 
 
 def format_card(card: dict) -> str:
@@ -41,12 +44,12 @@ async def send_digest_once() -> None:
     async with httpx.AsyncClient(base_url=API_HOST, timeout=60.0) as client:
         resp = await client.get("/subscriptions/users")
         if resp.status_code != 200:
-            print(f"[digest] subscribers fetch failed: {resp.status_code}")
+            logger.warning(f"[digest] subscribers fetch failed: {resp.status_code}")
             return
         users = resp.json()
 
     if not users:
-        print("[digest] no subscribers")
+        logger.info("[digest] no subscribers")
         return
 
     for user in users:
@@ -68,7 +71,7 @@ async def send_digest_once() -> None:
 
             text = format_card(card)
             if not BOT_TOKEN:
-                print("[digest] BOT_TOKEN not set, skipping send")
+                logger.warning("[digest] BOT_TOKEN not set, skipping send")
                 continue
             url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
             async with httpx.AsyncClient(timeout=20.0) as tg:
@@ -88,7 +91,7 @@ async def send_digest_once() -> None:
                         json={"chat_id": telegram_id, "text": to_plain(text)},
                     )
         except Exception as e:
-            print(f"[digest] Error for user {telegram_id}: {e}")
+            logger.warning(f"[digest] Error for user {telegram_id}: {e}")
 
 
 async def ingest_habr_once() -> None:
@@ -98,38 +101,38 @@ async def ingest_habr_once() -> None:
         async with httpx.AsyncClient(base_url=API_HOST, timeout=120.0) as client:
             r = await client.post(f"/ingestion/load-habr?limit={limit}")
             if r.status_code != 200:
-                print(f"[ingest:habr] non-200: {r.status_code}")
+                logger.warning(f"[ingest:habr] non-200: {r.status_code}")
                 return
             data = r.json()
-        print(
+        logger.info(
             f"[ingest:habr] new={data.get('new', 0)} "
             f"normalized={data.get('normalized', 0)} "
             f"non_it={data.get('non_it', 0)} failed={data.get('failed', 0)}"
         )
     except Exception as e:
-        print(f"[ingest:habr] error: {e}")
+        logger.warning(f"[ingest:habr] error: {e}")
 
 
 async def ingest_rss_once() -> None:
     """Дёрнуть API `/ingestion/load-rss` для пополнения из RSS-лент."""
     if not settings.rss_feeds_list:
-        print("[ingest:rss] RSS_FEEDS пуст, пропускаю")
+        logger.info("[ingest:rss] RSS_FEEDS пуст, пропускаю")
         return
     limit = settings.ingest_rss_limit_per_feed
     try:
         async with httpx.AsyncClient(base_url=API_HOST, timeout=180.0) as client:
             r = await client.post(f"/ingestion/load-rss?limit_per_feed={limit}")
             if r.status_code != 200:
-                print(f"[ingest:rss] non-200: {r.status_code}")
+                logger.warning(f"[ingest:rss] non-200: {r.status_code}")
                 return
             data = r.json()
-        print(
+        logger.info(
             f"[ingest:rss] feeds={data.get('feeds', 0)} "
             f"new={data.get('new', 0)} normalized={data.get('normalized', 0)} "
             f"non_it={data.get('non_it', 0)} failed={data.get('failed', 0)}"
         )
     except Exception as e:
-        print(f"[ingest:rss] error: {e}")
+        logger.warning(f"[ingest:rss] error: {e}")
 
 
 def compact_memories_once() -> None:
@@ -152,34 +155,34 @@ def compact_memories_once() -> None:
                     total_removed += r["removed"]
                     total_added += r["added"]
             db.commit()
-            print(f"[compact:memory] removed={total_removed} added={total_added}")
+            logger.info(f"[compact:memory] removed={total_removed} added={total_added}")
         finally:
             db.close()
     except Exception as e:
-        print(f"[compact:memory] error: {e}")
+        logger.warning(f"[compact:memory] error: {e}")
 
 
 async def ingest_telegram_once() -> None:
     """Дёрнуть API `/ingestion/load-telegram` для пополнения из TG-каналов."""
     channels = (getattr(settings, "tg_ingest_channels", "") or "").strip()
     if not channels:
-        print("[ingest:tg] TG_INGEST_CHANNELS пуст, пропускаю")
+        logger.info("[ingest:tg] TG_INGEST_CHANNELS пуст, пропускаю")
         return
     limit = settings.ingest_rss_limit_per_feed  # переиспользуем тот же лимит
     try:
         async with httpx.AsyncClient(base_url=API_HOST, timeout=180.0) as client:
             r = await client.post(f"/ingestion/load-telegram?limit_per_channel={limit}")
             if r.status_code != 200:
-                print(f"[ingest:tg] non-200: {r.status_code}")
+                logger.warning(f"[ingest:tg] non-200: {r.status_code}")
                 return
             data = r.json()
-        print(
+        logger.info(
             f"[ingest:tg] new={data.get('new', 0)} "
             f"normalized={data.get('normalized', 0)} "
             f"non_it={data.get('non_it', 0)} failed={data.get('failed', 0)}"
         )
     except Exception as e:
-        print(f"[ingest:tg] error: {e}")
+        logger.warning(f"[ingest:tg] error: {e}")
 
 
 def build_scheduler():
@@ -209,7 +212,7 @@ def build_scheduler():
         lambda: asyncio.run(send_digest_once()),
         **digest_kwargs,
     )
-    print(
+    logger.info(
         f"[scheduler] daily_digest: every {digest_minutes}m"
         f"{' (run on startup)' if settings.digest_run_on_startup else ' (no run on startup)'}"
     )
@@ -243,7 +246,7 @@ def build_scheduler():
                 next_run_time=now + timedelta(seconds=60),
                 jitter=1800,
             )
-        print(
+        logger.info(
             f"[scheduler] ingest_habr + ingest_rss"
             f"{' + ingest_telegram' if tg_channels else ''}: "
             f"run on startup, then every {interval}h "
@@ -251,7 +254,7 @@ def build_scheduler():
             f"tg channels: {len([c for c in tg_channels.split(',') if c.strip()])})"
         )
     else:
-        print("[scheduler] INGEST_ENABLED=false — periodic ingestion disabled")
+        logger.info("[scheduler] INGEST_ENABLED=false — periodic ingestion disabled")
 
     # Memory compaction — раз в неделю; не на старте, чтобы не блокировать boot.
     scheduler.add_job(
@@ -260,7 +263,7 @@ def build_scheduler():
         hours=24 * 7,
         id="compact_memories",
     )
-    print("[scheduler] compact_memories: every 7d (no run on startup)")
+    logger.info("[scheduler] compact_memories: every 7d (no run on startup)")
 
     return scheduler
 
@@ -268,7 +271,7 @@ def build_scheduler():
 def run_scheduler() -> None:
     """Запустить блокирующий scheduler: дайджест + (опционально) ingestion."""
     scheduler = build_scheduler()
-    print("[scheduler] starting...")
+    logger.info("[scheduler] starting...")
     scheduler.start()
 
 

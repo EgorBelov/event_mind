@@ -6,16 +6,16 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from app.db.base import Base
-from app.db.models.user import User
 from app.db.models.event import Event
-from app.db.models.topic import Topic, UserTopic, EventTopic
+from app.db.models.topic import EventTopic, Topic, UserTopic
+from app.db.models.user import User
 from app.db.models.user_memory import UserMemory
 from app.recommender.memory import (
-    write_memory,
-    recall,
-    extract_from_interaction,
-    extract_from_dialog,
     compact_user_memories,
+    extract_from_dialog,
+    extract_from_interaction,
+    recall,
+    write_memory,
 )
 
 

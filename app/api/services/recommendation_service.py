@@ -45,10 +45,8 @@ def refresh_user_embedding(db: Session, user: User) -> None:
         db.commit()
     except Exception as e:
         logger.warning("refresh_user_embedding failed, rollback: %s", e)
-        try:
+        with contextlib.suppress(Exception):
             db.rollback()
-        except Exception:
-            pass
 
 
 def get_recommendations_for_user(
@@ -58,13 +56,53 @@ def get_recommendations_for_user(
     if not user:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
 
-    events = db.query(Event).all()
-
-    # Один раз на запрос: закэшировать вектор пользователя (user.embedding)
-    # и досчитать батчем недостающие векторы событий с записью в БД.
-    # Иначе hybrid_score/explain пересчитывали эмбеддинги для КАЖДОГО из
-    # десятков событий — это и давало ~16 c на список.
+    # Один раз на запрос: закэшировать вектор пользователя (user.embedding).
     refresh_user_embedding(db, user)
+
+    # Precompute user embedding с session-blend — ОДИН раз на запрос
+    # (а не на каждое из N событий). Нужен и для cosine-компонента, и для
+    # кандидатного отбора через pgvector ниже.
+    precomputed_user_emb = None
+    try:
+        from app.recommender.embeddings import (
+            blend_user_embedding,
+            build_session_embedding,
+            get_or_build_user_embedding,
+        )
+        precomputed_user_emb = get_or_build_user_embedding(user)
+        session_emb = build_session_embedding(db, user, window=5)
+        if session_emb is not None:
+            precomputed_user_emb = blend_user_embedding(
+                precomputed_user_emb, session_emb, session_weight=0.3,
+            )
+    except Exception:
+        precomputed_user_emb = None
+
+    # Кандидатный отбор: на PostgreSQL+pgvector берём top-N по вектору через
+    # индекс <=> (а не скорим весь каталог). На SQLite/без pgvector
+    # pgvector_top_k_events вернёт [] → берём все события. joinedload по
+    # event_topics убирает N+1 (иначе _get_event_topic_codes делает SELECT
+    # на каждое событие — особенно дорого на PG по сети).
+    from sqlalchemy.orm import joinedload
+
+    candidate_pool = 300
+    candidate_ids: list[int] = []
+    if precomputed_user_emb is not None:
+        try:
+            from app.recommender.embeddings import pgvector_top_k_events
+            candidate_ids = pgvector_top_k_events(db, precomputed_user_emb, k=candidate_pool)
+        except Exception as e:
+            logger.warning("pgvector candidate fetch failed: %s", e)
+            candidate_ids = []
+
+    base_q = db.query(Event).options(joinedload(Event.event_topics))
+    events = (
+        base_q.filter(Event.id.in_(candidate_ids)).all()
+        if candidate_ids else base_q.all()
+    )
+
+    # Досчитать батчем недостающие векторы событий с записью в БД, чтобы
+    # cosine-компонент не пересчитывал их лениво по одному.
     try:
         from app.recommender.embeddings import ensure_event_embeddings
         ensure_event_embeddings(db, events)
@@ -85,25 +123,6 @@ def get_recommendations_for_user(
         skill_profile = load_skill_profile(db, user.id)
     except Exception:
         skill_profile = None
-
-    # Precompute user embedding с session-blend — ОДИН раз на запрос,
-    # а не на каждое из N событий (раньше build_session_embedding ходил
-    # в БД на каждое событие — это ловило timeout на холодном запуске).
-    precomputed_user_emb = None
-    try:
-        from app.recommender.embeddings import (
-            blend_user_embedding,
-            build_session_embedding,
-            get_or_build_user_embedding,
-        )
-        precomputed_user_emb = get_or_build_user_embedding(user)
-        session_emb = build_session_embedding(db, user, window=5)
-        if session_emb is not None:
-            precomputed_user_emb = blend_user_embedding(
-                precomputed_user_emb, session_emb, session_weight=0.3,
-            )
-    except Exception:
-        precomputed_user_emb = None
 
     # LinUCB-state — один раз на запрос (вместо N SELECT'ов из user_bandit_states).
     bandit_state = None

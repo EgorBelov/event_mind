@@ -135,7 +135,7 @@ def _postprocess_normalized(normalized: dict) -> dict:
     # Зажимаем score'ы в допустимый диапазон 1..10
     for score_field in ("quality_score", "hype_score"):
         val = normalized.get(score_field)
-        if isinstance(val, (int, float)):
+        if isinstance(val, int | float):
             normalized[score_field] = max(1, min(10, int(val)))
         else:
             normalized[score_field] = None

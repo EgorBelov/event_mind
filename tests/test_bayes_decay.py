@@ -1,9 +1,9 @@
 """Tests for temporal Beta decay in bayesian.load_user_stats."""
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 
 def _utcnow():
-    return datetime.now(timezone.utc).replace(tzinfo=None)
+    return datetime.now(UTC).replace(tzinfo=None)
 
 import pytest
 from sqlalchemy import create_engine
@@ -11,10 +11,10 @@ from sqlalchemy.orm import sessionmaker
 
 from app.core.config import settings
 from app.db.base import Base
-from app.db.models.user import User
 from app.db.models.topic import Topic, UserTopic
+from app.db.models.user import User
 from app.db.models.user_topic_stat import UserTopicStat
-from app.recommender.bayesian import load_user_stats, _apply_decay, PRIOR_ALPHA, PRIOR_BETA
+from app.recommender.bayesian import PRIOR_ALPHA, PRIOR_BETA, _apply_decay, load_user_stats
 
 
 @pytest.fixture

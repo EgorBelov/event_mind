@@ -6,8 +6,8 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from app.db.base import Base
-from app.db.models.user import User
 from app.db.models.topic import Topic
+from app.db.models.user import User
 from app.db.models.user_topic_stat import UserTopicStat
 from app.recommender.cold_start import BioProfile, apply_cold_start
 

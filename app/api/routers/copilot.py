@@ -16,14 +16,14 @@ from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
-logger = logging.getLogger(__name__)
-
 from app.api.services.recommendation_service import get_recommendations_for_user
 from app.db.dependencies import get_db
 from app.db.models.copilot_session import CopilotSession
 from app.db.models.event import Event
 from app.db.models.user import User
 from app.recommender.scoring import _get_event_topic_codes
+
+logger = logging.getLogger(__name__)
 
 
 def _utcnow() -> datetime:

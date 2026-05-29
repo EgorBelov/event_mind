@@ -1,3 +1,4 @@
+import contextlib
 import json
 from pathlib import Path
 
@@ -183,7 +184,7 @@ def load_all_events(db: Session, limit: int = 20) -> dict:
     logger = logging.getLogger(__name__)
 
     # (имя, вызов) — порядок = очередь выполнения.
-    sources: list[tuple[str, "callable"]] = [
+    sources: list[tuple[str, callable]] = [
         ("habr", lambda: load_habr_events(db, limit=limit)),
         ("rss", lambda: load_rss_events(db, limit_per_feed=limit)),
         ("kudago", lambda: load_kudago_events(db, limit=limit)),
@@ -204,10 +205,8 @@ def load_all_events(db: Session, limit: int = 20) -> dict:
             logger.exception("ingestion source '%s' failed", name)
             # Сессия могла «отравиться» на середине транзакции — откатываем,
             # иначе следующий источник упадёт с PendingRollbackError.
-            try:
+            with contextlib.suppress(Exception):
                 db.rollback()
-            except Exception:
-                pass
             res = {"source": name, "ok": False, "error": str(e)[:300]}
         per_source.append(res)
         for k in totals:

@@ -1,7 +1,7 @@
 """Tests for app/recommender/user_model.py"""
 from app.recommender.user_model import (
-    build_initial_topic_weights,
     apply_feedback_to_weights,
+    build_initial_topic_weights,
     parse_topics,
 )
 

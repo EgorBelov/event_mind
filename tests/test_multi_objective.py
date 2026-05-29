@@ -1,10 +1,10 @@
 """Multi-objective scoring, MMR diversity, freshness, breakdown."""
 import json
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 
 def _utcnow():
-    return datetime.now(timezone.utc).replace(tzinfo=None)
+    return datetime.now(UTC).replace(tzinfo=None)
 
 
 import pytest
@@ -12,11 +12,15 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from app.db.base import Base
-from app.db.models.user import User
 from app.db.models.event import Event
-from app.db.models.topic import Topic, UserTopic, EventTopic
-from app.recommender.hybrid import compute_score_breakdown, hybrid_score, freshness_score, _parse_event_date
+from app.db.models.topic import EventTopic, Topic, UserTopic
+from app.db.models.user import User
 from app.recommender.diversity import mmr_rerank
+from app.recommender.hybrid import (
+    _parse_event_date,
+    compute_score_breakdown,
+    freshness_score,
+)
 
 
 @pytest.fixture

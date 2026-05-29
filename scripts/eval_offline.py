@@ -21,14 +21,13 @@ import math
 import random
 from collections import defaultdict
 
-from app.db.session import SessionLocal
 from app.db.models.event import Event
 from app.db.models.interaction import Interaction
 from app.db.models.user import User
-from app.recommender.scoring import score_event_for_user
-from app.recommender.hybrid import hybrid_score
+from app.db.session import SessionLocal
 from app.recommender.bayesian import load_user_stats, posterior_mean
-
+from app.recommender.hybrid import hybrid_score
+from app.recommender.scoring import score_event_for_user
 
 POSITIVE_ACTIONS = {"like", "save"}
 

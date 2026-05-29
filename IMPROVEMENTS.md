@@ -30,6 +30,18 @@
   `app/api/services/ingestion_service.py`. Backoff в общий `llm.invoke`
   СОЗНАТЕЛЬНО не добавлен — это бы подвешивало user-facing запросы
   (copilot/why); SDK ChatGroq уже ретраит per-minute лимиты через max_retries.
+- [x] **Кандидатный отбор через pgvector + N+1 в `/recommendations`.** Сначала
+  считается user-embedding, затем `pgvector_top_k_events` отбирает top-300
+  кандидатов (на PG; на SQLite fallback на весь каталог), hybrid считается
+  только по ним. `joinedload(Event.event_topics)` убирает N+1 на темах.
+  `app/api/services/recommendation_service.py`.
+- [x] **Логи вместо `print()` в scheduler.** `app/scheduler/digest.py` переведён
+  на `logging` (info/warning по уровню).
+- [x] **ruff = 0 ошибок по репо.** `ruff check --fix` + unsafe-fix (UP038/SIM105),
+  перенос logger в `copilot.py`, per-file-ignores E402 для tests/alembic/scripts
+  в `pyproject.toml`.
+- [x] **CI.** `.github/workflows/ci.yml` — `ruff check .` + `pytest -q` на
+  push/PR в main/dev (Python 3.12, SQLite-БД по умолчанию).
 
 ## 🔴 Корректность / надёжность
 
@@ -44,14 +56,6 @@
 
 ## 🟠 Масштабирование / производительность
 
-- [ ] **Кандидатный отбор через pgvector в `/recommendations`.** Сейчас
-  `db.query(Event).all()` + hybrid на каждое событие — O(каталог) на запрос.
-  Использовать `retrieval.pgvector_top_k_events` для предотбора 200–500
-  кандидатов, затем hybrid только по ним.
-  `app/api/services/recommendation_service.py`.
-- [ ] **N+1 в скоринге.** `_get_event_topic_codes(event)` лениво грузит
-  relationship → отдельный SELECT на событие (особенно больно на PG по сети,
-  ~360 ms RTT). Eager-load через `joinedload(Event.event_topics)`.
 - [ ] **Состояние бота в памяти.** `user_recommendation_index` —
   модульный dict в `app/bot/handlers/recommendations.py`: теряется при
   рестарте и ломается при >1 воркере. Перенести в БД/Redis (как
@@ -62,14 +66,8 @@
 - [ ] **Авторизация API.** Все эндпоинты открыты, пользователь — `telegram_id`
   в пути. На деплое любой может читать/менять чужой профиль. Минимум —
   shared-secret между ботом и API (заголовок). `app/api/`.
-- [ ] **CI.** Нет автозапуска тестов. Добавить GitHub Actions:
-  `pytest -q` + `ruff check .` на push/PR.
-- [ ] **ruff в `app/`.** Заявлено «0 ошибок», реально ~10 (72 по репо).
-  `ruff check --fix .` уберёт ~43 автоматом, остальное — точечно.
 - [ ] **Pydantic `.dict()` → `model_dump()`.** Deprecation-warning'и в тестах;
   сломается на Pydantic v3.
-- [ ] **Логи вместо `print()` в scheduler.** `app/scheduler/digest.py` весь на
-  `print(...)` — на проде не попадёт в структурированные логи.
 - [ ] **Тесты Postgres-путей.** Фикстуры на SQLite; ветки
   `pgvector_top_k_events`, `<=>`-запросы, `has_pgvector()` не покрыты, а прод
   теперь PG (Supabase). Добавить хотя бы smoke против PG.

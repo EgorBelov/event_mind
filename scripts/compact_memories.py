@@ -7,8 +7,8 @@ from __future__ import annotations
 
 import argparse
 
-from app.db.session import SessionLocal
 from app.db.models.user import User
+from app.db.session import SessionLocal
 from app.recommender.memory import compact_user_memories
 
 

@@ -11,11 +11,11 @@ import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-from app.db.base import Base
-from app.db.models.raw_event import RawEvent
-from app.db.models.event import Event
-from app.ingestion.sources.rss import fetch_rss_events
 from app.api.services import ingestion_service
+from app.db.base import Base
+from app.db.models.event import Event
+from app.db.models.raw_event import RawEvent
+from app.ingestion.sources.rss import fetch_rss_events
 
 
 @pytest.fixture

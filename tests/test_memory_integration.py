@@ -6,9 +6,9 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from app.db.base import Base
-from app.db.models.user import User
 from app.db.models.event import Event
-from app.db.models.topic import Topic, UserTopic, EventTopic
+from app.db.models.topic import EventTopic, Topic, UserTopic
+from app.db.models.user import User
 from app.db.models.user_memory import UserMemory
 
 

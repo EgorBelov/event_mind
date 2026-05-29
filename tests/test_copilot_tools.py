@@ -5,12 +5,12 @@ import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
+from app.agents.copilot.tools import TOOL_DEFINITIONS, dispatch_tool
 from app.db.base import Base
-from app.db.models.user import User
 from app.db.models.event import Event
 from app.db.models.interaction import Interaction
-from app.db.models.topic import Topic, UserTopic, EventTopic
-from app.agents.copilot.tools import dispatch_tool, TOOL_DEFINITIONS
+from app.db.models.topic import EventTopic, Topic, UserTopic
+from app.db.models.user import User
 
 
 @pytest.fixture

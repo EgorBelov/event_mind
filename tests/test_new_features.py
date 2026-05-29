@@ -1,17 +1,18 @@
 """Tests for semantic search, trending, explainability, and enriched fields."""
 import json
+
 import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
+from app.api.services.search_service import search_events, semantic_search_events
 from app.db.base import Base
-from app.db.models.user import User
 from app.db.models.event import Event
 from app.db.models.interaction import Interaction
-from app.db.models.topic import Topic, UserTopic, EventTopic
-from app.recommender.explain import explain_event_for_user, explain_event_detailed
-from app.recommender.user_model import dump_topic_weights, build_initial_topic_weights
-from app.api.services.search_service import search_events, semantic_search_events
+from app.db.models.topic import EventTopic, Topic, UserTopic
+from app.db.models.user import User
+from app.recommender.explain import explain_event_detailed, explain_event_for_user
+from app.recommender.user_model import build_initial_topic_weights, dump_topic_weights
 
 
 @pytest.fixture
@@ -188,6 +189,7 @@ def test_trending_returns_structure(db):
 
     # Call the service directly (skip FastAPI dependency injection)
     from collections import Counter
+
     from app.recommender.scoring import _get_event_topic_codes
 
     interactions = db.query(Interaction).all()

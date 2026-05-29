@@ -1,5 +1,4 @@
 """Tests for new ingestion sources (offline mocks)."""
-import pytest
 
 
 def test_kudago_parses_results(monkeypatch):
@@ -42,15 +41,15 @@ def test_kudago_handles_http_error(monkeypatch):
 
 
 def test_luma_returns_empty_without_config(monkeypatch):
-    from app.ingestion.sources import luma
     from app.core.config import settings
+    from app.ingestion.sources import luma
     monkeypatch.setattr(settings, "luma_calendars", "")
     assert luma.fetch_luma_events() == []
 
 
 def test_luma_parses_ics(monkeypatch):
-    from app.ingestion.sources import luma
     from app.core.config import settings
+    from app.ingestion.sources import luma
 
     ics = """BEGIN:VCALENDAR
 BEGIN:VEVENT
@@ -75,23 +74,23 @@ END:VCALENDAR"""
 
 
 def test_meetup_skipped_without_creds(monkeypatch):
-    from app.ingestion.sources import meetup
     from app.core.config import settings
+    from app.ingestion.sources import meetup
     monkeypatch.setattr(settings, "meetup_token", "")
     assert meetup.fetch_meetup_events() == []
 
 
 def test_tg_skipped_without_channels(monkeypatch):
-    from app.ingestion.sources import tg_channels
     from app.core.config import settings
+    from app.ingestion.sources import tg_channels
     monkeypatch.setattr(settings, "tg_ingest_channels", "")
     assert tg_channels.fetch_telegram_events() == []
 
 
 def test_tg_parses_web_preview_html(monkeypatch):
     """Парсер должен извлекать сообщения из t.me/s/{channel} HTML."""
-    from app.ingestion.sources import tg_channels
     from app.core.config import settings
+    from app.ingestion.sources import tg_channels
 
     html = """
     <html><body>
@@ -133,8 +132,8 @@ def test_tg_parses_web_preview_html(monkeypatch):
 
 
 def test_tg_handles_http_error(monkeypatch):
-    from app.ingestion.sources import tg_channels
     from app.core.config import settings
+    from app.ingestion.sources import tg_channels
 
     class FakeResp:
         status_code = 404
@@ -148,8 +147,8 @@ def test_tg_handles_http_error(monkeypatch):
 
 def test_tg_silent_when_preview_disabled(monkeypatch):
     """Канал, у которого web-preview отключён, отдаёт страницу без .tgme_widget_message."""
-    from app.ingestion.sources import tg_channels
     from app.core.config import settings
+    from app.ingestion.sources import tg_channels
 
     class FakeResp:
         status_code = 200
@@ -163,8 +162,8 @@ def test_tg_silent_when_preview_disabled(monkeypatch):
 
 def test_tg_multi_channel(monkeypatch):
     """Несколько каналов через запятую — все обходятся."""
-    from app.ingestion.sources import tg_channels
     from app.core.config import settings
+    from app.ingestion.sources import tg_channels
 
     call_log: list[str] = []
 

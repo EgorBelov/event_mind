@@ -16,7 +16,6 @@ from app.bot.keyboards.inline import (
 )
 from app.bot.keyboards.reply import main_menu_keyboard
 from app.bot.services.api_client import EventMindAPIClient
-from app.bot.utils import send
 
 router = Router()
 api_client = EventMindAPIClient()

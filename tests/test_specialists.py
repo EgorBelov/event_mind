@@ -6,10 +6,10 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from app.db.base import Base
-from app.db.models.user import User
 from app.db.models.event import Event
 from app.db.models.interaction import Interaction
-from app.db.models.topic import Topic, UserTopic, EventTopic
+from app.db.models.topic import EventTopic, Topic, UserTopic
+from app.db.models.user import User
 
 
 @pytest.fixture
@@ -177,7 +177,7 @@ def test_roadmap_planner_returns_structured_answer(db, monkeypatch):
 
 def test_event_explainer_uses_target_event_id(db, monkeypatch):
     user, ev = _seed(db)
-    fake = f"Это событие подходит, потому что..."
+    fake = "Это событие подходит, потому что..."
 
     import app.agents.recommendation.llm as llm_mod
     monkeypatch.setattr(llm_mod, "llm", _make_fake_llm(fake))
@@ -198,7 +198,10 @@ def test_event_explainer_fallback_regex_extracts_id(db, monkeypatch):
     import app.agents.recommendation.llm as llm_mod
     monkeypatch.setattr(llm_mod, "llm", _make_fake_llm(fake))
 
-    from app.agents.copilot.specialists.explainer import event_explainer_node, _fallback_extract_event_id
+    from app.agents.copilot.specialists.explainer import (
+        _fallback_extract_event_id,
+        event_explainer_node,
+    )
     state = _state(db, user, ev, goal=f"расскажи про event #{ev.id}")
     state["target_event_id"] = None
     assert _fallback_extract_event_id(state["goal"], state) == ev.id

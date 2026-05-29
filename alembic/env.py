@@ -1,7 +1,6 @@
 from logging.config import fileConfig
 
-from sqlalchemy import engine_from_config
-from sqlalchemy import pool
+from sqlalchemy import engine_from_config, pool
 
 from alembic import context
 
@@ -13,11 +12,19 @@ if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
 # Import Base and all models so Alembic can detect them
-from app.db.base import Base
-from app.db.models import User, Event, Interaction, Topic, UserTopic, EventTopic, RawEvent  # noqa: F401
-
 # Override sqlalchemy.url from app config
 from app.core.config import DATABASE_URL
+from app.db.base import Base
+from app.db.models import (  # noqa: F401
+    Event,
+    EventTopic,
+    Interaction,
+    RawEvent,
+    Topic,
+    User,
+    UserTopic,
+)
+
 config.set_main_option("sqlalchemy.url", DATABASE_URL)
 
 target_metadata = Base.metadata

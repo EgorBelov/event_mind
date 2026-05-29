@@ -4,13 +4,11 @@ import json
 import pytest
 
 from app.agents.copilot.supervisor import (
-    SupervisorDecision,
     _keyword_classify,
     _llm_classify,
-    supervisor_node,
     route_after_supervisor,
+    supervisor_node,
 )
-
 
 # ─── Keyword fallback ────────────────────────────────────────────────────
 
@@ -64,7 +62,6 @@ def test_llm_classify_parses_valid_json(monkeypatch):
     class FakeLLM:
         def invoke(self, msgs): return FakeResponse()
 
-    import app.agents.copilot.supervisor as sup_mod
     import app.agents.recommendation.llm as llm_mod
     monkeypatch.setattr(llm_mod, "llm", FakeLLM())
 
