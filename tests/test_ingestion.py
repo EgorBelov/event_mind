@@ -327,6 +327,8 @@ def test_normalize_by_ids_batch_creates_events(db, monkeypatch):
     assert (normalized, non_it, failed) == (3, 0, 0)
     assert db.query(Event).count() == 3
     assert all(r.status == "normalized" for r in db.query(RawEvent).all())
+    # date "2026-06-01" распарсилась в start_at (DateTime) для freshness
+    assert all(e.start_at is not None for e in db.query(Event).all())
 
 
 def test_normalize_by_ids_rate_limit_leaves_raw(db, monkeypatch):
@@ -348,3 +350,41 @@ def test_normalize_by_ids_rate_limit_leaves_raw(db, monkeypatch):
     assert db.query(Event).count() == 0
     # ключевое: остались raw, а не failed → доберутся следующим /normalize
     assert all(r.status == "raw" for r in db.query(RawEvent).all())
+
+
+def test_retry_count_increments_and_caps(db, monkeypatch):
+    """Каждый провал нормализации инкрементит retry_count; после
+    MAX_NORMALIZE_RETRIES событие retry-failed больше не подбирает."""
+    def boom_batch(payloads):
+        raise ValueError("bad json")  # не rate-limit → деградация до per-event
+
+    def boom_single(state):
+        raise ValueError("llm broke")  # не rate-limit → _mark_failed
+
+    monkeypatch.setattr(
+        "app.agents.event_normalization.agent.event_normalizer_agent_batch", boom_batch
+    )
+    monkeypatch.setattr(
+        "app.agents.event_normalization.agent.event_normalizer_agent", boom_single
+    )
+    db.add(RawEvent(title="X", raw_description="d", status="raw"))
+    db.commit()
+
+    # 1-я попытка (raw → failed), retry_count=1
+    ingestion_service.normalize_raw_events(db)
+    r = db.query(RawEvent).first()
+    assert r.status == "failed" and r.retry_count == 1
+
+    # ещё две retry-failed → 2, 3
+    ingestion_service.retry_failed_events(db)
+    db.refresh(r)
+    assert r.retry_count == 2
+    ingestion_service.retry_failed_events(db)
+    db.refresh(r)
+    assert r.retry_count == 3
+
+    # retry_count >= MAX(3) → больше не подбирается
+    res = ingestion_service.retry_failed_events(db)
+    assert res["picked"] == 0
+    db.refresh(r)
+    assert r.retry_count == 3

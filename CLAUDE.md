@@ -194,11 +194,15 @@ IPv4) — pgvector 0.8.0 активен, retrieval идёт по `<=>`. `DATABAS
    N+1; тяжёлый `explain_event_detailed` — только для top-N (+ `limit`).
 2. Ingestion: `/load-all`, `/retry-failed`, батчинг нормализации + early-stop
    на rate-limit, запись `embedding_vec` при ingestion.
-3. Ops: scheduler переведён на `logging` (не `print`); `ruff` = 0 ошибок по
-   репо (+ per-file-ignores E402 для tests/alembic/scripts); CI на GitHub
-   Actions (`.github/workflows/ci.yml`: ruff + pytest на push/PR).
-4. Кроссплатформенные команды (macOS/Linux + Windows) в этом файле +
+3. Данные: `events.start_at` (DateTime) — нормализатор отдаёт ISO-дату,
+   freshness считается по `start_at` (строковая `date` остаётся для UI);
+   `raw_events.retry_count` + `MAX_NORMALIZE_RETRIES=3` — retry-failed не гоняет
+   безнадёжные. Миграция `b2c3d4e5f6a7` (аддитивная).
+4. Ops: scheduler на `logging` (не `print`); `ruff` = 0 по репо
+   (+ per-file-ignores E402); CI (`.github/workflows/ci.yml`: ruff + pytest).
+   LLM-обёртка ленивая — импорт не требует `GROQ_API_KEY` (была причина падения CI).
+5. Кроссплатформенные команды (macOS/Linux + Windows) в этом файле +
    `.env.example`; `ruff` и `python-docx` в `requirements.txt`.
-5. (ранее) rollback в `refresh_user_embedding`; `logger.exception` в
+6. (ранее) rollback в `refresh_user_embedding`; `logger.exception` в
    `/copilot` и `/agent-recommendations`; параметризуемый дайджест;
    чистка англицизмов в «Почему»; UX-правки `/start` и `tour:skip`.

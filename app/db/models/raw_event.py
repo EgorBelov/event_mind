@@ -13,5 +13,8 @@ class RawEvent(Base):
     source_url = Column(String, nullable=True)
     status = Column(String, default="raw", nullable=False)  # raw / normalized / non_it / failed
     error = Column(Text, nullable=True)
+    # Сколько раз нормализация падала — retry-failed пропускает «безнадёжные»
+    # после MAX_NORMALIZE_RETRIES попыток.
+    retry_count = Column(Integer, nullable=False, server_default="0", default=0)
     created_at = Column(DateTime, server_default=func.now(), nullable=False)
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now(), nullable=False)

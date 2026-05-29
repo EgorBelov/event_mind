@@ -69,6 +69,8 @@ seniority: junior | middle | senior | any
 - city для онлайн-событий = "any", если место не указано → "unknown".
 - format: вебинар/трансляция → "online"; физический адрес → "offline";
   оба формата → "hybrid".
+- date — дата начала строго в формате YYYY-MM-DD (для диапазона — дата начала);
+  если дата неизвестна → "" (пустая строка).
 - topics — список slug'ов. Минимум 1 для IT-событий.
 - tech_stack — список конкретных технологий (["Python", "FastAPI", "Docker"]).
 - seniority — "junior"/"middle"/"senior"/"any".

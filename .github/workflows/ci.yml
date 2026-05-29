@@ -9,6 +9,10 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
+    env:
+      # Тесты мокают реальные LLM-вызовы; фиктивный ключ нужен лишь чтобы
+      # конструкция ChatGroq не падала на проверке «ключ задан».
+      GROQ_API_KEY: ci-dummy-key
     steps:
       - uses: actions/checkout@v4
 

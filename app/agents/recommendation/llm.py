@@ -33,12 +33,28 @@ class _GroqWithFallback:
 
     Делегирует invoke/bind_tools основной модели; при исключении —
     однократно повторяет на fallback-модели. Если упала и она — пробрасываем.
+
+    ChatGroq строится ЛЕНИВО (при первом обращении), а не в __init__: иначе
+    импорт модуля требовал бы GROQ_API_KEY (ломало тесты/CI без ключа и любой
+    импорт без настроенного окружения). Ключ нужен только при реальном вызове.
     """
 
-    def __init__(self) -> None:
-        self._primary = _build_llm(settings.groq_model)
-        self._fallback = _build_llm(settings.groq_fallback_model)
-        self._tools: list | None = None
+    def __init__(self, tools: list | None = None) -> None:
+        self._tools = tools
+        self._primary_llm: ChatGroq | None = None
+        self._fallback_llm: ChatGroq | None = None
+
+    @property
+    def _primary(self) -> ChatGroq:
+        if self._primary_llm is None:
+            self._primary_llm = _build_llm(settings.groq_model)
+        return self._primary_llm
+
+    @property
+    def _fallback(self) -> ChatGroq:
+        if self._fallback_llm is None:
+            self._fallback_llm = _build_llm(settings.groq_fallback_model)
+        return self._fallback_llm
 
     def _bound(self, base: ChatGroq):
         return base.bind_tools(self._tools) if self._tools else base
@@ -59,13 +75,9 @@ class _GroqWithFallback:
         return self._primary.with_structured_output(*args, **kwargs)
 
     def bind_tools(self, tools):
-        # Возвращаем новую обёртку с привязанными tools, чтобы цепочка
-        # с инструментами тоже получала fallback.
-        clone = _GroqWithFallback.__new__(_GroqWithFallback)
-        clone._primary = self._primary
-        clone._fallback = self._fallback
-        clone._tools = tools
-        return clone
+        # Новая обёртка с привязанными tools (тоже ленивая) — чтобы цепочка
+        # с инструментами получала fallback.
+        return _GroqWithFallback(tools=tools)
 
 
 llm = _GroqWithFallback()

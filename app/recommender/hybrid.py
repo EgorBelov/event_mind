@@ -147,7 +147,9 @@ def _component_hype(event) -> float:
 
 
 def _component_freshness(event) -> float:
-    ev_dt = _parse_event_date(getattr(event, "date", None))
+    # Предпочитаем распарсенный start_at (DateTime); если его нет — парсим
+    # строковую date на лету (старые записи без backfill).
+    ev_dt = getattr(event, "start_at", None) or _parse_event_date(getattr(event, "date", None))
     return freshness_score(ev_dt) * settings.score_freshness_weight
 
 

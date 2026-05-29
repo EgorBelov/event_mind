@@ -14,7 +14,8 @@ class Event(Base):
     format = Column(String, nullable=False)
     city = Column(String, nullable=False)
     level = Column(String, nullable=False)
-    date = Column(String, nullable=False)
+    date = Column(String, nullable=False)        # человекочитаемая строка для UI
+    start_at = Column(DateTime, nullable=True)   # распарсенная дата начала: freshness/сортировка
     event_type = Column(String, nullable=True)
     target_audience = Column(String, nullable=True)
     source_url = Column(String, nullable=True)

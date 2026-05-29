@@ -50,8 +50,17 @@ def normalize_raw_events(
     По умолчанию обрабатываются только `raw`. Для повторной обработки
     провалившихся (например, после сброса дневного лимита Groq) передаётся
     `statuses=("failed",)` — см. retry_failed_events / endpoint /retry-failed.
+    События, превысившие MAX_NORMALIZE_RETRIES попыток, пропускаются как
+    безнадёжные (у `raw` retry_count=0, поэтому фильтр им не мешает).
     """
-    raw_events = db.query(RawEvent).filter(RawEvent.status.in_(list(statuses))).all()
+    raw_events = (
+        db.query(RawEvent)
+        .filter(
+            RawEvent.status.in_(list(statuses)),
+            RawEvent.retry_count < MAX_NORMALIZE_RETRIES,
+        )
+        .all()
+    )
     raw_ids = [r.id for r in raw_events]
     normalized, non_it, failed = _normalize_by_ids(db, raw_ids)
     return {"normalized": normalized, "non_it": non_it, "failed": failed, "picked": len(raw_ids)}
@@ -268,6 +277,18 @@ def _is_rate_limit_error(exc: Exception) -> bool:
     )
 
 
+# Сколько раз пытаемся нормализовать «упавшее» событие, прежде чем считать
+# его безнадёжным (retry-failed его больше не подбирает).
+MAX_NORMALIZE_RETRIES = 3
+
+
+def _mark_failed(raw: RawEvent, exc: Exception) -> None:
+    """Пометить raw-событие как failed + инкрементировать счётчик попыток."""
+    raw.status = "failed"
+    raw.error = str(exc)
+    raw.retry_count = (raw.retry_count or 0) + 1
+
+
 def _persist_normalized(db: Session, raw: RawEvent, item: dict) -> str:
     """Сохранить нормализованный dict как Event (или пометить non_it/дубль).
 
@@ -297,13 +318,18 @@ def _persist_normalized(db: Session, raw: RawEvent, item: dict) -> str:
     if not existing:
         import json as _json
         tech_stack = item.get("tech_stack", [])
+        # Дата начала: строку оставляем для UI, плюс парсим в DateTime
+        # (start_at) для freshness/сортировки. Не распарсилась → None.
+        from app.recommender.hybrid import _parse_event_date
+        date_str = item.get("date", "")
         event = Event(
             title=item["title"],
             description=item["description"],
             format=item["format"],
             city=item["city"],
             level=item["level"],
-            date=item.get("date", ""),
+            date=date_str,
+            start_at=_parse_event_date(date_str),
             event_type=item.get("event_type"),
             target_audience=item.get("target_audience"),
             source_url=item.get("source_url") or raw.source_url,
@@ -356,15 +382,13 @@ def _normalize_single(db: Session, raw: RawEvent) -> str:
     except Exception as e:
         if _is_rate_limit_error(e):
             raise
-        raw.status = "failed"
-        raw.error = str(e)
+        _mark_failed(raw, e)
         return "failed"
 
     try:
         return _persist_normalized(db, raw, item)
     except Exception as e:
-        raw.status = "failed"
-        raw.error = str(e)
+        _mark_failed(raw, e)
         return "failed"
 
 
@@ -399,8 +423,7 @@ def _normalize_chunk(db: Session, chunk: list[RawEvent]) -> tuple[int, int, int,
             try:
                 status = _persist_normalized(db, raw, item)
             except Exception as e:
-                raw.status = "failed"
-                raw.error = str(e)
+                _mark_failed(raw, e)
                 status = "failed"
             normalized += status == "normalized"
             non_it += status == "non_it"
@@ -414,8 +437,7 @@ def _normalize_chunk(db: Session, chunk: list[RawEvent]) -> tuple[int, int, int,
         except Exception as e:
             if _is_rate_limit_error(e):
                 return normalized, non_it, failed, True
-            raw.status = "failed"
-            raw.error = str(e)
+            _mark_failed(raw, e)
             status = "failed"
         normalized += status == "normalized"
         non_it += status == "non_it"

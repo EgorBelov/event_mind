@@ -42,17 +42,18 @@
   в `pyproject.toml`.
 - [x] **CI.** `.github/workflows/ci.yml` — `ruff check .` + `pytest -q` на
   push/PR в main/dev (Python 3.12, SQLite-БД по умолчанию).
-
-## 🔴 Корректность / надёжность
-
-- [ ] **Счётчик попыток у raw_events.** Добавить `retry_count` (миграция),
-  чтобы `retry-failed` не гонял вечно безнадёжные события и можно было
-  отсекать «битые» после N попыток. `app/db/models/raw_event.py`.
-- [ ] **Нормализация даты в ISO + тип `DateTime`.** Сейчас `events.date` —
-  строка, у реальных событий часто `unknown`/пусто → freshness падает в
-  дефолт 0.5, сортировка по дате невозможна. Обязать нормализатор возвращать
-  ISO-дату или null; в модели — `DateTime`. `app/db/models/event.py`,
-  `app/agents/event_normalization/`.
+- [x] **Тесты герметичны без GROQ_API_KEY.** `_GroqWithFallback` строит
+  `ChatGroq` лениво (не в `__init__`) — импорт модулей больше не требует
+  ключа (CI падал на этом). `app/agents/recommendation/llm.py` +
+  фиктивный `GROQ_API_KEY` в CI как подстраховка.
+- [x] **`retry_count` у raw_events.** Колонка + `_mark_failed` инкрементит
+  счётчик; `normalize_raw_events`/`retry-failed` пропускают события, превысившие
+  `MAX_NORMALIZE_RETRIES` (3). `app/db/models/raw_event.py`,
+  `app/api/services/ingestion_service.py`, миграция `b2c3d4e5f6a7`.
+- [x] **Дата начала: `events.start_at` (DateTime).** Нормализатор отдаёт ISO-дату,
+  она парсится в `start_at` при ingestion; `_component_freshness` использует
+  `start_at` (fallback на парсинг строки). Строковая `date` остаётся для UI.
+  Аддитивно — без смены типа существующей колонки.
 
 ## 🟠 Масштабирование / производительность
 
