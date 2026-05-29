@@ -33,6 +33,10 @@ def _sqlite_pragmas(dbapi_connection, connection_record):
 engine = create_engine(
     settings.database_url,
     echo=settings.debug,
+    # pool_pre_ping: управляемый PG/пулер (Supabase, RDS) роняет простаивающие
+    # соединения — без pre-ping первый запрос после паузы ловит "connection
+    # closed". Проверка дешёвая (SELECT 1) и безвредна для SQLite.
+    pool_pre_ping=True,
     connect_args={"check_same_thread": False} if "sqlite" in settings.database_url else {},
 )
 

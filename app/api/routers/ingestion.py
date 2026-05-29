@@ -3,6 +3,7 @@ from sqlalchemy.orm import Session
 
 from app.api.services.ingestion_service import (
     get_ingestion_status,
+    load_all_events,
     load_habr_events,
     load_kudago_events,
     load_luma_events,
@@ -11,6 +12,7 @@ from app.api.services.ingestion_service import (
     load_rss_events,
     load_telegram_events,
     normalize_raw_events,
+    retry_failed_events,
 )
 from app.db.dependencies import get_db
 
@@ -60,11 +62,28 @@ def load_tg(limit_per_channel: int = 20, db: Session = Depends(get_db)):
     return load_telegram_events(db, limit_per_channel=limit_per_channel)
 
 
+@router.post("/load-all")
+def load_all(limit: int = 20, db: Session = Depends(get_db)):
+    """Запустить ВСЕ источники по очереди: habr, rss, kudago, luma, meetup, telegram.
+
+    Ненастроенные/упавшие источники пропускаются, не прерывая остальные.
+    Возвращает per-source разбивку + агрегированные totals. Операция тяжёлая
+    (LLM-нормализация на каждое новое событие) — при больших limit может идти минуты.
+    """
+    return load_all_events(db, limit=limit)
+
+
 @router.post("/normalize")
 def normalize(db: Session = Depends(get_db)):
     """Прогнать pending raw-события через AI-нормализатор и сохранить в events."""
     result = normalize_raw_events(db)
     return result
+
+
+@router.post("/retry-failed")
+def retry_failed(db: Session = Depends(get_db)):
+    """Переобработать события со статусом failed (например, после сброса лимита Groq)."""
+    return retry_failed_events(db)
 
 
 @router.get("/status")

@@ -41,12 +41,29 @@ def load_raw_events(db: Session, file_path: str = "data/events_raw.json") -> dic
     return {"loaded": loaded, "skipped": skipped}
 
 
-def normalize_raw_events(db: Session) -> dict:
-    """Прогнать все pending raw-события через EventNormalizerAgent."""
-    raw_events = db.query(RawEvent).filter(RawEvent.status == "raw").all()
+def normalize_raw_events(
+    db: Session, statuses: tuple[str, ...] = ("raw",)
+) -> dict:
+    """Прогнать raw-события заданных статусов через EventNormalizerAgent.
+
+    По умолчанию обрабатываются только `raw`. Для повторной обработки
+    провалившихся (например, после сброса дневного лимита Groq) передаётся
+    `statuses=("failed",)` — см. retry_failed_events / endpoint /retry-failed.
+    """
+    raw_events = db.query(RawEvent).filter(RawEvent.status.in_(list(statuses))).all()
     raw_ids = [r.id for r in raw_events]
     normalized, non_it, failed = _normalize_by_ids(db, raw_ids)
-    return {"normalized": normalized, "non_it": non_it, "failed": failed}
+    return {"normalized": normalized, "non_it": non_it, "failed": failed, "picked": len(raw_ids)}
+
+
+def retry_failed_events(db: Session) -> dict:
+    """Повторно прогнать события со статусом 'failed'.
+
+    Типичный кейс: нормализация упала на rate-limit'е Groq (429). После
+    восстановления квоты этот вызов добивает остаток. На успехе статус
+    станет normalized/non_it, иначе останется failed с обновлённым error.
+    """
+    return normalize_raw_events(db, statuses=("failed",))
 
 
 def load_rss_events(
@@ -150,6 +167,55 @@ def load_telegram_events(db: Session, limit_per_channel: int = 20) -> dict:
     return _load_and_normalize(db, items, source="telegram")
 
 
+def load_all_events(db: Session, limit: int = 20) -> dict:
+    """Прогнать ВСЕ источники ingestion по очереди и собрать сводку.
+
+    Источники: habr, rss, kudago, luma, meetup, telegram. Каждый изолирован
+    в try/except + db.rollback() при сбое — отсутствие конфигурации или падение
+    одного источника не прерывает остальные (та же философия, что в hybrid-
+    скоринге). Возвращает per-source результаты + агрегированные totals.
+
+    Тяжёлая операция: на каждое новое событие идёт LLM-нормализация, так что
+    при больших limit запрос может выполняться минуты.
+    """
+    import logging
+
+    logger = logging.getLogger(__name__)
+
+    # (имя, вызов) — порядок = очередь выполнения.
+    sources: list[tuple[str, "callable"]] = [
+        ("habr", lambda: load_habr_events(db, limit=limit)),
+        ("rss", lambda: load_rss_events(db, limit_per_feed=limit)),
+        ("kudago", lambda: load_kudago_events(db, limit=limit)),
+        ("luma", lambda: load_luma_events(db, limit_per_calendar=limit)),
+        ("meetup", lambda: load_meetup_events(db, limit_per_group=limit)),
+        ("telegram", lambda: load_telegram_events(db, limit_per_channel=limit)),
+    ]
+
+    per_source: list[dict] = []
+    totals = {"new": 0, "skipped": 0, "normalized": 0, "non_it": 0, "failed": 0}
+
+    for name, fn in sources:
+        try:
+            res = fn()
+            res.setdefault("source", name)
+            res["ok"] = True
+        except Exception as e:
+            logger.exception("ingestion source '%s' failed", name)
+            # Сессия могла «отравиться» на середине транзакции — откатываем,
+            # иначе следующий источник упадёт с PendingRollbackError.
+            try:
+                db.rollback()
+            except Exception:
+                pass
+            res = {"source": name, "ok": False, "error": str(e)[:300]}
+        per_source.append(res)
+        for k in totals:
+            totals[k] += int(res.get(k, 0) or 0)
+
+    return {"sources": per_source, "totals": totals}
+
+
 def _load_and_normalize(db: Session, items: list[dict], source: str) -> dict:
     """Универсальная обёртка: items → raw_events → normalize → events."""
     loaded = 0
@@ -209,6 +275,7 @@ def _normalize_single(db: Session, raw: RawEvent) -> str:
 
         if not topics:
             raw.status = "non_it"
+            raw.error = None
             return "non_it"
 
         existing = db.query(Event).filter(Event.title == item["title"]).first()
@@ -247,15 +314,19 @@ def _normalize_single(db: Session, raw: RawEvent) -> str:
 
             # Сразу считаем вектор события, чтобы путь рекомендаций не
             # досчитывал его лениво (тот самый «холодный» провал).
+            # _write_embedding пишет И JSON-колонку, И pgvector-колонку
+            # embedding_vec — иначе на PG быстрый <=>-индекс пустой и каждый
+            # ingestion требовал бы ручного backfill_pgvector.
             # Best-effort: при сбое embedding останется None и его
             # подхватит ensure_event_embeddings при первом запросе.
             try:
-                from app.recommender.embeddings import build_event_embedding
-                event.embedding = _json.dumps(build_event_embedding(event))
+                from app.recommender.embeddings import _write_embedding, build_event_embedding
+                _write_embedding(event, build_event_embedding(event))
             except Exception:
                 pass
 
         raw.status = "normalized"
+        raw.error = None
         return "normalized"
 
     except Exception as e:

@@ -51,7 +51,9 @@ def refresh_user_embedding(db: Session, user: User) -> None:
             pass
 
 
-def get_recommendations_for_user(db: Session, telegram_id: int) -> list[dict]:
+def get_recommendations_for_user(
+    db: Session, telegram_id: int, limit: int = 25
+) -> list[dict]:
     user = db.query(User).filter(User.telegram_id == telegram_id).first()
     if not user:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
@@ -113,8 +115,11 @@ def get_recommendations_for_user(db: Session, telegram_id: int) -> list[dict]:
             logger.warning("LinUCB state load failed for user %s: %s", user.id, e)
             bandit_state = None
 
-    results = []
-
+    # Фаза 1 — ДЕШЁВЫЙ скоринг всех событий (без объяснений).
+    # Раньше тяжёлый explain_event_detailed вызывался для КАЖДОГО события,
+    # хотя в выдачу попадают единицы — отсюда «~16 c на список». Теперь
+    # объяснения строятся только для возвращаемого top-N (фаза 3).
+    scored = []
     for event in events:
         try:
             if _HAS_HYBRID and _compute_breakdown is not None:
@@ -132,12 +137,9 @@ def get_recommendations_for_user(db: Session, telegram_id: int) -> list[dict]:
             breakdown = {}
             score = float(score_event_for_user(user, event))
 
-        explanation = explain_event_detailed(
-            user, event, db=db,
-            precomputed_breakdown=breakdown or None,
-        )
-
-        results.append({
+        scored.append({
+            "_event": event,            # ссылка на ORM-объект для фазы 3
+            "_breakdown_raw": breakdown,  # полная точность для объяснения
             "event_id": event.id,
             "title": event.title,
             "description": event.description,
@@ -155,25 +157,37 @@ def get_recommendations_for_user(db: Session, telegram_id: int) -> list[dict]:
             "hype_score": getattr(event, "hype_score", None),
             "score": round(score, 2),
             "score_breakdown": {k: round(v, 3) for k, v in breakdown.items()},
-            "explanation": explanation["text"],
-            "explanation_details": {
-                "topic_match": explanation["topic_match"],
-                "format_match": explanation["format_match"],
-                "city_match": explanation["city_match"],
-                "semantic_similarity": explanation.get("semantic_similarity"),
-                "history_signals": explanation["history_signals"],
-            },
         })
 
-    results.sort(key=lambda x: x["score"], reverse=True)
-
-    # MMR-диверсификация — пост-процессинг top-N.
-    if settings.mmr_enabled and len(results) > 1:
+    # Фаза 2 — сортировка + MMR-диверсификация, затем срез до limit.
+    scored.sort(key=lambda x: x["score"], reverse=True)
+    if settings.mmr_enabled and len(scored) > 1:
         try:
             from app.recommender.diversity import mmr_rerank
-            results = mmr_rerank(results, db, lambda_=settings.mmr_lambda)
+            scored = mmr_rerank(scored, db, lambda_=settings.mmr_lambda)
         except Exception as e:
             logger.warning("MMR rerank failed: %s", e)
+    if limit and limit > 0:
+        scored = scored[:limit]
+
+    # Фаза 3 — тяжёлое объяснение ТОЛЬКО для отобранных событий.
+    results = []
+    for item in scored:
+        event = item.pop("_event")
+        breakdown_raw = item.pop("_breakdown_raw")
+        explanation = explain_event_detailed(
+            user, event, db=db,
+            precomputed_breakdown=breakdown_raw or None,
+        )
+        item["explanation"] = explanation["text"]
+        item["explanation_details"] = {
+            "topic_match": explanation["topic_match"],
+            "format_match": explanation["format_match"],
+            "city_match": explanation["city_match"],
+            "semantic_similarity": explanation.get("semantic_similarity"),
+            "history_signals": explanation["history_signals"],
+        }
+        results.append(item)
 
     return results
 

@@ -15,7 +15,9 @@ EventMind — система агрегации IT-мероприятий и п�
 
 ## Стек
 
-- Python 3.12 в `.venv/` (используй `.venv/bin/python` и `.venv/bin/pytest`)
+- Python 3.12 в `.venv/`. Путь к исполняемым файлам зависит от ОС:
+  macOS/Linux — `.venv/bin/<tool>`, Windows — `.venv\Scripts\<tool>.exe`
+  (например `.venv\Scripts\python.exe`, `.venv\Scripts\pytest.exe`).
 - FastAPI 0.110, aiogram 3.13, SQLAlchemy 2.0 + Alembic, Pydantic 2
 - LangGraph 0.2 + langchain-groq (primary `llama-3.3-70b-versatile`, fallback
   `llama-3.1-8b-instant`)
@@ -25,8 +27,16 @@ EventMind — система агрегации IT-мероприятий и п�
 
 ## Запуск (dev)
 
+Код кроссплатформенный — различаются только путь к venv и shell-синтаксис.
+Сам `.venv` НЕ переносится между ОС (и не в git) — на каждой машине
+создаётся заново под её платформу.
+
+### macOS / Linux (bash/zsh)
+
 ```bash
 # первый раз
+python3.12 -m venv .venv
+.venv/bin/python -m pip install -r requirements.txt
 cp .env.example .env       # вписать BOT_TOKEN, GROQ_API_KEY
 .venv/bin/alembic upgrade head
 
@@ -36,7 +46,32 @@ cp .env.example .env       # вписать BOT_TOKEN, GROQ_API_KEY
 .venv/bin/python -m app.scheduler.digest
 ```
 
-Проверки: `curl localhost:8000/health`, `pytest -q`, `ruff check .`.
+Проверки: `curl localhost:8000/health`, `.venv/bin/pytest -q`, `.venv/bin/ruff check .`.
+
+### Windows (PowerShell)
+
+```powershell
+# первый раз — venv именно на 3.12 (py -3.12), не на более новой версии:
+# старые пины (torch, sentence-transformers, pydantic) не имеют колёс под 3.13+
+py -3.12 -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt
+Copy-Item .env.example .env   # вписать BOT_TOKEN, GROQ_API_KEY
+.\.venv\Scripts\alembic.exe upgrade head
+
+# процессы — каждый в своём терминале
+.\.venv\Scripts\uvicorn.exe app.api.main:app --reload
+.\.venv\Scripts\python.exe -m app.bot.main
+.\.venv\Scripts\python.exe -m app.scheduler.digest
+```
+
+Проверки: `curl localhost:8000/health`, `.\.venv\Scripts\pytest.exe -q`,
+`.\.venv\Scripts\ruff.exe check .`.
+
+> Windows-нюанс: HuggingFace кэширует модель MiniLM через симлинки, которых
+> Windows без Developer Mode не поддерживает — кэш работает «деградированно»
+> (чуть больше места на диске, на функциональность не влияет). Чтобы убрать
+> предупреждение: `setx HF_HUB_DISABLE_SYMLINKS_WARNING 1` или включить
+> Developer Mode.
 
 ## Ключевые dev-флаги в `.env`
 
@@ -71,9 +106,11 @@ LangGraph Supervisor-Worker граф в `app/agents/copilot/`:
 `retrieve → supervisor → один из 5 specialists → finalize`.
 
 5 специалистов: `recommendation`, `career_coach`, `roadmap`, `explainer`,
-`summary`. 5 function-calling tools в `app/agents/copilot/tools.py`:
-`search_events`, `get_user_profile`, `get_recent_interactions`,
-`recall_about_user`, `get_event_details`.
+`summary`. 6 function-calling tools в `app/agents/copilot/tools.py`
+(`TOOL_DEFINITIONS`): `search_events`, `get_user_profile`,
+`get_interactions_summary`, `explain_event`, `recall_about_user`,
+`mark_saved`. Подмножество tools на специалиста раздаётся через
+`filter_tools(...)`.
 
 Сессии мульти-туровые — состояние в таблице `copilot_sessions`. В боте —
 `app/bot/handlers/copilot.py`, активная сессия 15 минут.
@@ -95,7 +132,9 @@ LangGraph Supervisor-Worker граф в `app/agents/copilot/`:
 
 ## Тесты
 
-170 кейсов в `tests/`. Запуск: `.venv/bin/pytest -q` (~30 с).
+170 кейсов в `tests/`. Запуск: `.venv/bin/pytest -q` (macOS/Linux) или
+`.\.venv\Scripts\pytest.exe -q` (Windows). ~30 с на тёплом кэше; первый
+прогон на новой машине дольше — докачивается модель MiniLM (~120 МБ).
 Ключевые файлы: `test_scoring`, `test_hybrid`/`test_multi_objective`,
 `test_bayesian`/`test_bayes_decay`, `test_bandit`, `test_gnn`,
 `test_memory`/`test_memory_integration`, `test_dedup`, `test_supervisor`,

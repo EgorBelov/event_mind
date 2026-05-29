@@ -16,8 +16,10 @@ router = APIRouter(prefix="/recommendations", tags=["recommendations"])
 
 
 @router.get("/{telegram_id}")
-def get_recommendations(telegram_id: int, db: Session = Depends(get_db)):
-    return get_recommendations_for_user(db, telegram_id)
+def get_recommendations(telegram_id: int, limit: int = 25, db: Session = Depends(get_db)):
+    """Top-N рекомендаций. limit<=0 — без ограничения (объяснения всё равно
+    строятся только для возвращаемых событий)."""
+    return get_recommendations_for_user(db, telegram_id, limit=limit)
 
 
 @router.post("/interactions")

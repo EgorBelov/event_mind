@@ -46,5 +46,11 @@ feedparser==6.0.11
 # Уже тянется транзитивно через httpx — фиксируем как прямую зависимость.
 certifi>=2024.2.2
 
-# --- Tests ---
+# --- Tests / Lint ---
 pytest==8.2.2
+# Линтер (конфиг в pyproject.toml [tool.ruff]); CLAUDE.md/docs ссылаются на него.
+ruff==0.6.2
+
+# --- Docs generation ---
+# scripts/regenerate_docs.py собирает .docx из текущей реализации.
+python-docx==1.1.2

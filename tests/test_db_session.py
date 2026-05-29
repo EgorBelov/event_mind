@@ -4,7 +4,16 @@ WAL + busy_timeout критичны для одновременной работ
 CLI-скриптов с одной SQLite-БД. Если эти PRAGMA отвалятся (например,
 кто-то выпилит event-listener), вернутся ошибки 'database is locked'.
 """
+import pytest
+
 from app.db.session import engine
+
+# PRAGMA-настройки имеют смысл только на SQLite. Если DATABASE_URL указывает на
+# Postgres (например, dev на Supabase) — пропускаем, а не падаем.
+pytestmark = pytest.mark.skipif(
+    engine.dialect.name != "sqlite",
+    reason="SQLite-specific PRAGMA checks (DATABASE_URL is not SQLite)",
+)
 
 
 def test_sqlite_journal_mode_is_wal():
