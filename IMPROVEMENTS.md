@@ -21,15 +21,18 @@
   всего каталога.
 - [x] **`pool_pre_ping=True`** в `app/db/session.py` — для управляемого PG/пулера.
 - [x] **Зависимости.** `ruff`, `python-docx` добавлены в `requirements.txt`.
+- [x] **Батчинг нормализации + early-stop на rate-limit.**
+  `event_normalizer_agent_batch` нормализует пачку событий одним LLM-вызовом
+  (кратно меньше токенов); `_normalize_by_ids` ходит пачками по 5, на
+  rate-limit (429/TPD) останавливается рано и оставляет необработанные в
+  статусе `raw` (а не выжигает в `failed`) — их доберёт `/normalize` после
+  сброса квоты. `app/agents/event_normalization/agent.py`,
+  `app/api/services/ingestion_service.py`. Backoff в общий `llm.invoke`
+  СОЗНАТЕЛЬНО не добавлен — это бы подвешивало user-facing запросы
+  (copilot/why); SDK ChatGroq уже ретраит per-minute лимиты через max_retries.
 
 ## 🔴 Корректность / надёжность
 
-- [ ] **Backoff на Groq 429 + батчинг нормализации.** Сейчас при rate-limit
-  код моментально падает на fallback-модель без паузы и без учёта
-  `Retry-After`; когда и 8b упирается — событие в `failed`. За один прогон
-  так потерялось 53 события. Нужно: уважать `Retry-After`, и нормализовать
-  несколько событий одним LLM-вызовом (кратно меньше токенов).
-  `app/agents/recommendation/llm.py`, `app/api/services/ingestion_service.py`.
 - [ ] **Счётчик попыток у raw_events.** Добавить `retry_count` (миграция),
   чтобы `retry-failed` не гонял вечно безнадёжные события и можно было
   отсекать «битые» после N попыток. `app/db/models/raw_event.py`.

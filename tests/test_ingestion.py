@@ -286,3 +286,65 @@ def test_normalize_survives_embedding_failure(db, monkeypatch, fake_normalizer):
     event = db.query(Event).filter(Event.title == "AI Conf").first()
     assert event is not None
     assert event.embedding is None
+
+
+# ── батч-нормализация + early-stop на rate-limit ──────────────────────────
+
+
+def test_normalize_by_ids_batch_creates_events(db, monkeypatch):
+    """Батч-путь: один вызов event_normalizer_agent_batch на пачку → N событий."""
+    def fake_batch(payloads):
+        return [
+            {
+                "title": f"Event {i}",
+                "description": "desc",
+                "format": "online",
+                "city": "any",
+                "level": "beginner",
+                "date": "2026-06-01",
+                "topics": ["ai_ml"],
+            }
+            for i, _ in enumerate(payloads)
+        ]
+
+    monkeypatch.setattr(
+        "app.agents.event_normalization.agent.event_normalizer_agent_batch", fake_batch
+    )
+    monkeypatch.setattr(
+        "app.recommender.embeddings.build_event_embedding", lambda e: [0.1, 0.2, 0.3]
+    )
+    # отключаем semantic-dedup, иначе одинаковые стаб-векторы схлопнутся в дубли
+    monkeypatch.setattr(
+        "app.recommender.dedup.find_semantic_duplicate", lambda *a, **kw: None
+    )
+    for i in range(3):
+        db.add(RawEvent(title=f"raw {i}", raw_description="x", status="raw"))
+    db.commit()
+    ids = [r.id for r in db.query(RawEvent).all()]
+
+    normalized, non_it, failed = ingestion_service._normalize_by_ids(db, ids, batch_size=5)
+
+    assert (normalized, non_it, failed) == (3, 0, 0)
+    assert db.query(Event).count() == 3
+    assert all(r.status == "normalized" for r in db.query(RawEvent).all())
+
+
+def test_normalize_by_ids_rate_limit_leaves_raw(db, monkeypatch):
+    """На rate-limit обработка прерывается, события остаются 'raw' (не 'failed')."""
+    def boom(payloads):
+        raise RuntimeError("Error code: 429 - rate_limit_exceeded: tokens per day (TPD)")
+
+    monkeypatch.setattr(
+        "app.agents.event_normalization.agent.event_normalizer_agent_batch", boom
+    )
+    for i in range(3):
+        db.add(RawEvent(title=f"raw {i}", raw_description="x", status="raw"))
+    db.commit()
+    ids = [r.id for r in db.query(RawEvent).all()]
+
+    normalized, non_it, failed = ingestion_service._normalize_by_ids(db, ids, batch_size=5)
+
+    assert (normalized, non_it, failed) == (0, 0, 0)
+    assert db.query(Event).count() == 0
+    # ключевое: остались raw, а не failed → доберутся следующим /normalize
+    assert all(r.status == "raw" for r in db.query(RawEvent).all())

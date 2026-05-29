@@ -256,8 +256,92 @@ def _load_and_normalize(db: Session, items: list[dict], source: str) -> dict:
     }
 
 
+def _is_rate_limit_error(exc: Exception) -> bool:
+    """Похоже ли исключение на rate-limit/квоту Groq (429, TPD, too many requests)."""
+    s = str(exc).lower()
+    return (
+        "rate limit" in s
+        or "rate_limit" in s
+        or "429" in s
+        or "too many requests" in s
+        or "tokens per day" in s
+        or "quota" in s
+    )
+
+
+def _persist_normalized(db: Session, raw: RawEvent, item: dict) -> str:
+    """Сохранить нормализованный dict как Event (или пометить non_it/дубль).
+
+    Возвращает 'normalized' | 'non_it'. Бросает исключение при ошибке БД —
+    вызывающая сторона решает, помечать ли raw как failed. Общий код для
+    одиночной и батч-нормализации.
+    """
+    topics = item.get("topics", [])
+
+    if not topics:
+        raw.status = "non_it"
+        raw.error = None
+        return "non_it"
+
+    existing = db.query(Event).filter(Event.title == item["title"]).first()
+
+    # Семантическая дедупликация: если по title не нашли, проверим
+    # по эмбеддингу. Это ловит парафразы и кросс-источниковые дубли.
+    if not existing:
+        try:
+            from app.recommender.dedup import find_semantic_duplicate
+            candidate_text = f"{item['title']} {item['description']}"
+            existing = find_semantic_duplicate(db, candidate_text)
+        except Exception:
+            existing = None
+
+    if not existing:
+        import json as _json
+        tech_stack = item.get("tech_stack", [])
+        event = Event(
+            title=item["title"],
+            description=item["description"],
+            format=item["format"],
+            city=item["city"],
+            level=item["level"],
+            date=item.get("date", ""),
+            event_type=item.get("event_type"),
+            target_audience=item.get("target_audience"),
+            source_url=item.get("source_url") or raw.source_url,
+            tech_stack=_json.dumps(tech_stack, ensure_ascii=False) if tech_stack else None,
+            seniority=item.get("seniority"),
+            quality_score=item.get("quality_score"),
+            hype_score=item.get("hype_score"),
+        )
+        db.add(event)
+        db.flush()
+        _attach_event_topics(db, event, topics)
+
+        # Сразу считаем вектор события, чтобы путь рекомендаций не
+        # досчитывал его лениво (тот самый «холодный» провал).
+        # _write_embedding пишет И JSON-колонку, И pgvector-колонку
+        # embedding_vec — иначе на PG быстрый <=>-индекс пустой и каждый
+        # ingestion требовал бы ручного backfill_pgvector.
+        # Best-effort: при сбое embedding останется None и его
+        # подхватит ensure_event_embeddings при первом запросе.
+        try:
+            from app.recommender.embeddings import _write_embedding, build_event_embedding
+            _write_embedding(event, build_event_embedding(event))
+        except Exception:
+            pass
+
+    raw.status = "normalized"
+    raw.error = None
+    return "normalized"
+
+
 def _normalize_single(db: Session, raw: RawEvent) -> str:
-    """Нормализовать одно raw-событие. Возвращает итоговый статус: 'normalized' | 'non_it' | 'failed'."""
+    """Нормализовать одно raw-событие: LLM-вызов + persist.
+
+    Возвращает 'normalized' | 'non_it' | 'failed'. Rate-limit (429/квота)
+    ПРОБРАСЫВАЕТСЯ наружу — чтобы батч-цикл мог остановиться рано и оставить
+    необработанные события в статусе 'raw' (а не выжигать их в 'failed').
+    """
     from app.agents.event_normalization.agent import event_normalizer_agent
 
     try:
@@ -269,76 +353,88 @@ def _normalize_single(db: Session, raw: RawEvent) -> str:
             },
             "normalized_event": {},
         })
-
         item = result["normalized_event"]
-        topics = item.get("topics", [])
+    except Exception as e:
+        if _is_rate_limit_error(e):
+            raise
+        raw.status = "failed"
+        raw.error = str(e)
+        return "failed"
 
-        if not topics:
-            raw.status = "non_it"
-            raw.error = None
-            return "non_it"
-
-        existing = db.query(Event).filter(Event.title == item["title"]).first()
-
-        # Семантическая дедупликация: если по title не нашли, проверим
-        # по эмбеддингу. Это ловит парафразы и кросс-источниковые дубли.
-        if not existing:
-            try:
-                from app.recommender.dedup import find_semantic_duplicate
-                candidate_text = f"{item['title']} {item['description']}"
-                existing = find_semantic_duplicate(db, candidate_text)
-            except Exception:
-                existing = None
-
-        if not existing:
-            import json as _json
-            tech_stack = item.get("tech_stack", [])
-            event = Event(
-                title=item["title"],
-                description=item["description"],
-                format=item["format"],
-                city=item["city"],
-                level=item["level"],
-                date=item.get("date", ""),
-                event_type=item.get("event_type"),
-                target_audience=item.get("target_audience"),
-                source_url=item.get("source_url") or raw.source_url,
-                tech_stack=_json.dumps(tech_stack, ensure_ascii=False) if tech_stack else None,
-                seniority=item.get("seniority"),
-                quality_score=item.get("quality_score"),
-                hype_score=item.get("hype_score"),
-            )
-            db.add(event)
-            db.flush()
-            _attach_event_topics(db, event, topics)
-
-            # Сразу считаем вектор события, чтобы путь рекомендаций не
-            # досчитывал его лениво (тот самый «холодный» провал).
-            # _write_embedding пишет И JSON-колонку, И pgvector-колонку
-            # embedding_vec — иначе на PG быстрый <=>-индекс пустой и каждый
-            # ingestion требовал бы ручного backfill_pgvector.
-            # Best-effort: при сбое embedding останется None и его
-            # подхватит ensure_event_embeddings при первом запросе.
-            try:
-                from app.recommender.embeddings import _write_embedding, build_event_embedding
-                _write_embedding(event, build_event_embedding(event))
-            except Exception:
-                pass
-
-        raw.status = "normalized"
-        raw.error = None
-        return "normalized"
-
+    try:
+        return _persist_normalized(db, raw, item)
     except Exception as e:
         raw.status = "failed"
         raw.error = str(e)
         return "failed"
 
 
-def _normalize_by_ids(db: Session, raw_ids: list[int]) -> tuple[int, int, int]:
-    """Прогнать конкретные строки raw_events через AI-нормализатор.
+def _normalize_chunk(db: Session, chunk: list[RawEvent]) -> tuple[int, int, int, bool]:
+    """Нормализовать пачку. Возвращает (normalized, non_it, failed, rate_limited).
 
-    Возвращает кортеж счётчиков (normalized, non_it, failed).
+    Сначала пробует один батч-LLM-вызов (экономия токенов). При сбое батча
+    (невалидный JSON / рассинхрон длины) — деградирует до per-event. При
+    rate-limit оставшиеся в пачке события НЕ трогаются (остаются 'raw'),
+    rate_limited=True — сигнал верхнему циклу остановиться.
+    """
+    from app.agents.event_normalization.agent import event_normalizer_agent_batch
+
+    normalized = non_it = failed = 0
+
+    items: list[dict] | None = None
+    try:
+        payloads = [
+            {"title": r.title, "raw_description": r.raw_description, "source_url": r.source_url}
+            for r in chunk
+        ]
+        items = event_normalizer_agent_batch(payloads)
+    except Exception as e:
+        if _is_rate_limit_error(e):
+            return 0, 0, 0, True
+        # не rate-limit (битый JSON и т.п.) — деградируем до per-event ниже
+        items = None
+
+    # Быстрый путь: батч удался и длина совпала — persist по элементам.
+    if items is not None and len(items) == len(chunk):
+        for raw, item in zip(chunk, items, strict=True):
+            try:
+                status = _persist_normalized(db, raw, item)
+            except Exception as e:
+                raw.status = "failed"
+                raw.error = str(e)
+                status = "failed"
+            normalized += status == "normalized"
+            non_it += status == "non_it"
+            failed += status == "failed"
+        return normalized, non_it, failed, False
+
+    # Fallback: по одному. Rate-limit здесь → стоп, остальные остаются 'raw'.
+    for raw in chunk:
+        try:
+            status = _normalize_single(db, raw)
+        except Exception as e:
+            if _is_rate_limit_error(e):
+                return normalized, non_it, failed, True
+            raw.status = "failed"
+            raw.error = str(e)
+            status = "failed"
+        normalized += status == "normalized"
+        non_it += status == "non_it"
+        failed += status == "failed"
+    return normalized, non_it, failed, False
+
+
+def _normalize_by_ids(
+    db: Session, raw_ids: list[int], batch_size: int = 5
+) -> tuple[int, int, int]:
+    """Прогнать строки raw_events через AI-нормализатор пачками.
+
+    Батчинг (несколько событий на один LLM-вызов) кратно экономит токены —
+    без него ingestion быстро выжигал дневной лимит Groq. При rate-limit
+    обработка останавливается рано: недообработанные остаются в статусе 'raw'
+    и доберутся следующим вызовом /normalize.
+
+    Возвращает (normalized, non_it, failed).
     """
     if not raw_ids:
         return 0, 0, 0
@@ -346,14 +442,19 @@ def _normalize_by_ids(db: Session, raw_ids: list[int]) -> tuple[int, int, int]:
     raw_events = db.query(RawEvent).filter(RawEvent.id.in_(raw_ids)).all()
     normalized = non_it = failed = 0
 
-    for raw in raw_events:
-        status = _normalize_single(db, raw)
-        if status == "normalized":
-            normalized += 1
-        elif status == "non_it":
-            non_it += 1
-        else:
-            failed += 1
+    for start in range(0, len(raw_events), max(1, batch_size)):
+        chunk = raw_events[start:start + batch_size]
+        n, ni, f, rate_limited = _normalize_chunk(db, chunk)
+        normalized += n
+        non_it += ni
+        failed += f
+        if rate_limited:
+            import logging
+            left = len(raw_events) - (start + len(chunk))
+            logging.getLogger(__name__).warning(
+                "normalize stopped early on rate-limit; %d events left as 'raw'", left,
+            )
+            break
 
     db.commit()
     return normalized, non_it, failed

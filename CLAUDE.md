@@ -23,7 +23,7 @@ EventMind — система агрегации IT-мероприятий и п�
   `llama-3.1-8b-instant`)
 - sentence-transformers 2.7 (MiniLM-L12-v2, 384 dim, русский)
 - SQLite (dev) / PostgreSQL + pgvector (prod)
-- pytest 8.2 (170 тестов), ruff
+- pytest 8.2 (172 теста), ruff
 
 ## Запуск (dev)
 
@@ -132,10 +132,11 @@ LangGraph Supervisor-Worker граф в `app/agents/copilot/`:
 
 ## Тесты
 
-170 кейсов в `tests/`. Запуск: `.venv/bin/pytest -q` (macOS/Linux) или
+172 кейса в `tests/`. Запуск: `.venv/bin/pytest -q` (macOS/Linux) или
 `.\.venv\Scripts\pytest.exe -q` (Windows). ~30 с на тёплом кэше; первый
 прогон на новой машине дольше — докачивается модель MiniLM (~120 МБ).
-Ключевые файлы: `test_scoring`, `test_hybrid`/`test_multi_objective`,
+На Postgres-`DATABASE_URL` 3 SQLite-PRAGMA теста (`test_db_session`) пропускаются.
+Ключевые файлы: `test_scoring`, `test_multi_objective`,
 `test_bayesian`/`test_bayes_decay`, `test_bandit`, `test_gnn`,
 `test_memory`/`test_memory_integration`, `test_dedup`, `test_supervisor`,
 `test_copilot_tools`, `test_copilot_graph_e2e`, `test_cold_start`,
@@ -152,22 +153,48 @@ LangGraph Supervisor-Worker граф в `app/agents/copilot/`:
 - Все три перегенерируются скриптом `python -m scripts.regenerate_docs` —
   идемпотентно, под текущую реализацию.
 
+## Ingestion (загрузка событий)
+
+6 источников (`app/ingestion/sources/`): habr, rss, kudago, luma, meetup,
+telegram. Эндпоинты в `app/api/routers/ingestion.py`:
+
+- `POST /ingestion/load-<source>` — один источник.
+- `POST /ingestion/load-all?limit=N` — **все источники по очереди**, каждый
+  изолирован try/except + rollback, агрегированные totals.
+- `POST /ingestion/normalize` — дообработать `raw`-события.
+- `POST /ingestion/retry-failed` — переобработать `failed` (после сброса
+  лимита Groq).
+- `GET /ingestion/status` — счётчики по статусам raw_events.
+
+Пайплайн: source → `raw_events` → AI-нормализация (Pydantic) → `events`.
+Нормализация **батчевая** (`event_normalizer_agent_batch`, пачки по 5 — кратно
+меньше токенов); на rate-limit (429/TPD) обработка останавливается рано и
+оставляет остаток в `raw` (не `failed`) — доберётся следующим `/normalize`.
+`embedding_vec` (pgvector) пишется сразу через `_write_embedding`.
+
+## Бэклог доработок
+
+`IMPROVEMENTS.md` в корне — живой список доработок (сделанные `[x]` +
+открытые `[ ]`, с привязкой к файлам, по приоритету). **Держать в актуальном
+состоянии при каждом изменении** (как и этот файл).
+
 ## Текущее состояние (29 мая 2026)
 
-Активная ветка: `dev`. Свежий пакет правок:
+Активная ветка: `dev`.
 
-1. Починен `GET /recommendations` (rollback в `refresh_user_embedding`) —
-   раньше при «database is locked» падало 500 → бот показывал «Пока нет
-   рекомендаций» при настроенном профиле.
-2. В `/copilot` и `/agent-recommendations` добавлены `logger.exception`
-   во всех ветках fallback'а.
-3. Дайджест: `DIGEST_INTERVAL_MINUTES` и `DIGEST_RUN_ON_STARTUP` — теперь
-   настраивается через `.env`.
-4. Чистка англицизмов в «Почему» (нет «Bayesian Thompson», «LinUCB»,
-   «LightGCN» в пользовательском UI).
-5. `/start` теперь сбрасывает старую reply-клавиатуру через
-   `ReplyKeyboardRemove` — кнопка «Начать настройку» больше не
-   дублируется.
-6. Пропуск тура (`tour:skip`) даёт отдельное сообщение с инлайн-кнопкой
-   «🚀 Начать настройку».
-7. Регенерация docs/ под текущую реализацию (`scripts/regenerate_docs.py`).
+**Инфраструктура:** dev-БД переехала на **Supabase Postgres** (session pooler,
+IPv4) — pgvector 0.8.0 активен, retrieval идёт по `<=>`. `DATABASE_URL` в
+`.env`. `pool_pre_ping=True` в `app/db/session.py`. SQLite-PRAGMA тесты
+`skipif` при не-SQLite. Подробности — память `dev-db-supabase`.
+
+**Свежие правки:**
+
+1. `/recommendations`: тяжёлый `explain_event_detailed` строится только для
+   возвращаемого top-N (+ параметр `limit`), а не для всего каталога.
+2. Ingestion: `/load-all`, `/retry-failed`, батчинг нормализации + early-stop
+   на rate-limit, запись `embedding_vec` при ingestion.
+3. Кроссплатформенные команды (macOS/Linux + Windows) в этом файле +
+   `.env.example`; `ruff` и `python-docx` в `requirements.txt`.
+4. (ранее) rollback в `refresh_user_embedding`; `logger.exception` в
+   `/copilot` и `/agent-recommendations`; параметризуемый дайджест;
+   чистка англицизмов в «Почему»; UX-правки `/start` и `tour:skip`.

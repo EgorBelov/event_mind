@@ -13,13 +13,24 @@ from app.core.topics import (
 )
 
 
-def _extract_json(text: str) -> dict:
+def _strip_fences(text: str) -> str:
     text = text.strip()
     if text.startswith("```json"):
         text = text.removeprefix("```json").removesuffix("```").strip()
     elif text.startswith("```"):
         text = text.removeprefix("```").removesuffix("```").strip()
-    return json.loads(text)
+    return text
+
+
+def _extract_json(text: str) -> dict:
+    return json.loads(_strip_fences(text))
+
+
+def _extract_json_array(text: str) -> list:
+    data = json.loads(_strip_fences(text))
+    if not isinstance(data, list):
+        raise ValueError("expected JSON array from batch normalizer")
+    return data
 
 
 # Списки ниже — *предпочтительные* значения. LLM призывается переиспользовать
@@ -106,8 +117,13 @@ def event_normalizer_agent(state: EventNormalizationState) -> dict:
         )
     )
 
-    normalized = _extract_json(result.content)
+    normalized = _postprocess_normalized(_extract_json(result.content))
+    return {"normalized_event": normalized}
 
+
+def _postprocess_normalized(normalized: dict) -> dict:
+    """Привести сырой LLM-JSON к каноничному виду: slugify полей, clamp score'ов,
+    гарантия типов. Общий код для одиночной и батч-нормализации."""
     # Прогоняем все свободные строки от LLM через slugify — это гарантирует
     # единый формат словаря (snake_case) независимо от того, как выглядели
     # исходные данные.
@@ -128,7 +144,80 @@ def event_normalizer_agent(state: EventNormalizationState) -> dict:
     if not isinstance(normalized.get("tech_stack"), list):
         normalized["tech_stack"] = []
 
-    return {"normalized_event": normalized}
+    return normalized
+
+
+_BATCH_SYSTEM_PROMPT = _SYSTEM_PROMPT + """
+
+РЕЖИМ ПАКЕТНОЙ ОБРАБОТКИ:
+Тебе придёт JSON-массив сырых событий, у каждого есть числовое поле "idx".
+Верни СТРОГО JSON-массив той же длины и в том же порядке — по одному объекту
+на каждое входное событие. В каждый объект СКОПИРУЙ его "idx" из входа.
+Никакого текста и markdown вне массива.
+"""
+
+_BATCH_USER_PROMPT = """
+Сырые события (JSON-массив):
+{raw_events}
+
+Верни JSON-массив, по объекту на событие, каждый строго в формате:
+{{
+  "idx": <число из входа>,
+  "title": "...",
+  "description": "...",
+  "format": "online/offline/hybrid/unknown",
+  "city": "<slug города или any/unknown>",
+  "level": "<slug уровня или unknown>",
+  "date": "...",
+  "topics": ["<slug темы>", "..."],
+  "event_type": "meetup/conference/webinar/workshop/hackathon/lecture/unknown",
+  "target_audience": "...",
+  "source_url": "...",
+  "tech_stack": ["..."],
+  "seniority": "junior/middle/senior/any",
+  "quality_score": 7,
+  "hype_score": 8
+}}
+"""
+
+
+def event_normalizer_agent_batch(raw_events: list[dict]) -> list[dict]:
+    """Нормализовать НЕСКОЛЬКО событий одним LLM-вызовом (экономия токенов).
+
+    Возвращает список normalized-dict той же длины и порядка, что вход.
+    Бросает исключение при сбое LLM, невалидном JSON или несоответствии длины —
+    вызывающая сторона (ingestion) делает per-event fallback.
+    """
+    if not raw_events:
+        return []
+
+    payload = [{"idx": i, **ev} for i, ev in enumerate(raw_events)]
+    prompt = ChatPromptTemplate.from_messages([
+        ("system", _BATCH_SYSTEM_PROMPT),
+        ("user", _BATCH_USER_PROMPT),
+    ])
+    result = llm.invoke(
+        prompt.format_messages(raw_events=json.dumps(payload, ensure_ascii=False))
+    )
+    data = _extract_json_array(result.content)
+
+    # Сопоставляем по idx; при отсутствии — позиционно.
+    by_idx: dict[int, dict] = {}
+    for obj in data:
+        if isinstance(obj, dict) and isinstance(obj.get("idx"), int):
+            by_idx[obj["idx"]] = obj
+
+    out: list[dict] = []
+    for i in range(len(raw_events)):
+        item = by_idx.get(i)
+        if item is None:
+            if i < len(data) and isinstance(data[i], dict):
+                item = data[i]
+            else:
+                raise ValueError(f"batch normalize: missing item idx={i}")
+        item.pop("idx", None)
+        out.append(_postprocess_normalized(item))
+    return out
 
 
 def _slug_list(values) -> list[str]:
