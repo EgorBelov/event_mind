@@ -131,7 +131,7 @@ def build_overview(b: Builder) -> None:
     b.bullet("sentence-transformers 2.7 — мультиязычный MiniLM (384 dim)")
     b.bullet("APScheduler 3.10 для дайджестов и периодического ingestion")
     b.bullet("feedparser, BeautifulSoup 4 + lxml, httpx, pydantic 2")
-    b.bullet("pytest 8.2 — 170 тестов проходят, ruff — без ошибок")
+    b.bullet("pytest 8.2 — 180 тестов проходят, ruff — без ошибок")
     b.bullet("Docker + docker-compose: три контейнера, healthcheck на бэке перед стартом bot/scheduler")
 
     # ── 2. Что сделано ────────────────────────────────────────────────────
@@ -146,7 +146,7 @@ def build_overview(b: Builder) -> None:
     b.bullet("app/scheduler — digest + ingestion + memory compaction на APScheduler")
     b.bullet("app/db/models — user, event, raw_event, interaction, topic, copilot_session, user_topic_stat, user_bandit_state, user_skill_profile, user_memory")
     b.bullet("alembic — 10 миграций; включая pgvector, copilot_sessions, bandit_state, user_memories, skill_profile, enriched_fields")
-    b.bullet("tests — 26 файлов, 170 кейсов: scoring, hybrid, bayesian, bandit, gnn, memory, dedup, ingestion, supervisor, copilot tools, cold-start, scheduler")
+    b.bullet("tests — 25 файлов, 180 кейсов: scoring, hybrid, bayesian, bandit, gnn, memory, dedup, ingestion, supervisor, copilot tools, cold-start, scheduler")
     b.bullet("scripts — train_gnn, eval_offline (Recall@k/nDCG@k), llm_judge, compact_memories, backfill_pgvector, make_presentation_plan, append_overview_chapter")
 
     b.h3("2.2. Готовая функциональность")
@@ -178,9 +178,9 @@ def build_overview(b: Builder) -> None:
     )
     b.bullet(
         "AI Copilot: Supervisor-Worker граф LangGraph с пятью специалистами "
-        "(recommendation, career_coach, roadmap, explainer, summary); пять "
+        "(recommendation, career_coach, roadmap, explainer, summary); шесть "
         "function-calling tools (search_events, get_user_profile, "
-        "get_recent_interactions, recall_about_user, get_event_details); "
+        "get_interactions_summary, explain_event, recall_about_user, mark_saved); "
         "история диалога — в copilot_sessions, multi-turn память; long-term "
         "memory подмешивается в recall."
     )
@@ -207,6 +207,32 @@ def build_overview(b: Builder) -> None:
 
     # ── 3. Доработки мая 2026 ────────────────────────────────────────────
     b.h2("3. Доработки мая 2026")
+
+    b.h3("3.0. Новейшее: Postgres/Supabase, масштабирование, ops")
+    b.bullet(
+        "Dev-БД переведена на управляемый PostgreSQL (Supabase, session pooler): "
+        "pgvector активен, retrieval и кандидатный отбор идут через индекс <=>; "
+        "engine с pool_pre_ping для устойчивости к простаивающим соединениям."
+    )
+    b.bullet(
+        "Масштабирование /recommendations: кандидатный отбор top-N через pgvector "
+        "(вместо скоринга всего каталога) + joinedload против N+1 на темах; "
+        "тяжёлые объяснения строятся только для возвращаемого top-N."
+    )
+    b.bullet(
+        "Ingestion: единый POST /ingestion/load-all (все источники по очереди), "
+        "POST /ingestion/retry-failed, батчевая LLM-нормализация (несколько событий "
+        "на один вызов — экономия токенов) с early-stop на rate-limit (429/TPD); "
+        "embedding_vec пишется сразу при нормализации."
+    )
+    b.bullet(
+        "Данные: events.start_at (DateTime) для freshness/сортировки + "
+        "raw_events.retry_count (retry-failed пропускает безнадёжные после N попыток)."
+    )
+    b.bullet(
+        "Ops/качество: scheduler на logging; ruff = 0 ошибок по репо; CI на GitHub "
+        "Actions (ruff + pytest); LLM-обёртка строится лениво (импорт не требует ключа)."
+    )
 
     b.h3("3.1. Свежий пакет правок (29 мая)")
     b.bullet(
@@ -285,7 +311,7 @@ def build_overview(b: Builder) -> None:
 
     b.h3("3.6. Качество кода")
     b.p(
-        "ruff на app/ — без ошибок. Тестовый набор — 170 кейсов в 26 файлах, "
+        "ruff на app/ — без ошибок. Тестовый набор — 180 кейсов в 25 файлах, "
         "покрывает scoring, bayesian, bandit, gnn, memory, dedup, ingestion, "
         "supervisor, copilot tools, cold-start, scheduler. Pytest-фикстуры "
         "используют отдельный SQLite-файл с in-memory mode, чтобы тесты не "
@@ -935,10 +961,10 @@ def build_presentation_plan(b: Builder) -> None:
         "Function calling (вызов инструментов)",
         "LLM умеет сама решать «нужно вызвать функцию foo с такими "
         "аргументами», мы возвращаем результат, она продолжает.",
-        "У Copilot 5 tools: search_events, get_user_profile, "
-        "get_recent_interactions, recall_about_user, get_event_details.",
+        "У Copilot 6 tools: search_events, get_user_profile, "
+        "get_interactions_summary, explain_event, recall_about_user, mark_saved.",
         "Если пользователь спрашивает «что я лайкал на прошлой неделе», "
-        "Copilot сам вызовет get_recent_interactions.",
+        "Copilot сам вызовет get_interactions_summary.",
     )
     term(
         "LangGraph",
@@ -1147,7 +1173,7 @@ def build_presentation_plan(b: Builder) -> None:
     term(
         "Pytest",
         "Фреймворк для тестов в Python: функции с assert + фикстуры.",
-        "170 тестов в 26 файлах: scoring, bayesian, bandit, gnn, memory, "
+        "180 тестов в 25 файлах: scoring, bayesian, bandit, gnn, memory, "
         "ingestion, supervisor, copilot tools, cold-start, scheduler.",
         "pytest -q проходит за ~30 с.",
     )
@@ -1291,12 +1317,13 @@ def build_presentation_plan(b: Builder) -> None:
     b.bullet("event_explainer — intent=explain, разбор конкретного события")
     b.bullet("summary_specialist — intent=summary, сводки/обзоры")
 
-    b.h2("7.4. Пять инструментов (function calling)")
-    b.bullet("search_events — поиск по описанию/темам")
+    b.h2("7.4. Шесть инструментов (function calling)")
+    b.bullet("search_events — семантический поиск событий по запросу")
     b.bullet("get_user_profile — снимок профиля + топ-темы")
-    b.bullet("get_recent_interactions — последние лайки/saves")
+    b.bullet("get_interactions_summary — сводка истории (лайки/сейвы/топ-темы)")
+    b.bullet("explain_event — детальное объяснение, почему событие подходит")
     b.bullet("recall_about_user — top-k заметки long-term памяти")
-    b.bullet("get_event_details — карточка события по id")
+    b.bullet("mark_saved — пометить событие сохранённым")
 
     b.h2("7.5. Мульти-туровый диалог")
     b.p(
@@ -1436,7 +1463,7 @@ def build_presentation_plan(b: Builder) -> None:
     b.bullet("Copilot помнит контекст (multi-turn), уточняет план")
     b.h3("11.6.3. Объяснение события")
     b.bullet("«объясни мне, почему ты порекомендовал митап X»")
-    b.bullet("Supervisor → event_explainer → tool get_event_details → LLM объясняет")
+    b.bullet("Supervisor → event_explainer → tool explain_event → LLM объясняет")
     b.h3("Что подсветить про архитектуру Copilot'а")
     b.bullet("Граф LangGraph: явный, тестируемый, не «магия»")
     b.bullet("5 коротких специализированных промптов вместо одного огромного")
@@ -1449,7 +1476,7 @@ def build_presentation_plan(b: Builder) -> None:
     b.bullet("Опционально, если останется время")
 
     b.h2("11.8. Качество (1 минута)")
-    b.bullet("170 тестов в 26 файлах: scoring, bayesian, bandit, gnn, memory, ingestion, supervisor")
+    b.bullet("180 тестов в 25 файлах: scoring, bayesian, bandit, gnn, memory, ingestion, supervisor")
     b.bullet("ruff 0 ошибок")
     b.bullet("10 миграций Alembic — schema versioning")
     b.bullet("3 уровня fallback: LLM, hybrid, Copilot")
@@ -1561,9 +1588,9 @@ def build_presentation_plan(b: Builder) -> None:
     )
     qa(
         "Что такое function calling?",
-        "Способность LLM сама решать, какую функцию вызвать. У нас 5 tools "
+        "Способность LLM сама решать, какую функцию вызвать. У нас 6 tools "
         "для Copilot: search_events, get_user_profile, "
-        "get_recent_interactions, recall_about_user, get_event_details.",
+        "get_interactions_summary, explain_event, recall_about_user, mark_saved.",
     )
     qa(
         "Что такое Thompson sampling и Bayesian-предпочтения?",
@@ -1644,7 +1671,7 @@ def build_presentation_plan(b: Builder) -> None:
     b.bullet("Если вопрос «как вы это решаете» — сначала назвать парадигму (content / collaborative / contextual), потом конкретный компонент")
     b.bullet("Никогда не скрывать слабые места: «GNN выключен на малом датасете» — это плюс, а не минус")
     b.bullet("Если LLM отвечает странно на демо — спокойно: «У нас есть fallback на rule-only, я переключусь»")
-    b.bullet("Подсветить число тестов: 170, и что они проверяют не текст LLM, а граф/tools/схемы")
+    b.bullet("Подсветить число тестов: 180, и что они проверяют не текст LLM, а граф/tools/схемы")
 
 
 # ════════════════════════════════════════════════════════════════════════
@@ -1746,7 +1773,7 @@ def build_thesis(b: Builder, *, default_text: str, list_style: str) -> None:
         "коллаборативную и Bayesian-парадигмы; 5) реализовать AI-копилота "
         "как multi-agent граф LangGraph с долговременной памятью; 6) "
         "обеспечить REST API, Telegram-бота и контейнеризованное "
-        "развёртывание; 7) провести функциональное тестирование (170 "
+        "развёртывание; 7) провести функциональное тестирование (180 "
         "автотестов), офлайн-оценку рекомендера (Recall@k, nDCG@k) и "
         "LLM-оценку качества выдачи."
     )
@@ -2410,11 +2437,11 @@ def build_thesis(b: Builder, *, default_text: str, list_style: str) -> None:
     )
     b.h3("3.6.3. Набор инструментов агентов")
     p(
-        "Пять function-calling tools в app/agents/copilot/tools.py: "
-        "search_events(query), get_user_profile(telegram_id), "
-        "get_recent_interactions(telegram_id, limit), "
-        "recall_about_user(telegram_id, query, k), "
-        "get_event_details(event_id). Связываются с LLM через bind_tools — "
+        "Шесть function-calling tools в app/agents/copilot/tools.py: "
+        "search_events(query, k), get_user_profile(telegram_id), "
+        "get_interactions_summary(telegram_id), explain_event(event_id), "
+        "recall_about_user(telegram_id, query, k), mark_saved(event_id). "
+        "Связываются с LLM через bind_tools — "
         "модель сама решает, что вызвать."
     )
 
@@ -2481,7 +2508,7 @@ def build_thesis(b: Builder, *, default_text: str, list_style: str) -> None:
     b.h1("Глава 4. Тестирование")
     b.h2("4.1. Функциональное тестирование")
     b.h3("4.1.1. Организация тестового набора")
-    p("170 тестов в 26 файлах. Каждый файл — отдельный модуль/подсистема. Прогон через pytest -q занимает ~30 с.")
+    p("180 тестов в 25 файлах. Каждый файл — отдельный модуль/подсистема. Прогон через pytest -q занимает ~30 с.")
     b.h3("4.1.2. Тесты алгоритмов рекомендательной подсистемы")
     p(
         "test_scoring (правила и hybrid base), test_bayesian + test_bayes_decay "
@@ -2578,7 +2605,7 @@ def build_thesis(b: Builder, *, default_text: str, list_style: str) -> None:
         "при пропуске тура. На /start сбрасывается старая reply-клавиатура."
     )
     b.h2("5.6. Качество кода")
-    p("ruff — без ошибок на app/. 170 тестов проходят. Все хендлеры покрыты pytest-фикстурами с in-memory SQLite.")
+    p("ruff — без ошибок на app/. 180 тестов проходят. Все хендлеры покрыты pytest-фикстурами с in-memory SQLite.")
     b.h2("5.7. Итог")
     p(
         "Майская итерация привела систему к стабильному состоянию: "
@@ -2610,7 +2637,7 @@ def build_thesis(b: Builder, *, default_text: str, list_style: str) -> None:
         "двухуровневая объяснимость выдачи (короткий поп-ап и развёрнутый "
         "разбор с counterfactual) и долговременная mem0-стилевая память "
         "пользователя, подключённая к AI-копилоту. Все компоненты покрыты "
-        "автотестами (170 кейсов) и офлайн-оценкой (Recall@k, nDCG@k)."
+        "автотестами (180 кейсов) и офлайн-оценкой (Recall@k, nDCG@k)."
     )
     p(
         "Дальнейшее развитие: 1) накопление достаточного объёма данных "

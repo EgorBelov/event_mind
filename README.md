@@ -213,7 +213,7 @@ eventmind/
 ├── data/                                    # справочные источники
 ├── docs/                                    # обзор, план показа, отчёт (HSE)
 │   └── diagrams/                            # PNG-диаграммы
-├── tests/                                   # 170 тестов в 26 файлах
+├── tests/                                   # 180 тестов в 25 файлах
 ├── scripts/
 │   ├── eval_offline.py                      # leave-one-out Recall@k / nDCG@k
 │   ├── llm_judge.py                         # LLM-as-judge для оценки выдачи
@@ -247,7 +247,7 @@ eventmind/
 - **APScheduler 3.10** — фоновые джобы
 - **BeautifulSoup 4 + lxml**, **feedparser**, **httpx**
 - **Pydantic 2** + **pydantic-settings**
-- **pytest 8.2** (170 тестов), **ruff**
+- **pytest 8.2** (180 тестов), **ruff**
 
 ---
 
@@ -688,10 +688,11 @@ fallback.
 | `event_explainer` | explain | explain_event, profile | разворачивает `explain_event_detailed` в нарратив |
 | `summary_specialist` | summary | interactions_summary, profile | анализ истории |
 
-**5 function-calling tools** в `agents/copilot/tools.py`:
-`search_events`, `get_user_profile`, `get_recent_interactions`,
-`recall_about_user`, `get_event_details`. Связываются через
-`bind_tools` — модель сама решает, что вызвать. Лимит — `MAX_TOOL_HOPS=3`.
+**6 function-calling tools** в `agents/copilot/tools.py` (`TOOL_DEFINITIONS`):
+`search_events`, `get_user_profile`, `get_interactions_summary`,
+`explain_event`, `recall_about_user`, `mark_saved`. Связываются через
+`bind_tools` — модель сама решает, что вызвать. Подмножество на специалиста
+раздаётся через `filter_tools(...)`.
 
 **Multi-turn:** `POST /copilot/{tid}/turn` хранит сессии в
 `copilot_sessions`, принимает опциональный `session_id`. История
@@ -879,7 +880,7 @@ curl "http://localhost:8000/analytics/trending?days=7&limit=5"
 ## Тесты
 
 ```bash
-pytest -q              # 170 тестов, ~30 с
+pytest -q              # 180 тестов, ~30 с
 pytest tests/test_scoring.py -v
 ruff check .           # 0 ошибок (line-length=100, py312)
 ```
