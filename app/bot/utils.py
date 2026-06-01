@@ -9,9 +9,44 @@
 """
 import html
 import re
+from datetime import datetime
+from zoneinfo import ZoneInfo
 
 from aiogram.exceptions import TelegramBadRequest
 from aiogram.types import CallbackQuery, Message
+
+# Дефолтная таймзона рендеринга дат в боте. Можно сделать per-user (хранить
+# users.timezone), но пока ~100% аудитории — Москва.
+_DEFAULT_TZ = ZoneInfo("Europe/Moscow")
+_MONTHS_RU_GEN = (
+    "января", "февраля", "марта", "апреля", "мая", "июня",
+    "июля", "августа", "сентября", "октября", "ноября", "декабря",
+)
+
+
+def format_event_date(event: dict, tz: ZoneInfo = _DEFAULT_TZ) -> str:
+    """Дата события для отображения в карточке.
+
+    Приоритет — `start_at` (валидный DateTime от нормализатора): рендерим
+    с локализацией в таймзону пользователя («1 июня 2026, 19:00 MSK»).
+    Если `start_at` нет — fallback на строку `event["date"]` (то, что
+    показывает источник; может быть «лето 2026», диапазон, и т.п. —
+    рисуем как есть).
+    """
+    raw_iso = event.get("start_at")
+    if raw_iso:
+        try:
+            dt = datetime.fromisoformat(raw_iso)
+            # start_at из БД — naive UTC. Привязываем UTC, потом конвертируем.
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=ZoneInfo("UTC"))
+            local = dt.astimezone(tz)
+            month = _MONTHS_RU_GEN[local.month - 1]
+            time_part = f", {local:%H:%M}" if (local.hour or local.minute) else ""
+            return f"{local.day} {month} {local.year}{time_part} {tz.key.split('/')[-1]}"
+        except Exception:
+            pass
+    return event.get("date") or "—"
 
 
 def esc(value) -> str:

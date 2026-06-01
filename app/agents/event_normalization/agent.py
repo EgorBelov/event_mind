@@ -25,6 +25,49 @@ _DATE_YEAR_MIN = 2020
 _DATE_YEAR_MAX = 2035
 
 
+# ── Строгий домен enum-полей ──────────────────────────────────────────────
+# format/event_type/seniority — closed-domain в нашем UI и логике скоринга.
+# city/level — open-domain (новые slug'и могут появляться вместе с источниками),
+# но если LLM вернёт что-то явно мусорное (длинная строка с пробелами, мат, и т.п.) —
+# выкидываем в "unknown", чтобы не плодить мусорные значения в БД.
+_ALLOWED_FORMAT: frozenset[str] = frozenset({"online", "offline", "hybrid", "any", "unknown"})
+_ALLOWED_EVENT_TYPE: frozenset[str] = frozenset({
+    "meetup", "conference", "webinar", "workshop",
+    "hackathon", "lecture", "unknown",
+})
+_ALLOWED_SENIORITY: frozenset[str] = frozenset({"junior", "middle", "senior", "any"})
+# city/level не closed, но slug должен быть «нормальный» (короткий, snake_case).
+_OPEN_SLUG_MAX_LEN = 32
+
+
+def _normalize_enum_field(
+    value, *, allowed: frozenset[str] | None, default: str, label: str
+) -> str:
+    """Привести значение к допустимому домену.
+
+    - None/пустое → default.
+    - Не-строка → default.
+    - Closed domain (`allowed` задан) и значение вне него → default + лог.
+    - Open domain (`allowed=None`) — slug длиной > _OPEN_SLUG_MAX_LEN или
+      с пробелами/невалидными символами → default + лог.
+    """
+    if value is None or not isinstance(value, str):
+        return default
+    v = value.strip()
+    if not v:
+        return default
+    if allowed is not None:
+        if v in allowed:
+            return v
+        logger.debug("normalizer: rejecting %s=%r (not in domain)", label, v)
+        return default
+    # Open domain: уже прошёл через slugify_code, но всё равно ловим аномалии.
+    if len(v) > _OPEN_SLUG_MAX_LEN or any(ch in v for ch in (" ", "/", "\\", "\n", "\t")):
+        logger.debug("normalizer: rejecting %s=%r (malformed slug)", label, v)
+        return default
+    return v
+
+
 def _validate_iso_date(raw) -> str:
     """Привести date от LLM к строгому YYYY-MM-DD или вернуть "".
 
@@ -208,6 +251,31 @@ def _postprocess_normalized(normalized: dict) -> dict:
     for field in ("format", "city", "level", "event_type", "seniority"):
         if normalized.get(field):
             normalized[field] = slugify_code(normalized[field]) or normalized[field]
+
+    # Boundary-валидация enum'ов. Раньше slugify пускал в БД любые «придуманные»
+    # значения LLM — теперь closed-domain поля сваливаются в дефолт, open-domain
+    # ловят аномалии (длина, пробелы) и тоже схлопываются. Раздел freshness/
+    # MMR/UI получают чистый словарь, нет мусорных «virtual_online_in_zoom».
+    normalized["format"] = _normalize_enum_field(
+        normalized.get("format"), allowed=_ALLOWED_FORMAT,
+        default="unknown", label="format",
+    )
+    normalized["event_type"] = _normalize_enum_field(
+        normalized.get("event_type"), allowed=_ALLOWED_EVENT_TYPE,
+        default="unknown", label="event_type",
+    )
+    normalized["seniority"] = _normalize_enum_field(
+        normalized.get("seniority"), allowed=_ALLOWED_SENIORITY,
+        default="any", label="seniority",
+    )
+    normalized["city"] = _normalize_enum_field(
+        normalized.get("city"), allowed=None,
+        default="unknown", label="city",
+    )
+    normalized["level"] = _normalize_enum_field(
+        normalized.get("level"), allowed=None,
+        default="unknown", label="level",
+    )
 
     # Зажимаем score'ы в допустимый диапазон 1..10
     for score_field in ("quality_score", "hype_score"):

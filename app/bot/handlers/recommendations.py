@@ -4,7 +4,7 @@ from aiogram.types import CallbackQuery, Message
 
 from app.bot.keyboards.inline import recommendation_keyboard
 from app.bot.services.api_client import EventMindAPIClient
-from app.bot.utils import esc, send
+from app.bot.utils import esc, format_event_date, send
 
 router = Router()
 api_client = EventMindAPIClient()
@@ -53,7 +53,7 @@ def format_event_card(event: dict) -> str:
         f"Формат: {esc(event['format'])}\n"
         f"Город: {esc(event['city'])}\n"
         f"Уровень: {esc(event['level'])}\n"
-        f"Дата: {esc(event['date'])}\n\n"
+        f"Дата: {esc(format_event_date(event))}\n\n"
         f"{esc(event['description'])}"
     )
 

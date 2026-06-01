@@ -315,18 +315,23 @@ def _persist_normalized(db: Session, raw: RawEvent, item: dict) -> str:
         except Exception:
             existing = None
 
-    if not existing:
+    # Boundary-валидация даты: даже если кто-то отдаст dict в обход агента,
+    # мусор в events.date не попадёт. Defence in depth с _validate_iso_date
+    # в самом агенте.
+    from app.agents.event_normalization.agent import _validate_iso_date
+    from app.recommender.hybrid import _parse_event_date
+    date_str = _validate_iso_date(item.get("date", ""))
+    new_source_url = item.get("source_url") or raw.source_url
+
+    if existing:
+        # Idempotent update: событие уже есть в каталоге — оно могло «переехать»
+        # (новый URL, появилась дата, поменялся формат). Безопасно мержим:
+        # только перезаписываем поле, если новое значение информативнее старого.
+        # Не трогаем embedding/series_slug — title не менялся, переcчёт не нужен.
+        _merge_existing_event(existing, item, date_str, new_source_url)
+    else:
         import json as _json
         tech_stack = item.get("tech_stack", [])
-        # Дата начала: строку оставляем для UI, плюс парсим в DateTime
-        # (start_at) для freshness/сортировки. Не распарсилась → None.
-        # Boundary-валидация на ВХОДЕ в БД: даже если кто-то отдаст dict
-        # в обход event_normalizer_agent (тесты, ручной import), мусор
-        # в events.date не попадёт. Дубль с _validate_iso_date в агенте
-        # сознателен — defence in depth.
-        from app.agents.event_normalization.agent import _validate_iso_date
-        from app.recommender.hybrid import _parse_event_date
-        date_str = _validate_iso_date(item.get("date", ""))
         from app.recommender.series import compute_series_slug
         event = Event(
             title=item["title"],
@@ -338,7 +343,7 @@ def _persist_normalized(db: Session, raw: RawEvent, item: dict) -> str:
             start_at=_parse_event_date(date_str),
             event_type=item.get("event_type"),
             target_audience=item.get("target_audience"),
-            source_url=item.get("source_url") or raw.source_url,
+            source_url=new_source_url,
             tech_stack=_json.dumps(tech_stack, ensure_ascii=False) if tech_stack else None,
             seniority=item.get("seniority"),
             quality_score=item.get("quality_score"),
@@ -365,6 +370,63 @@ def _persist_normalized(db: Session, raw: RawEvent, item: dict) -> str:
     raw.status = "normalized"
     raw.error = None
     return "normalized"
+
+
+def _merge_existing_event(event: Event, item: dict, new_date: str, new_url: str | None) -> None:
+    """Idempotent-обновление существующего события из re-ingestion.
+
+    Стратегия: новое значение перезаписывает старое ТОЛЬКО если оно
+    информативнее. «Информативнее» означает:
+    - URL: текущий пустой, новый — нет;
+    - date/start_at: текущая пустая, новая валидная (или start_at новее);
+    - format/city/level/seniority: текущий 'unknown'/'any', новый — конкретный;
+    - description: пустое поле или новое существенно длиннее (+20%);
+    - target_audience/event_type: были пустыми, заполнились;
+    - quality_score/hype_score: были None, новые есть.
+
+    Это закрывает кейс «то же событие, новая дата/URL/расширенное описание» —
+    раньше ingestion просто `skipped` его при найденном duplicate. Embedding/
+    series_slug не пересчитываем: title тот же, семантика близкая.
+    """
+    from app.recommender.hybrid import _parse_event_date
+
+    if new_url and not event.source_url:
+        event.source_url = new_url
+    if new_date and not event.date:
+        event.date = new_date
+        event.start_at = _parse_event_date(new_date)
+    elif new_date:
+        # Если новая дата валиднее ИЛИ старее текущей по start_at — обновляем.
+        # Прецедент: повторный анонс серии с уточнённой датой.
+        new_start = _parse_event_date(new_date)
+        if new_start is not None and (event.start_at is None or new_start != event.start_at):
+            event.date = new_date
+            event.start_at = new_start
+
+    for field, neutral_values in (
+        ("format", ("unknown",)),
+        ("city", ("unknown", "any")),
+        ("level", ("unknown", "any")),
+        ("seniority", ("any",)),
+        ("event_type", ("unknown",)),
+    ):
+        current = getattr(event, field, None)
+        new_val = item.get(field)
+        if new_val and current in (None, "", *neutral_values) and new_val not in neutral_values:
+            setattr(event, field, new_val)
+
+    new_desc = (item.get("description") or "").strip()
+    cur_desc = (event.description or "").strip()
+    if new_desc and (not cur_desc or len(new_desc) > len(cur_desc) * 1.2):
+        event.description = new_desc
+
+    new_audience = (item.get("target_audience") or "").strip()
+    if new_audience and not (event.target_audience or "").strip():
+        event.target_audience = new_audience
+
+    for score_field in ("quality_score", "hype_score"):
+        if getattr(event, score_field, None) is None and item.get(score_field) is not None:
+            setattr(event, score_field, item[score_field])
 
 
 def _normalize_single(db: Session, raw: RawEvent) -> str:
@@ -524,7 +586,21 @@ def _normalize_by_ids(
             )
             break
 
-    db.commit()
+    # Safe commit: при длинных LLM-вызовах Supabase pooler может закрыть
+    # SSL-сокет до того, как мы дошли сюда. Голый db.commit() в таком
+    # случае ловит SSL SYSCALL EOF -> PendingRollbackError, а вышестоящий
+    # load_all_events ловит «invalid transaction», и СЛЕДУЮЩИЙ источник
+    # каскадом валится с тем же PendingRollbackError. Делаем rollback на
+    # сбое — следующий источник стартует с чистой сессией.
+    try:
+        db.commit()
+    except Exception as e:
+        logger.warning(
+            "normalize: commit failed (%s) — rolling back, statuses written до этого момента "
+            "уйдут в /retry-failed", e,
+        )
+        with contextlib.suppress(Exception):
+            db.rollback()
     return normalized, non_it, failed
 
 
