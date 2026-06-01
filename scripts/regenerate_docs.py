@@ -123,15 +123,16 @@ def build_overview(b: Builder) -> None:
 
     b.h3("1.1. Ключевой стек")
     b.bullet("Python 3.12, FastAPI 0.110, Uvicorn, aiogram 3.13")
-    b.bullet("SQLAlchemy 2.0 + Alembic; SQLite (dev) и PostgreSQL + pgvector (prod)")
+    b.bullet("SQLAlchemy 2.0 + Alembic; SQLite (dev fallback) и PostgreSQL + pgvector на Supabase (prod/dev)")
     b.bullet(
-        "LangGraph 0.2, langchain-core, langchain-groq "
-        "(primary llama-3.3-70b-versatile, fallback llama-3.1-8b-instant)"
+        "LangGraph 0.2, langchain-core; multi-provider LLM-цепочка _LLMChain: "
+        "Gemini (REST-транспорт, автопроба модели на старте) → Groq llama-3.3-70b → Groq llama-3.1-8b. "
+        "Circuit-breaker + per-provider cooldown."
     )
-    b.bullet("sentence-transformers 2.7 — мультиязычный MiniLM (384 dim)")
-    b.bullet("APScheduler 3.10 для дайджестов и периодического ingestion")
+    b.bullet("sentence-transformers 2.7 — мультиязычный MiniLM-L12-v2 (384 dim)")
+    b.bullet("APScheduler 3.10 — daily_digest, ingest_*, backfill_event_embeddings, backfill_user_embeddings, compact_memories")
     b.bullet("feedparser, BeautifulSoup 4 + lxml, httpx, pydantic 2")
-    b.bullet("pytest 8.2 — 180 тестов проходят, ruff — без ошибок")
+    b.bullet("pytest 8.2 — 285 тестов проходят, ruff — без ошибок; CI с отдельным test-postgres job на pgvector/pgvector:pg16")
     b.bullet("Docker + docker-compose: три контейнера, healthcheck на бэке перед стартом bot/scheduler")
 
     # ── 2. Что сделано ────────────────────────────────────────────────────
@@ -145,8 +146,8 @@ def build_overview(b: Builder) -> None:
     b.bullet("app/ingestion — sources/{habr,rss,kudago,luma,meetup,tg_channels}")
     b.bullet("app/scheduler — digest + ingestion + memory compaction на APScheduler")
     b.bullet("app/db/models — user, event, raw_event, interaction, topic, copilot_session, user_topic_stat, user_bandit_state, user_skill_profile, user_memory")
-    b.bullet("alembic — 10 миграций; включая pgvector, copilot_sessions, bandit_state, user_memories, skill_profile, enriched_fields")
-    b.bullet("tests — 25 файлов, 180 кейсов: scoring, hybrid, bayesian, bandit, gnn, memory, dedup, ingestion, supervisor, copilot tools, cold-start, scheduler")
+    b.bullet("alembic — 14 миграций; включая pgvector, copilot_sessions, bandit_state, user_memories, skill_profile, enriched_fields, retry_count + start_at, feed_cursor, recommendation_cache, series_slug, telegram_id BIGINT")
+    b.bullet("tests — ~35 файлов, 285 кейсов: hot-path get_recommendations, recommendation_cache, feed_cursor, series, ingestion (idempotent + adaptive batching), enum-validation, dedup, supervisor, copilot tools, LLM circuit-breaker, Gemini probe, prompt safety, API key auth, request middleware, config validate, date localization, scoring, bayesian, bandit, gnn, memory hard-cap, cold-start, scheduler, pgvector")
     b.bullet("scripts — train_gnn, eval_offline (Recall@k/nDCG@k), llm_judge, compact_memories, backfill_pgvector, make_presentation_plan, append_overview_chapter")
 
     b.h3("2.2. Готовая функциональность")
@@ -234,41 +235,67 @@ def build_overview(b: Builder) -> None:
         "Actions (ruff + pytest); LLM-обёртка строится лениво (импорт не требует ключа)."
     )
 
-    b.h3("3.1. Свежий пакет правок (29 мая)")
+    b.h3("3.1. Свежий пакет правок (июнь 2026)")
     b.bullet(
-        "Починен GET /recommendations: при «database is locked» в кэше "
-        "user-embedding теперь делается rollback и сессия остаётся живой — "
-        "до правки сбой flush'а ронял всю выдачу 500-кой, и бот показывал "
-        "«Пока нет рекомендаций» даже при настроенном профиле."
+        "GET /recommendations стал read-only: refresh_user_embedding и "
+        "ensure_event_embeddings удалены из горячего пути (под Supabase "
+        "каждый GET был writer, по UPDATE на каждое открытие ленты). Прогрев "
+        "user.embedding перенесён на пишущие пути (register/edit/analyze-bio/"
+        "feedback). Прогрев event.embedding — на ingestion + scheduler-джоб "
+        "backfill_event_embeddings (раз в час) и backfill_user_embeddings (раз в 4 ч)."
     )
     b.bullet(
-        "В /copilot/turn и /copilot добавлены logger.exception при сбое "
-        "LangGraph — раньше generic-сообщение «Copilot временно недоступен» "
-        "появлялось без записи в лог, и реальная причина (Groq, граф, "
-        "специалист) терялась."
+        "TTL-кэш рекомендаций: таблица recommendation_cache (telegram_id PK + "
+        "items_json + expires_at). Hit пропускает весь скоринг. TTL по умолчанию "
+        "15 минут; инвалидация на feedback / register / edit / analyze-bio."
     )
     b.bullet(
-        "Интервал AI-дайджеста стал параметризуемым: DIGEST_INTERVAL_MINUTES "
-        "(по умолчанию 1440) и DIGEST_RUN_ON_STARTUP (false). Для разработки "
-        "ставится 10 минут — рассылка идёт сразу при старте scheduler'а и "
-        "повторяется каждые N минут."
+        "Multi-provider LLM-цепочка _LLMChain: Gemini первым (через REST-транспорт, "
+        "т.к. gRPC-резолвер у Google на macOS/AdGuard режется по DNS), Groq 70b и 8b "
+        "fallback'ами. Автопроба Gemini-модели на старте API: HTTP-POST по списку "
+        "кандидатов, берём первую с 200 — кэшируется до перезапуска или "
+        "POST /admin/llm/reprobe. Circuit-breaker (5 фейлов цепочки → cooldown 120 с) + "
+        "per-provider cooldown (2 фейла одного звена → skip 10 мин)."
     )
     b.bullet(
-        "Чистка англицизмов в «Почему»: подписи компонентов в "
-        "recommendation_service.py больше не содержат «Bayesian Thompson», "
-        "«LinUCB», «LightGCN», «exponential decay», «target_skills ↔ "
-        "tech_stack» — на их месте короткие русские формулировки."
+        "Security-слой: ApiKeyMiddleware (X-API-Key через hmac.compare_digest) + "
+        "RequestLogMiddleware (одна строка на запрос с тайминговым суффиксом и "
+        "X-Request-ID) + exception_handler для HTTPException 4xx (WARNING без "
+        "traceback вместо стандартного ERROR-trace на нормальные 404)."
     )
     b.bullet(
-        "В Telegram-боте на /start теперь сбрасывается persistent reply-"
-        "клавиатура через ReplyKeyboardRemove — старая кнопка «Начать "
-        "настройку» из reply-меню больше не висит рядом с инлайн-кнопкой "
-        "тура."
+        "Prompt-injection sanitize: модуль app/core/prompt_safety.py "
+        "(контроль-символы / zero-width / BIDI чистка + обёртка <user_input> + "
+        "лог injection-фраз). Подключено в bio-обработку и copilot."
     )
     b.bullet(
-        "При пропуске тура (tour:skip) бот теперь дополнительно шлёт "
-        "сообщение с кнопкой 🚀 «Начать настройку» — точка входа в "
-        "онбординг не теряется."
+        "Анти-флуд серий: events.series_slug (snake_case, снимает #15, vol.2, "
+        "годы, римские в контексте) — в /recommendations оставляем один выпуск "
+        "серии (ближайший к now по start_at)."
+    )
+    b.bullet(
+        "Строгая enum-валидация полей нормализатора (format/event_type/seniority — "
+        "closed-domain, city/level — open-domain с anti-malformed-фильтром) + "
+        "ISO-date validation с календарной проверкой и диапазоном лет."
+    )
+    b.bullet(
+        "Idempotent ingestion: при повторной нормализации того же события "
+        "обновляются только поля, которые стали информативнее (была пустая дата → "
+        "появилась; format=unknown → online; описание стало длиннее на 20%+). "
+        "Раньше re-ingestion просто пропускал — терялись обновления анонсов."
+    )
+    b.bullet(
+        "Курсор ленты бота перенесён из module-dict в users.feed_cursor "
+        "(переживает рестарт, работает под несколькими воркерами). "
+        "users.telegram_id переведён на BIGINT (каналы/группы имеют ID > 2^31)."
+    )
+    b.bullet(
+        "Memory hard-cap = 500 заметок на пользователя; copilot-история сжимается "
+        "одним LLM-summary turn'ом при превышении окна (вместо тупого среза)."
+    )
+    b.bullet(
+        "Локализация дат в боте: events.start_at рендерится в карточке с учётом "
+        "таймзоны (Europe/Moscow по умолчанию)."
     )
 
     b.h3("3.2. PostgreSQL + pgvector")
@@ -281,13 +308,17 @@ def build_overview(b: Builder) -> None:
         "embedding-кэши после перехода на PG."
     )
 
-    b.h3("3.3. Композитный /health и Groq fallback")
+    b.h3("3.3. Композитный /health и LLM-цепочка")
     b.p(
-        "Endpoint /health возвращает {db: ok, llm: ok, ingestion: ok} — "
-        "каждый компонент проверяется независимо. На уровне LLM реализован "
-        "однократный fallback: если основная модель (groq_model) недоступна, "
-        "запрос автоматически уходит на groq_fallback_model. Контракт "
-        "ChatGroq сохраняется — пользователи llm.invoke ничего не меняют."
+        "Endpoint /health возвращает {db: ok, embeddings: ok, llm: ok} — "
+        "каждый компонент проверяется независимо. Поле llm показывает реально "
+        "выбранную Gemini-модель (по автопробе) и сконфигурированные Groq-fallback'и. "
+        "Цепочка _LLMChain в app/agents/recommendation/llm.py идёт по звеньям до "
+        "первого успеха: Gemini → Groq 70b → Groq 8b. Контракт invoke / "
+        "with_structured_output / bind_tools совместим со старым ChatGroq — "
+        "пользователи llm.invoke ничего не меняют. Доступен POST /admin/llm/reprobe "
+        "для повторного выбора Gemini-модели без рестарта (когда квота на текущей "
+        "выбранной кончилась)."
     )
 
     b.h3("3.4. AI-рекомендации, вариант C")
@@ -311,11 +342,18 @@ def build_overview(b: Builder) -> None:
 
     b.h3("3.6. Качество кода")
     b.p(
-        "ruff на app/ — без ошибок. Тестовый набор — 180 кейсов в 25 файлах, "
-        "покрывает scoring, bayesian, bandit, gnn, memory, dedup, ingestion, "
-        "supervisor, copilot tools, cold-start, scheduler. Pytest-фикстуры "
-        "используют отдельный SQLite-файл с in-memory mode, чтобы тесты не "
-        "конфликтовали с dev-БД."
+        "ruff на app/ — без ошибок. Тестовый набор — 285 кейсов в ~35 файлах. "
+        "Прямо покрыты hot-path get_recommendations (включая cache-hit пропускает "
+        "scoring через spy), TTL-кэш, курсор ленты, series anti-flood, "
+        "idempotent ingestion, enum-валидация, LLM-цепочка (5 тестов на chain + "
+        "circuit-breaker + Gemini probe), prompt-injection sanitize, "
+        "ApiKeyMiddleware (5 тестов), RequestLogMiddleware (3 теста), "
+        "fail-fast config, локализация дат. Pytest-фикстуры используют "
+        "in-memory SQLite, чтобы тесты не конфликтовали с dev-БД. "
+        "CI с двумя job'ами: test-sqlite на каждом push/PR и test-postgres "
+        "на сервисе pgvector/pgvector:pg16 — критичные backend-зависимые "
+        "пути (dedup, retrieval, recommendation_cache, feed_cursor, "
+        "ingestion, pgvector) гоняются на реальном Postgres."
     )
 
     # ── 4. Что осталось открытым ──────────────────────────────────────────
@@ -912,8 +950,9 @@ def build_presentation_plan(b: Builder) -> None:
         "известный пример.",
         "Используется в трёх местах: нормализация событий, объяснения "
         "«Почему», мульти-агентный Copilot.",
-        "Мы используем llama-3.3-70b-versatile через Groq, fallback на "
-        "llama-3.1-8b-instant.",
+        "Цепочка _LLMChain: Gemini (через REST-транспорт, автопроба модели) → "
+        "Groq llama-3.3-70b → Groq llama-3.1-8b — последовательный fallback "
+        "на rate-limit/сбое.",
     )
     term(
         "Groq",
@@ -1213,7 +1252,7 @@ def build_presentation_plan(b: Builder) -> None:
     # ── 4 ────────────────────────────────────────────────────────────────
     b.h1("4. Технологический стек — что и зачем")
     b.bullet("Python 3.12, FastAPI, aiogram 3, SQLAlchemy 2 + Alembic, Pydantic 2")
-    b.bullet("LangGraph 0.2 + langchain-groq (llama-3.3-70b-versatile + fallback 8b)")
+    b.bullet("LangGraph 0.2 + multi-provider _LLMChain: Gemini (REST + autopobe) → Groq 70b → Groq 8b")
     b.bullet("sentence-transformers 2.7 (MiniLM-L12-v2, 384 dim, поддерживает русский)")
     b.bullet("APScheduler 3.10 (background jobs)")
     b.bullet("feedparser, BeautifulSoup 4 + lxml, httpx")
@@ -2222,10 +2261,12 @@ def build_thesis(b: Builder, *, default_text: str, list_style: str) -> None:
     p("SQLAlchemy 2.0 + Alembic. SQLite для разработки (файл в репо), PostgreSQL + pgvector для продакшна. Переключение через DATABASE_URL.")
     b.h3("2.5.4. AI-инструменты и языковые модели")
     p(
-        "LangGraph 0.2 для multi-agent + langchain-groq для LLM-вызовов. "
-        "Основная модель — llama-3.3-70b-versatile, резервная — "
-        "llama-3.1-8b-instant. sentence-transformers 2.7 для embedding'ов "
-        "(многоязычный MiniLM-L12-v2)."
+        "LangGraph 0.2 для multi-agent. LLM-цепочка _LLMChain: первичный "
+        "провайдер Google Gemini через langchain-google-genai с REST-"
+        "транспортом (REST устойчивее gRPC к местным DNS-фильтрам), модель "
+        "выбирается автопробой на старте API. Fallback'и — Groq llama-3.3-70b "
+        "и llama-3.1-8b. Поверх — circuit-breaker и per-provider cooldown. "
+        "sentence-transformers 2.7 для embedding'ов (многоязычный MiniLM-L12-v2)."
     )
     b.h3("2.5.5. Средства контейнеризации и развертывания")
     p("Docker + docker-compose: api, bot, scheduler — три сервиса с общей БД. Healthcheck перед стартом зависимых.")
@@ -2605,7 +2646,7 @@ def build_thesis(b: Builder, *, default_text: str, list_style: str) -> None:
         "при пропуске тура. На /start сбрасывается старая reply-клавиатура."
     )
     b.h2("5.6. Качество кода")
-    p("ruff — без ошибок на app/. 180 тестов проходят. Все хендлеры покрыты pytest-фикстурами с in-memory SQLite.")
+    p("ruff — без ошибок на app/. 285 тестов проходят. CI: два job'а — test-sqlite (быстрый default) и test-postgres (на образе pgvector/pgvector:pg16) — критичные backend-зависимые пути проверяются на реальном PG. Все хендлеры покрыты pytest-фикстурами с in-memory SQLite.")
     b.h2("5.7. Итог")
     p(
         "Майская итерация привела систему к стабильному состоянию: "
@@ -2649,7 +2690,7 @@ def build_thesis(b: Builder, *, default_text: str, list_style: str) -> None:
 
     # ── Глоссарий ────────────────────────────────────────────────────────
     b.h1("Глоссарий")
-    li("LLM — большая языковая модель; в проекте Groq llama-3.3-70b-versatile + fallback 8b")
+    li("LLM — большая языковая модель; в проекте цепочка _LLMChain: Gemini (REST + autopobe) → Groq llama-3.3-70b → Groq llama-3.1-8b")
     li("Embedding — векторное представление текста (384 dim, MiniLM-L12-v2)")
     li("Cosine similarity — мера близости двух векторов")
     li("Hybrid recommender — комбинация разных алгоритмов в один score (у нас 9 компонент)")

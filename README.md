@@ -88,41 +88,89 @@ APScheduler.
 
 ## Архитектура
 
-```
-┌─────────────────┐      HTTP        ┌────────────────────┐
-│  Telegram Bot   │ ───────────────► │      FastAPI       │
-│   (aiogram 3)   │ ◄─────────────── │    REST backend    │
-└────────┬────────┘                  └──────────┬─────────┘
-         │                                      │
-         │ async httpx                          │ SQLAlchemy 2
-         │                                      ▼
-         │                            ┌────────────────────┐
-         │                            │  SQLite / Postgres │
-         │                            │   + pgvector       │
-         │                            └─────────┬──────────┘
-         │                                      │
-┌────────▼─────────┐    invoke()      ┌─────────▼──────────┐
-│   APScheduler    │ ───────────────► │  LangGraph agents  │
-│ digest+ingest+   │                  │   (Groq LLM +      │
-│ memory-compact   │                  │   fallback)        │
-└──────────────────┘                  └─────────┬──────────┘
-                                                │
-                                                │ sentence-transformers
-                                                ▼
-                                      ┌────────────────────┐
-                                      │ Hybrid Recommender │
-                                      │   9 components     │
-                                      └────────────────────┘
+```mermaid
+flowchart LR
+    User(["👤 Пользователь"])
+
+    subgraph Telegram["Telegram (long-polling)"]
+        Bot["🤖 aiogram 3<br/><i>app/bot</i>"]
+    end
+
+    subgraph Backend["FastAPI · uvicorn"]
+        API["REST API<br/><i>app/api</i>"]
+        MW["Middleware<br/>X-API-Key · request-log<br/>4xx WARNING · X-Request-ID"]
+        Recsys["Hybrid Recommender<br/>9 компонент + MMR + series anti-flood<br/><i>app/recommender</i>"]
+        Copilot["LangGraph Copilot<br/>Supervisor → 5 specialists<br/><i>app/agents/copilot</i>"]
+        Normalize["Event Normalizer<br/>Pydantic + ISO-date<br/><i>app/agents/event_normalization</i>"]
+    end
+
+    subgraph LLM["LLM-цепочка<br/><i>llm._LLMChain</i>"]
+        Gemini["Gemini<br/>(autopobe модели,<br/>REST transport)"]
+        Groq70["Groq llama-3.3-70b"]
+        Groq8["Groq llama-3.1-8b"]
+        Gemini -->|429 / DNS / 5xx| Groq70
+        Groq70 -->|429 / 5xx| Groq8
+    end
+
+    subgraph Embed["sentence-transformers"]
+        MiniLM["MiniLM-L12-v2<br/>384-dim, multilingual"]
+    end
+
+    subgraph DB["Supabase Postgres + pgvector"]
+        Users[("users · user_topic_stats<br/>user_bandit_states · user_skill_profiles<br/>user_memories · copilot_sessions")]
+        Events[("events · raw_events · topics<br/>interactions<br/>recommendation_cache")]
+        Vec[("embedding_vec vector(384)<br/>+ IVFFlat &lt;=&gt;-index")]
+    end
+
+    subgraph Scheduler["APScheduler · одиночный процесс"]
+        Digest["daily_digest"]
+        Ingest["ingest: habr / rss / kudago<br/>luma / meetup / telegram"]
+        Backfill["backfill_event_embeddings<br/>backfill_user_embeddings"]
+        Compact["compact_memories"]
+    end
+
+    subgraph Sources["Внешние источники"]
+        Habr["Habr HTML"]
+        RSS["RSS / Atom"]
+        Kudago["KudaGo API"]
+        Luma["Lu.ma ICS"]
+        Meetup["Meetup GraphQL"]
+        TG["Telegram-каналы"]
+    end
+
+    User <-->|сообщения| Bot
+    Bot <-->|"HTTP + X-API-Key"| API
+    API --> MW
+    MW --> Recsys
+    MW --> Copilot
+    Copilot -->|invoke| LLM
+    Normalize -->|invoke| LLM
+    Recsys -->|"why-explanation"| LLM
+    Recsys -->|"vector ops"| MiniLM
+    Normalize -->|"vector ops"| MiniLM
+    Recsys <--> Vec
+    Recsys <--> Events
+    Recsys <--> Users
+    Copilot <--> Users
+    Copilot <--> Events
+    Normalize --> Events
+    Ingest --> Sources
+    Sources --> Ingest
+    Ingest -->|"raw → normalize"| Normalize
+    Digest -->|"карточка дня"| Bot
+    Digest -->|HTTP| API
+    Backfill --> Vec
+    Compact --> Users
 ```
 
 Три независимых процесса:
-1. **api** (`uvicorn app.api.main:app`) — основной REST-сервис, держит БД
-   и LLM-агентов.
-2. **bot** (`python -m app.bot.main`) — Telegram-фронт, long-polling,
-   общается с api по HTTP.
+1. **api** (`uvicorn app.api.main:app`) — REST-сервис, держит БД, LLM-цепочку
+   и embedding-модель в памяти.
+2. **bot** (`python -m app.bot.main`) — Telegram-фронт на long-polling,
+   общается с api по HTTP с заголовком `X-API-Key`.
 3. **scheduler** (`python -m app.scheduler.digest`) — APScheduler:
-   `daily_digest`, `ingest_habr`, `ingest_rss`, `ingest_telegram`,
-   `compact_memories`.
+   `daily_digest`, `ingest_*`, `backfill_event_embeddings`,
+   `backfill_user_embeddings`, `compact_memories`.
 
 `bot` и `scheduler` ждут healthcheck'а `api` перед стартом (в `docker-compose`).
 
@@ -241,13 +289,16 @@ eventmind/
 - **SQLAlchemy 2.0** + **Alembic**
 - **SQLite** (dev, WAL + busy_timeout=10s) / **PostgreSQL + pgvector** (prod)
 - **LangGraph 0.2** + **langchain-core** — multi-agent графы
-- **langchain-groq** + Groq LLM (primary `llama-3.3-70b-versatile`,
-  fallback `llama-3.1-8b-instant`)
+- **LLM-цепочка** (`app/agents/recommendation/llm.py::_LLMChain`):
+  Google Gemini (через `langchain-google-genai` с `transport="rest"`,
+  автопроба модели на старте) → Groq `llama-3.3-70b` → Groq
+  `llama-3.1-8b`. Circuit-breaker + per-provider cooldown.
 - **sentence-transformers 2.7** — multilingual MiniLM-L12-v2 (384 dim)
-- **APScheduler 3.10** — фоновые джобы
+- **APScheduler 3.10** — фоновые джобы (digest, ingestion, backfill
+  embeddings, compact memory)
 - **BeautifulSoup 4 + lxml**, **feedparser**, **httpx**
 - **Pydantic 2** + **pydantic-settings**
-- **pytest 8.2** (180 тестов), **ruff**
+- **pytest 8.2** (**285 тестов**), **ruff**
 
 ---
 
@@ -279,6 +330,15 @@ eventmind/
   `access_count`, `last_accessed_at`, `source` (long-term memory, mem0).
 - `copilot_sessions` — `messages_json`, `started_at`, `last_message_at`,
   `closed` (мульти-туровая история).
+- `recommendation_cache` — `telegram_id` (PK BigInt), `items_json`,
+  `limit_used`, `computed_at`, `expires_at` (TTL-кэш выдачи
+  `/recommendations`, по умолчанию 15 мин).
+
+**Поля курсора и серий:**
+- `users.feed_cursor` — индекс ленты `/recommend` в боте; раньше жил
+  в module-dict, теперь переживает рестарт процесса.
+- `events.series_slug` — `python-meetup`, `devops-days-moscow`, ...
+  (детерминированный slug, см. `app/recommender/series.py`).
 
 **Взаимодействия:**
 - `interactions` — `user_id`, `event_id`, `action ∈ {like, dislike, save}`,
@@ -370,17 +430,31 @@ DATABASE_URL=postgresql+psycopg2://... python -m scripts.backfill_pgvector
 | `BOT_TOKEN` | — | Токен Telegram-бота. Обязателен для `app.bot.main` и scheduler. |
 | `DATABASE_URL` | `sqlite:///./eventmind.db` | SQLAlchemy URL. Для PG: `postgresql+psycopg2://user:pass@host:5432/db`. |
 | `API_HOST` | `http://localhost:8000` | Базовый URL FastAPI, который дёргают bot и scheduler. |
+| `API_SHARED_SECRET` | `""` | Shared-secret для `X-API-Key`. Пустой = dev open-mode (auth выключен). На проде задать ОБЯЗАТЕЛЬНО. |
 | `DEBUG` | `false` | Verbose-логи и SQL echo. |
 
-### LLM (Groq)
+### LLM-цепочка
+
+`app/agents/recommendation/llm.py::_LLMChain` идёт по звеньям до первого
+успеха. Хотя бы один из двух ключей (`GOOGLE_API_KEY` или `GROQ_API_KEY`)
+должен быть задан, иначе LLM-агенты не работают.
 
 | Переменная | Default | Описание |
 |---|---|---|
-| `GROQ_API_KEY` | — | Ключ Groq Cloud. Без него LLM-агенты падают, система деградирует до rule-based. |
-| `GROQ_MODEL` | `llama-3.3-70b-versatile` | Primary-модель. |
-| `GROQ_FALLBACK_MODEL` | `llama-3.1-8b-instant` | Резерв — при rate-limit'е primary `_GroqWithFallback` автоматически переключается. |
-| `GROQ_TEMPERATURE` | `0.4` | Temperature обоих моделей. |
-| `GROQ_MAX_RETRIES` | `2` | Retries при сетевых ошибках. |
+| `GOOGLE_API_KEY` | — | Ключ Google AI Studio (https://aistudio.google.com/app/apikey). Primary-звено цепочки. |
+| `GOOGLE_MODEL` | `""` | Конкретная Gemini-модель. Пустой = автопроба: на старте API цепочкой POST'ов выбирается первая отвечающая 200 (см. `_GEMINI_FALLBACK_MODELS` в `llm.py`). |
+| `GROQ_API_KEY` | — | Ключ Groq Cloud. Fallback после Gemini (или primary, если Gemini пустой). |
+| `GROQ_MODEL` | `llama-3.3-70b-versatile` | Groq primary-модель. |
+| `GROQ_FALLBACK_MODEL` | `llama-3.1-8b-instant` | Groq last-resort fallback. |
+| `GROQ_TEMPERATURE` | `0.4` | Temperature всех звеньев цепочки. |
+| `GROQ_MAX_RETRIES` | `2` | Retries Groq SDK при сетевых ошибках. |
+
+### Рекомендации
+
+| Переменная | Default | Описание |
+|---|---|---|
+| `RECOMMENDATION_CACHE_ENABLED` | `true` | TTL-кэш `/recommendations` в таблице `recommendation_cache`. |
+| `RECOMMENDATION_CACHE_TTL_MINUTES` | `15` | Время жизни кэша. Инвалидируется на feedback / register / edit / analyze-bio. |
 
 ### Ingestion
 
@@ -748,7 +822,8 @@ fallback.
 | Метод | URL | Описание |
 |---|---|---|
 | GET | `/` | Корневой ответ. |
-| GET | `/health` | `{db, embeddings, llm: ok/fail}`. |
+| GET | `/health` | `{db, embeddings, llm}` — для LLM показывает реально выбранную Gemini-модель и Groq fallback'и. |
+| POST | `/admin/llm/reprobe` | Сбросить кэш автопробы Gemini и выбрать модель заново (когда квота на текущей кончилась). |
 
 ### Users
 
@@ -782,6 +857,9 @@ fallback.
 | GET | `/recommendations/{telegram_id}/event/{event_id}/interactions` | Действия пользователя по событию. |
 | GET | `/recommendations/{telegram_id}/saved` | Сохранённые события. |
 | GET | `/recommendations/{telegram_id}/why/{event_id}` | `{short, full}` для ❓ Почему / 📖 Подробнее. |
+| GET | `/recommendations/{telegram_id}/cursor` | Текущая позиция в ленте `/recommend`. |
+| POST | `/recommendations/{telegram_id}/cursor/reset` | Сбросить курсор. |
+| POST | `/recommendations/{telegram_id}/cursor/advance` | Перейти к следующему элементу ленты. |
 
 ### Agent recommendations (вариант C)
 
@@ -810,7 +888,9 @@ fallback.
 | POST | `/ingestion/load-meetup` | Meetup GraphQL (требует `MEETUP_TOKEN`). |
 | POST | `/ingestion/load-telegram` | Telegram-каналы (web-preview). |
 | POST | `/ingestion/load-raw` | Залить `data/events_raw.json` в `raw_events`. |
+| POST | `/ingestion/load-all` | Прогнать ВСЕ источники по очереди. Каждый изолирован try/except + rollback. |
 | POST | `/ingestion/normalize` | Прогнать `raw_events.status == 'raw'` через AI-нормализатор. |
+| POST | `/ingestion/retry-failed` | Переобработать события со статусом `failed` (после сброса квот LLM). |
 | GET | `/ingestion/status` | Счётчики по статусам. |
 
 ### Subscriptions
@@ -880,24 +960,35 @@ curl "http://localhost:8000/analytics/trending?days=7&limit=5"
 ## Тесты
 
 ```bash
-pytest -q              # 180 тестов, ~30 с
+pytest -q              # 285 тестов, ~80–95 с (первый прогон дольше — MiniLM)
 pytest tests/test_scoring.py -v
 ruff check .           # 0 ошибок (line-length=100, py312)
 ```
 
-Состав (26 файлов):
-- `test_scoring`, `test_user_model`, `test_interactions`, `test_new_features`
-- `test_bayesian`, `test_bayes_decay` — Beta-апдейты, Thompson, decay
-- `test_retrieval` — RAG retrieval + interaction context
-- `test_multi_objective` — breakdown, freshness, quality+hype, MMR
-- `test_dedup` — semantic dedup threshold
-- `test_cold_start` — `apply_cold_start`
-- `test_skill_gap`, `test_bandit`, `test_gnn`
-- `test_copilot_tools`, `test_supervisor`, `test_specialists`,
-  `test_copilot_graph_e2e`
-- `test_memory`, `test_memory_integration`
-- `test_ingestion`, `test_multi_source` — офлайн-моки источников
-- `test_card_format`, `test_scheduler`, `test_db_session`
+Состав (~36 файлов, 285 кейсов):
+- **Скоринг:** `test_scoring`, `test_user_model`, `test_interactions`,
+  `test_new_features`, `test_multi_objective`, `test_bayesian`/`test_bayes_decay`,
+  `test_skill_gap`, `test_bandit`, `test_gnn`.
+- **Рекомендер:** `test_get_recommendations` (hot-path),
+  `test_recommendation_cache`, `test_feed_cursor`, `test_dedup`,
+  `test_series`, `test_retrieval`.
+- **Ingestion:** `test_ingestion`, `test_multi_source`, `test_ingestion_idempotent`,
+  `test_enum_validation` — офлайн-моки источников + idempotent re-ingestion +
+  enum-валидация полей нормализатора.
+- **Память:** `test_memory`, `test_memory_integration`, `test_memory_hard_cap`,
+  `test_cold_start`.
+- **AI / LLM:** `test_supervisor`, `test_copilot_tools`, `test_specialists`,
+  `test_copilot_graph_e2e`, `test_llm_circuit_breaker`,
+  `test_gemini_probe`.
+- **Security / ops:** `test_api_key_auth`, `test_config_validate`,
+  `test_middleware`, `test_prompt_safety`.
+- **Локализация:** `test_date_localization` — рендер дат через zoneinfo.
+- **Прочее:** `test_card_format`, `test_scheduler`, `test_db_session`,
+  `test_pgvector`.
+
+CI (`.github/workflows/ci.yml`) гоняет два job'а: `test-sqlite` (быстрый
+default) и `test-postgres` (через service `pgvector/pgvector:pg16`,
+прогоняет критичные backend-зависимые тесты на реальном PG).
 
 ---
 
@@ -909,7 +1000,7 @@ alembic revision --autogenerate -m "add field"    # создать
 alembic downgrade -1                              # откат на ревизию
 ```
 
-История (`alembic/versions/`, 10 ревизий):
+История (`alembic/versions/`, 14 ревизий):
 - `6af520bb31e0_initial_schema` — базовые таблицы;
 - `7b1c9d2e3a4f_add_summary_embedding_to_events` — `summary`, `embedding`;
 - `b3c4d5e6f7a8_add_enriched_fields` — `tech_stack`, `seniority`,
@@ -922,6 +1013,14 @@ alembic downgrade -1                              # откат на ревизи
 - `9a1b2c3d4e5f_add_pgvector` — **только PG**: `CREATE EXTENSION vector`,
   `events.embedding_vec` / `users.embedding_vec` типа `vector(384)`,
   IVFFlat-индекс. На SQLite — no-op.
+- `b2c3d4e5f6a7_add_start_at_and_retry_count` — `events.start_at` (DateTime)
+  и `raw_events.retry_count`.
+- `c3d4e5f6a7b8_add_user_feed_cursor` — `users.feed_cursor` (курсор ленты в БД).
+- `d4e5f6a7b8c9_add_recommendation_cache` — TTL-кэш рекомендаций.
+- `e5f6a7b8c9d0_add_event_series_slug` — `events.series_slug` + индекс
+  (для anti-flood серий).
+- `f6a7b8c9d0e1_telegram_id_bigint` — `users.telegram_id INTEGER → BIGINT`
+  (Telegram канал/группа ID превышают 2³¹; на SQLite no-op).
 
 ---
 

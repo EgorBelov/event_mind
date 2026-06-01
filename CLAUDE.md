@@ -6,30 +6,47 @@
 ## Что это за проект
 
 EventMind — система агрегации IT-мероприятий и персонализированных
-рекомендаций. Три независимых процесса вокруг общей БД:
+рекомендаций. Курсовая ВКР, перерастающая в магистерскую. Три независимых
+процесса вокруг общей БД:
 
 - **api** — REST на FastAPI + Uvicorn (`app/api`)
 - **bot** — Telegram-клиент на aiogram 3 (`app/bot`)
-- **scheduler** — фоновые джобы APScheduler: дайджест, ingestion, compaction
-  памяти (`app/scheduler`)
+- **scheduler** — фоновые джобы APScheduler: дайджест, ingestion, backfill
+  embeddings, compaction памяти (`app/scheduler`)
 
 ## Стек
 
 - Python 3.12 в `.venv/`. Путь к исполняемым файлам зависит от ОС:
-  macOS/Linux — `.venv/bin/<tool>`, Windows — `.venv\Scripts\<tool>.exe`
-  (например `.venv\Scripts\python.exe`, `.venv\Scripts\pytest.exe`).
-- FastAPI 0.110, aiogram 3.13, SQLAlchemy 2.0 + Alembic, Pydantic 2
-- LangGraph 0.2 + langchain-groq (primary `llama-3.3-70b-versatile`, fallback
-  `llama-3.1-8b-instant`)
-- sentence-transformers 2.7 (MiniLM-L12-v2, 384 dim, русский)
-- SQLite (dev) / PostgreSQL + pgvector (prod)
-- pytest 8.2 (172 теста), ruff
+  macOS/Linux — `.venv/bin/<tool>`, Windows — `.venv\Scripts\<tool>.exe`.
+- FastAPI 0.110, aiogram 3.13, SQLAlchemy 2.0 + Alembic 1.13, Pydantic 2
+- LangGraph 0.2; **LLM-цепочка** (см. ниже): Gemini → Groq 70b → Groq 8b
+- sentence-transformers 2.7 (MiniLM-L12-v2, 384 dim, multilingual/русский)
+- SQLite (dev fallback) / **PostgreSQL + pgvector** на Supabase (prod/dev)
+- pytest 8.2 (285 тестов), ruff 0.6
+
+## LLM (важно для модификаций)
+
+Цепочка провайдеров живёт в `app/agents/recommendation/llm.py::_LLMChain`.
+На каждом `llm.invoke()` цикл идёт по звеньям до первого успеха:
+
+1. **Gemini** — primary, через `langchain-google-genai` с `transport="rest"`
+   (gRPC у Google на macOS/AdGuard режется по DNS).
+   - `_probe_gemini_model()` на старте API делает HTTP-POST по списку
+     кандидатов и берёт первую с `200`. Сохраняется до перезапуска или
+     `POST /admin/llm/reprobe`. Список fallback'ов — `_GEMINI_FALLBACK_MODELS`
+     в llm.py; если в `.env` задан `GOOGLE_MODEL` — он идёт первым.
+   - Free-tier лимиты часто меняются без предупреждения (20 RPD на
+     2.5-flash, 0 на legacy 1.5-flash). Поэтому жёстко не привязываемся.
+2. **Groq 70b** (`llama-3.3-70b-versatile`) — fallback.
+3. **Groq 8b** (`llama-3.1-8b-instant`) — last-resort fallback.
+
+Поверх есть **circuit-breaker** (5 подряд фейлов цепочки → cooldown 120с) и
+**per-provider cooldown** (2 подряд на одном звене → skip на 10 мин).
+
+`with_structured_output` навешивается на первое включённое звено.
+`bind_tools` возвращает новую цепочку с привязанными tools (для LangGraph).
 
 ## Запуск (dev)
-
-Код кроссплатформенный — различаются только путь к venv и shell-синтаксис.
-Сам `.venv` НЕ переносится между ОС (и не в git) — на каждой машине
-создаётся заново под её платформу.
 
 ### macOS / Linux (bash/zsh)
 
@@ -37,7 +54,7 @@ EventMind — система агрегации IT-мероприятий и п�
 # первый раз
 python3.12 -m venv .venv
 .venv/bin/python -m pip install -r requirements.txt
-cp .env.example .env       # вписать BOT_TOKEN, GROQ_API_KEY
+cp .env.example .env       # вписать BOT_TOKEN, GOOGLE_API_KEY, GROQ_API_KEY
 .venv/bin/alembic upgrade head
 
 # процессы — каждый в своём терминале
@@ -46,7 +63,8 @@ cp .env.example .env       # вписать BOT_TOKEN, GROQ_API_KEY
 .venv/bin/python -m app.scheduler.digest
 ```
 
-Проверки: `curl localhost:8000/health`, `.venv/bin/pytest -q`, `.venv/bin/ruff check .`.
+Проверки: `curl localhost:8000/health`, `.venv/bin/pytest -q`,
+`.venv/bin/ruff check .`.
 
 ### Windows (PowerShell)
 
@@ -55,7 +73,7 @@ cp .env.example .env       # вписать BOT_TOKEN, GROQ_API_KEY
 # старые пины (torch, sentence-transformers, pydantic) не имеют колёс под 3.13+
 py -3.12 -m venv .venv
 .\.venv\Scripts\python.exe -m pip install -r requirements.txt
-Copy-Item .env.example .env   # вписать BOT_TOKEN, GROQ_API_KEY
+Copy-Item .env.example .env   # вписать BOT_TOKEN, GOOGLE_API_KEY, GROQ_API_KEY
 .\.venv\Scripts\alembic.exe upgrade head
 
 # процессы — каждый в своём терминале
@@ -64,26 +82,26 @@ Copy-Item .env.example .env   # вписать BOT_TOKEN, GROQ_API_KEY
 .\.venv\Scripts\python.exe -m app.scheduler.digest
 ```
 
-Проверки: `curl localhost:8000/health`, `.\.venv\Scripts\pytest.exe -q`,
-`.\.venv\Scripts\ruff.exe check .`.
-
-> Windows-нюанс: HuggingFace кэширует модель MiniLM через симлинки, которых
-> Windows без Developer Mode не поддерживает — кэш работает «деградированно»
-> (чуть больше места на диске, на функциональность не влияет). Чтобы убрать
-> предупреждение: `setx HF_HUB_DISABLE_SYMLINKS_WARNING 1` или включить
-> Developer Mode.
+> Windows-нюанс: HuggingFace кэширует MiniLM через симлинки, которых
+> Windows без Developer Mode не поддерживает — кэш работает «деградированно».
+> Чтобы убрать предупреждение: `setx HF_HUB_DISABLE_SYMLINKS_WARNING 1`.
 
 ## Ключевые dev-флаги в `.env`
 
+См. `.env.example` для полного списка. Самое важное:
+
+- `GOOGLE_API_KEY` / `GROQ_API_KEY` — хотя бы один обязателен.
+- `GOOGLE_MODEL=` (пустой) — автопроба сама подберёт работающую Gemini.
+- `API_SHARED_SECRET=` — пустой в dev (auth выключен); на проде задать.
+- `DATABASE_URL=postgresql+psycopg2://...` для Supabase; иначе SQLite.
 - `DIGEST_INTERVAL_MINUTES=10` + `DIGEST_RUN_ON_STARTUP=true` — увидеть
   дайджест прямо сейчас (default 1440 / false).
 - `INGEST_ENABLED=true`, `INGEST_INTERVAL_HOURS=6` — периодический ingestion.
 - `GNN_ENABLED=false` по умолчанию (на малом датасете шумит).
 - `MEMORY_ENABLED=true` — long-term память пользователя.
+- `RECOMMENDATION_CACHE_ENABLED=true`, `RECOMMENDATION_CACHE_TTL_MINUTES=15`.
 
 ## Архитектура рекомендера (hybrid из 9 компонент)
-
-Полное описание — в `docs/Обзор_проекта_EventMind.docx` глава 7. Кратко:
 
 | Компонент | Парадигма | Где | Вес |
 |-----------|-----------|-----|-----|
@@ -97,8 +115,23 @@ Copy-Item .env.example .env   # вписать BOT_TOKEN, GROQ_API_KEY
 | bandit | LinUCB contextual | `recommender/bandit.py` | 2.0 |
 | gnn | LightGCN collaborative | `recommender/gnn.py` | 3.0 (выкл) |
 
-Поверх — MMR-rerank (λ=0.7). Все компоненты в `app/recommender/hybrid.py`,
-каждая в try/except — сбой одной не ломает выдачу.
+Поверх — MMR-rerank (λ=0.7) + **series anti-flood**: если у событий одинаковый
+`series_slug`, в выдаче остаётся выпуск, ближайший по `start_at` к now.
+Все компоненты — в try/except, сбой одной не ломает выдачу.
+
+### Read-only hot-path
+
+`GET /recommendations` сейчас **read-only**: не вызывает `refresh_user_embedding`
+и `ensure_event_embeddings` (раньше каждый GET писал по UPDATE на Supabase).
+Прогрев `user.embedding` идёт на пишущих путях
+(`create_or_update_user`, `analyze_bio`, `create_interaction`).
+Прогрев `event.embedding` — при ingestion + scheduler-джоб
+`backfill_event_embeddings` (раз в час) и `backfill_user_embeddings` (раз в 4 ч).
+
+### TTL-кэш рекомендаций
+
+`recommendation_cache` (PK `telegram_id`, TTL 15 мин). Hit пропускает весь
+скоринг. Инвалидируется на feedback / register / edit / analyze-bio.
 
 ## AI Copilot
 
@@ -106,71 +139,93 @@ LangGraph Supervisor-Worker граф в `app/agents/copilot/`:
 `retrieve → supervisor → один из 5 specialists → finalize`.
 
 5 специалистов: `recommendation`, `career_coach`, `roadmap`, `explainer`,
-`summary`. 6 function-calling tools в `app/agents/copilot/tools.py`
-(`TOOL_DEFINITIONS`): `search_events`, `get_user_profile`,
-`get_interactions_summary`, `explain_event`, `recall_about_user`,
-`mark_saved`. Подмножество tools на специалиста раздаётся через
-`filter_tools(...)`.
+`summary`. 6 function-calling tools в `app/agents/copilot/tools.py`:
+`search_events`, `get_user_profile`, `get_interactions_summary`,
+`explain_event`, `recall_about_user`, `mark_saved`.
 
 Сессии мульти-туровые — состояние в таблице `copilot_sessions`. В боте —
-`app/bot/handlers/copilot.py`, активная сессия 15 минут.
+`app/bot/handlers/copilot.py`. **LLM-compaction**: при превышении
+истории сжимаем середину одним system-summary turn'ом (см.
+`copilot.py::_compact_history`).
+
+## API security / ops
+
+- **`ApiKeyMiddleware`** (`app/api/middleware.py`): `X-API-Key` через
+  `hmac.compare_digest` против `settings.api_shared_secret`. Пустой
+  секрет = open-mode (dev). Whitelist: `/`, `/health`, `/docs`,
+  `/redoc`, `/openapi.json`. Бот и scheduler шлют заголовок ВО ВСЕ
+  запросы (см. `_auth_headers()` / `_api_headers()`).
+- **`RequestLogMiddleware`**: одна строка на запрос —
+  `METHOD PATH -> STATUS (rid=…, NN.NNms)`. Логгер `eventmind.access`.
+  Уровень от кода: 5xx ERROR, 4xx WARNING, прочее INFO. Прокидывает
+  X-Request-ID.
+- **HTTPException handler**: 4xx → короткий WARNING без traceback,
+  5xx → ERROR. Все ответы содержат `X-Request-ID`.
+- **`config_validate`** (`app/core/config_validate.py`): per-context
+  required-поля. `validate_or_exit(ctx)` → код 78 (EX_CONFIG).
 
 ## Соглашения по коду
 
-- При `Exception` во время `db.flush()` обязательно `db.rollback()` —
-  иначе SQLAlchemy уходит в `PendingRollbackError` и ломает запрос. Свежий
-  прецедент: `refresh_user_embedding` в
-  `app/api/services/recommendation_service.py` — без rollback'а вся
-  `/recommendations` валилась 500-кой при «database is locked».
-- Все обращения LLM идут через `app/agents/recommendation/llm.py` — там
-  однократный fallback primary → fallback model.
-- Никаких «временно недоступен» без `logger.exception` — иначе причину не
-  выяснить. В `/copilot` и `/agent-recommendations` логирование уже стоит.
-- В Telegram-боте использовать `app/bot/utils.send` (HTML + plain-fallback)
-  вместо прямого `message.answer`.
+- При `Exception` во время `db.flush()`/`db.commit()` обязательно
+  `db.rollback()` — иначе SQLAlchemy уходит в `PendingRollbackError`.
+- Все обращения LLM — только через `from app.agents.recommendation.llm import llm`.
+- Никаких `print` — везде `logging`.
+- В Telegram-боте использовать `app/bot/utils.send` вместо прямого
+  `message.answer` (HTML + plain-fallback).
+- Пользовательский ввод в LLM-промпт оборачивать через
+  `prompt_safety.sanitize_user_text` + `wrap_user_text(<user_input>...)`.
 - Никогда не коммитить `.env`, `eventmind.db`, `data/` (см. `.gitignore`).
 
 ## Тесты
 
-172 кейса в `tests/`. Запуск: `.venv/bin/pytest -q` (macOS/Linux) или
-`.\.venv\Scripts\pytest.exe -q` (Windows). ~30 с на тёплом кэше; первый
-прогон на новой машине дольше — докачивается модель MiniLM (~120 МБ).
-На Postgres-`DATABASE_URL` 3 SQLite-PRAGMA теста (`test_db_session`) пропускаются.
-Ключевые файлы: `test_scoring`, `test_multi_objective`,
-`test_bayesian`/`test_bayes_decay`, `test_bandit`, `test_gnn`,
-`test_memory`/`test_memory_integration`, `test_dedup`, `test_supervisor`,
-`test_copilot_tools`, `test_copilot_graph_e2e`, `test_cold_start`,
-`test_scheduler`.
+**285 кейсов** в `tests/`. Запуск: `.venv/bin/pytest -q` (~80–95 с на тёплом
+кэше; первый прогон дольше — докачивается MiniLM ~120 МБ). На
+Postgres-`DATABASE_URL` 3 SQLite-PRAGMA теста пропускаются.
+
+Ключевые файлы:
+- Скоринг: `test_scoring`, `test_multi_objective`, `test_bayesian`/`test_bayes_decay`,
+  `test_bandit`, `test_gnn`, `test_skill_gap`.
+- Рекомендер: `test_get_recommendations`, `test_recommendation_cache`,
+  `test_feed_cursor`, `test_dedup`, `test_series`, `test_retrieval`.
+- Ingestion: `test_ingestion`, `test_multi_source`.
+- Память: `test_memory`/`test_memory_integration`, `test_memory_hard_cap`,
+  `test_cold_start`.
+- AI: `test_supervisor`, `test_copilot_tools`, `test_copilot_graph_e2e`,
+  `test_specialists`, `test_llm_circuit_breaker`, `test_gemini_probe`.
+- Security/ops: `test_api_key_auth`, `test_config_validate`, `test_middleware`,
+  `test_prompt_safety`.
+- Данные: `test_enum_validation`, `test_ingestion_idempotent`,
+  `test_date_localization`.
+- Прочее: `test_scheduler`, `test_interactions`, `test_pgvector`,
+  `test_db_session`.
 
 ## Документация
 
-- `docs/Обзор_проекта_EventMind.docx` — авторитетный summary архитектуры
-  и состояния. Глава 7 — подробно про рекомендер (9 компонент).
-- `docs/План_показа_EventMind.docx` — план защиты на 15–20 минут с
-  глоссарием.
-- `docs/отчет_Курсовая.docx` — HSE-стилизованный отчёт (введение → 5 глав
-  → заключение → глоссарий → библиография).
-- Все три перегенерируются скриптом `python -m scripts.regenerate_docs` —
-  идемпотентно, под текущую реализацию.
+- `docs/Обзор_проекта_EventMind.docx` — авторитетный summary архитектуры.
+- `docs/План_показа_EventMind.docx` — план защиты на 15–20 минут.
+- `docs/отчет_Курсовая.docx` — HSE-стилизованный отчёт.
+- Все три перегенерируются `python -m scripts.regenerate_docs`.
 
-## Ingestion (загрузка событий)
+## Ingestion
 
 6 источников (`app/ingestion/sources/`): habr, rss, kudago, luma, meetup,
 telegram. Эндпоинты в `app/api/routers/ingestion.py`:
 
 - `POST /ingestion/load-<source>` — один источник.
-- `POST /ingestion/load-all?limit=N` — **все источники по очереди**, каждый
-  изолирован try/except + rollback, агрегированные totals.
+- `POST /ingestion/load-all?limit=N` — все источники по очереди,
+  изоляция try/except + rollback, агрегированные totals.
 - `POST /ingestion/normalize` — дообработать `raw`-события.
-- `POST /ingestion/retry-failed` — переобработать `failed` (после сброса
-  лимита Groq).
+- `POST /ingestion/retry-failed` — переобработать `failed`.
 - `GET /ingestion/status` — счётчики по статусам raw_events.
 
-Пайплайн: source → `raw_events` → AI-нормализация (Pydantic) → `events`.
-Нормализация **батчевая** (`event_normalizer_agent_batch`, пачки по 5 — кратно
-меньше токенов); на rate-limit (429/TPD) обработка останавливается рано и
-оставляет остаток в `raw` (не `failed`) — доберётся следующим `/normalize`.
-`embedding_vec` (pgvector) пишется сразу через `_write_embedding`.
+Пайплайн: source → `raw_events` → AI-нормализация (Pydantic-валидация +
+строгая валидация ISO-даты + defence-in-depth в `_persist_normalized`) →
+`events`. Нормализация **батчевая**: `_adaptive_batch_size` подбирает
+размер чанка из средней длины описаний (target ~6000 символов, в [2..10]).
+На rate-limit обработка останавливается рано, остаток в `raw`.
+`embedding_vec` (pgvector) пишется сразу. `series_slug` (см.
+`recommender/series.py`) — снимает `#15`, `vol.2`, годы, даты, римские
+в контексте; используется для anti-flood в выдаче.
 
 ## Бэклог доработок
 
@@ -178,31 +233,28 @@ telegram. Эндпоинты в `app/api/routers/ingestion.py`:
 открытые `[ ]`, с привязкой к файлам, по приоритету). **Держать в актуальном
 состоянии при каждом изменении** (как и этот файл).
 
-## Текущее состояние (29 мая 2026)
+## Текущее состояние (1 июня 2026)
 
 Активная ветка: `dev`.
 
-**Инфраструктура:** dev-БД переехала на **Supabase Postgres** (session pooler,
-IPv4) — pgvector 0.8.0 активен, retrieval идёт по `<=>`. `DATABASE_URL` в
-`.env`. `pool_pre_ping=True` в `app/db/session.py`. SQLite-PRAGMA тесты
-`skipif` при не-SQLite. Подробности — память `dev-db-supabase`.
+**Инфраструктура:** dev-БД на **Supabase Postgres** (session pooler, IPv4),
+pgvector 0.8.0. `DATABASE_URL` в `.env`. `pool_pre_ping=True` +
+`pool_recycle=1500` (Supabase pooler режет idle ~5 мин).
 
-**Свежие правки:**
+**Свежие фичи** (этой серией коммитов):
 
-1. `/recommendations`: кандидатный отбор через pgvector (top-300 на PG,
-   fallback на весь каталог на SQLite) + `joinedload(event_topics)` против
-   N+1; тяжёлый `explain_event_detailed` — только для top-N (+ `limit`).
-2. Ingestion: `/load-all`, `/retry-failed`, батчинг нормализации + early-stop
-   на rate-limit, запись `embedding_vec` при ingestion.
-3. Данные: `events.start_at` (DateTime) — нормализатор отдаёт ISO-дату,
-   freshness считается по `start_at` (строковая `date` остаётся для UI);
-   `raw_events.retry_count` + `MAX_NORMALIZE_RETRIES=3` — retry-failed не гоняет
-   безнадёжные. Миграция `b2c3d4e5f6a7` (аддитивная).
-4. Ops: scheduler на `logging` (не `print`); `ruff` = 0 по репо
-   (+ per-file-ignores E402); CI (`.github/workflows/ci.yml`: ruff + pytest).
-   LLM-обёртка ленивая — импорт не требует `GROQ_API_KEY` (была причина падения CI).
-5. Кроссплатформенные команды (macOS/Linux + Windows) в этом файле +
-   `.env.example`; `ruff` и `python-docx` в `requirements.txt`.
-6. (ранее) rollback в `refresh_user_embedding`; `logger.exception` в
-   `/copilot` и `/agent-recommendations`; параметризуемый дайджест;
-   чистка англицизмов в «Почему»; UX-правки `/start` и `tour:skip`.
+1. **LLM-цепочка**: Gemini (REST-транспорт, автопроба модели) → Groq 70b →
+   Groq 8b. Circuit-breaker + per-provider cooldown. `POST /admin/llm/reprobe`.
+2. **Read-only `/recommendations`** + TTL-кэш + курсор ленты в БД.
+3. **pgvector-dedup** + adaptive batch + series anti-flood +
+   усиленный фильтр не-IT в системном промпте.
+4. **Security/ops**: `X-API-Key` shared-secret + request-middleware с
+   timing'ами + 4xx WARNING без traceback + fail-fast config validation.
+5. **LLM-устойчивость**: prompt-injection sanitize + memory hard-cap (500) +
+   copilot LLM-compaction истории + scheduler-backfill для embedding'ов.
+6. **DB**: `users.telegram_id` → BIGINT; миграции `c3d4`, `d4e5`, `e5f6`,
+   `f6a7` (feed_cursor, recommendation_cache, series_slug, telegram_id BIGINT).
+7. **CI**: добавлен `test-postgres` job (pgvector/pgvector:pg16) рядом с
+   SQLite-job.
+8. **Cleanup**: вынесли `utcnow_naive` в `app/core/utils.py` (раньше был
+   продублирован в 7 файлах); удалили dead `_user_profile_snapshot`.
