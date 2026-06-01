@@ -16,10 +16,11 @@ from __future__ import annotations
 import json
 import logging
 import math
-from datetime import UTC, datetime
+from datetime import datetime
 from typing import Any
 
 from app.core.config import settings
+from app.core.utils import utcnow_naive
 from app.recommender.bandit import context_vector, load_user_bandit, ucb_score
 from app.recommender.bayesian import load_user_stats, thompson_score
 from app.recommender.embeddings import (
@@ -58,7 +59,7 @@ def freshness_score(event_date: datetime | None, half_life_days: float | None = 
     if event_date is None:
         return 0.5
     half_life = half_life_days or settings.freshness_half_life_days
-    now = datetime.now(UTC).replace(tzinfo=None)
+    now = utcnow_naive()
     days = abs((event_date - now).total_seconds()) / 86400.0
     return float(math.exp(-math.log(2.0) * days / max(half_life, 1.0)))
 

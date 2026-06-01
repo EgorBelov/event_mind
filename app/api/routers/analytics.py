@@ -1,9 +1,10 @@
 from collections import Counter
-from datetime import UTC, datetime, timedelta
+from datetime import timedelta
 
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 
+from app.core.utils import utcnow_naive
 from app.db.dependencies import get_db
 from app.db.models.event import Event
 from app.db.models.interaction import Interaction
@@ -87,7 +88,7 @@ def analytics_trending(
 
     Формула score: likes×3 + saves×2 + dislikes×0 (с учётом свежести).
     """
-    cutoff = datetime.now(UTC).replace(tzinfo=None) - timedelta(days=days)
+    cutoff = utcnow_naive() - timedelta(days=days)
 
     # Только свежие интеракции (created_at >= cutoff)
     interactions = (

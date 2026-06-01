@@ -24,11 +24,16 @@ aiogram==3.13.1
 pydantic==2.8.2
 pydantic-settings==2.3.4
 
-# --- LangChain / LangGraph / Groq ---
+# --- LangChain / LangGraph / LLM-провайдеры ---
+# Multi-provider цепочка живёт в app/agents/recommendation/llm.py: primary
+# (Gemini, если есть GOOGLE_API_KEY) -> fallback (Groq 70b) -> fallback (Groq 8b).
+# Groq бесплатен, но его дневной лимит 100k токенов на 70b быстро кончается;
+# Gemini 2.0 Flash даёт 1M токенов/день в free-tier — поэтому он сейчас primary.
 langchain==0.2.14
 langchain-core==0.2.36
 langgraph==0.2.16
 langchain-groq==0.1.6
+langchain-google-genai==1.0.10
 
 # --- Embeddings / Hybrid scoring ---
 sentence-transformers==2.7.0

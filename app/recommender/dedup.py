@@ -15,11 +15,12 @@ from __future__ import annotations
 import contextlib
 import json
 import logging
-from datetime import UTC, datetime, timedelta
+from datetime import timedelta
 
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
+from app.core.utils import utcnow_naive
 from app.db.backend import has_pgvector, is_postgres
 from app.db.models.event import Event
 
@@ -60,7 +61,7 @@ def find_semantic_duplicate(
         if ok:
             return hit
 
-    cutoff = datetime.now(UTC).replace(tzinfo=None) - timedelta(days=lookback_days)
+    cutoff = utcnow_naive() - timedelta(days=lookback_days)
     query = (
         db.query(Event)
         .filter(Event.embedding.isnot(None))
@@ -111,7 +112,7 @@ def _pgvector_nearest_duplicate(
     try:
         from sqlalchemy import text
         vec_str = "[" + ",".join(repr(float(x)) for x in cand_vec) + "]"
-        cutoff = datetime.now(UTC).replace(tzinfo=None) - timedelta(days=lookback_days)
+        cutoff = utcnow_naive() - timedelta(days=lookback_days)
         # max distance, при котором cosine-sim ≥ threshold
         max_dist = float(1.0 - threshold)
         sql = text(

@@ -75,6 +75,10 @@ def _safe_refresh_user_embedding(db: Session, user: User) -> None:
     Импорт лежит в теле, чтобы не было циклического импорта на старте
     (recommendation_service → user_service не существует, но избегаем
     зависимости от порядка инициализации модулей).
+
+    Best-effort: сам refresh уже логирует свои сбои; здесь ловим только
+    редкий import/setup-сбой, чтобы не сорвать основной пишущий путь
+    (register/edit/analyze-bio).
     """
     try:
         from app.api.services.recommendation_service import (
@@ -83,8 +87,11 @@ def _safe_refresh_user_embedding(db: Session, user: User) -> None:
         )
         refresh_user_embedding(db, user)
         invalidate_recommendation_cache(db, user.telegram_id)
-    except Exception:
-        pass
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).warning(
+            "_safe_refresh_user_embedding skipped (user_id=%s): %s", user.id, e,
+        )
 
 
 def get_user_by_telegram_id(db: Session, telegram_id: int) -> User | None:

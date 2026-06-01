@@ -22,12 +22,27 @@ class Settings(BaseSettings):
     # (dev/тесты). На проде обязан быть задан в .env (читается middleware).
     api_shared_secret: str = ""
 
-    # Groq / LLM
+    # LLM-провайдеры. Цепочка: Gemini (если ключ задан) → Groq 70b → Groq 8b.
+    # Первый в цепочке держит основную нагрузку, остальные подхватывают на
+    # rate-limit/сбое. Подробнее — app/agents/recommendation/llm.py.
+
+    # Google Gemini (рекомендуемый primary). Ключ — https://aistudio.google.com/app/apikey.
+    # google_model пуст по умолчанию: на free-tier Google режет лимиты конкретной
+    # модели без предупреждения (видели 20 RPD на 2.5-flash). llm.py делает
+    # автопробу по списку кандидатов и берёт первую отвечающую 200 — выбранная
+    # модель кэшируется до перезапуска. Чтобы зафиксировать модель руками
+    # (платный tier, специфическая capability) — задай GOOGLE_MODEL в .env.
+    google_api_key: str = ""
+    google_model: str = ""
+
+    # Groq: бесплатный, очень быстрый, но дневной лимит 100k токенов на 70b —
+    # держим как fallback, чтобы не зависеть от одного провайдера.
     groq_api_key: str = ""
     groq_model: str = "llama-3.3-70b-versatile"
-    # Резервная модель: если основная упала/недоступна, llm.invoke автоматически
-    # переключается на неё. Меньше параметров → дешевле/доступнее.
+    # Резервная модель Groq: если 70b упала, переключаемся на 8b — меньше
+    # параметров → дешевле/доступнее.
     groq_fallback_model: str = "llama-3.1-8b-instant"
+    # Общая температура (применяется ко всем провайдерам в цепочке).
     groq_temperature: float = 0.4
     groq_max_retries: int = 2
 

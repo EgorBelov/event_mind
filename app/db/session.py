@@ -37,6 +37,12 @@ engine = create_engine(
     # соединения — без pre-ping первый запрос после паузы ловит "connection
     # closed". Проверка дешёвая (SELECT 1) и безвредна для SQLite.
     pool_pre_ping=True,
+    # pool_recycle: Supabase pooler закрывает SSL-сокет, если транзакция
+    # «висит» дольше idle_in_transaction_session_timeout (по умолчанию у
+    # них 5 мин). При долгих LLM-вызовах внутри ingestion соединение
+    # становилось «зомби» и db.commit() ловил SSL SYSCALL EOF →
+    # PendingRollbackError. 1500s (25 мин) — компромисс ниже их таймаута.
+    pool_recycle=1500,
     connect_args={"check_same_thread": False} if "sqlite" in settings.database_url else {},
 )
 

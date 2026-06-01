@@ -1,12 +1,13 @@
 import contextlib
 import json
 import logging
-from datetime import UTC, datetime, timedelta
+from datetime import timedelta
 
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
+from app.core.utils import utcnow_naive
 from app.db.models.event import Event
 from app.db.models.interaction import Interaction
 from app.db.models.recommendation_cache import RecommendationCache
@@ -54,10 +55,6 @@ def refresh_user_embedding(db: Session, user: User) -> None:
             db.rollback()
 
 
-def _utcnow_naive() -> datetime:
-    return datetime.now(UTC).replace(tzinfo=None)
-
-
 def _read_recommendation_cache(db: Session, telegram_id: int, limit: int) -> list[dict] | None:
     """Вернуть свежий кэш, если он есть и не истёк, иначе None."""
     if not getattr(settings, "recommendation_cache_enabled", True):
@@ -69,7 +66,7 @@ def _read_recommendation_cache(db: Session, telegram_id: int, limit: int) -> lis
     )
     if row is None:
         return None
-    if row.expires_at <= _utcnow_naive():
+    if row.expires_at <= utcnow_naive():
         return None
     if int(row.limit_used or 0) < limit:
         # запросили больше, чем в кэше — не возвращаем, чтобы не подрезать
@@ -88,7 +85,7 @@ def _write_recommendation_cache(
     if not getattr(settings, "recommendation_cache_enabled", True):
         return
     ttl = max(1, int(getattr(settings, "recommendation_cache_ttl_minutes", 15)))
-    expires = _utcnow_naive() + timedelta(minutes=ttl)
+    expires = utcnow_naive() + timedelta(minutes=ttl)
     try:
         row = (
             db.query(RecommendationCache)
@@ -107,7 +104,7 @@ def _write_recommendation_cache(
         else:
             row.items_json = payload
             row.limit_used = int(limit)
-            row.computed_at = _utcnow_naive()
+            row.computed_at = utcnow_naive()
             row.expires_at = expires
         db.commit()
     except Exception as e:
@@ -263,6 +260,7 @@ def get_recommendations_for_user(
             "city": event.city,
             "level": event.level,
             "date": event.date,
+            "start_at": event.start_at.isoformat() if event.start_at else None,
             "topics": list(_get_event_topic_codes(event)),
             "summary": getattr(event, "summary", None),
             "source_url": event.source_url,
@@ -292,7 +290,7 @@ def get_recommendations_for_user(
     # ближайший к «сейчас» выпуск среди скоринг-эквивалентных. Раньше можно
     # было потерять свежий выпуск, если устаревший шёл выше по MMR.
     if scored:
-        now = _utcnow_naive()
+        now = utcnow_naive()
 
         def _date_key(item: dict) -> float:
             ev = item.get("_event")

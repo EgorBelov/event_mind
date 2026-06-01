@@ -19,12 +19,13 @@ from __future__ import annotations
 
 import json
 import logging
-from datetime import UTC, datetime
+from datetime import datetime
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field, ValidationError
 from sqlalchemy.orm import Session
 
+from app.core.utils import utcnow_naive
 from app.db.models.event import Event
 from app.db.models.user import User
 from app.db.models.user_memory import UserMemory
@@ -46,7 +47,8 @@ USER_MEMORY_HARD_CAP = 500
 
 
 def _utcnow() -> datetime:
-    return datetime.now(UTC).replace(tzinfo=None)
+    # Тонкий alias, чтобы не менять все call-сайты внутри файла.
+    return utcnow_naive()
 
 
 # ─── Pydantic-схемы для LLM-извлечения ───────────────────────────────────

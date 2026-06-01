@@ -10,11 +10,12 @@
 """
 import random
 from collections.abc import Iterable
-from datetime import UTC, datetime
+from datetime import datetime
 
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
+from app.core.utils import utcnow_naive
 from app.db.models.topic import Topic
 from app.db.models.user_topic_stat import UserTopicStat
 
@@ -38,7 +39,7 @@ def _apply_decay(alpha: float, beta: float, updated_at: datetime | None) -> tupl
     if gamma >= 1.0:
         return alpha, beta
     try:
-        now = datetime.now(UTC).replace(tzinfo=None)
+        now = utcnow_naive()
         days = max(0.0, (now - updated_at).total_seconds() / 86400.0)
     except Exception:
         return alpha, beta

@@ -109,16 +109,6 @@ def _parse_reasons(raw: str) -> dict[int, str]:
         return {}
 
 
-def _user_profile_snapshot(card: dict) -> dict:
-    """Лёгкий снапшот профиля; полная структура нам не нужна для пояснений."""
-    # Берём всё, что и так есть в первой карточке через explanation_details:
-    # темы пользователя выводятся в /recommendations отдельно, поэтому
-    # сами заходим в БД через get_recommendations_for_user → у первой
-    # карточки лежит history_signals. Здесь же достаточно показать LLM,
-    # какие сигналы у пользователя сильнее всего.
-    return {}
-
-
 def build_ai_cards(db: Session, telegram_id: int, limit: int = 5) -> dict:
     """Главная точка входа: отбор + AI-пояснения.
 

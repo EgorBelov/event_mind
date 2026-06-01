@@ -58,6 +58,20 @@ async def lifespan(_app: FastAPI):
         logger.info("Embeddings model ready")
     except Exception as e:
         logger.warning("Embedding model warmup failed (will lazy-load on first request): %s", e)
+
+    # Параллельно — probe Gemini-модели: иначе первый запрос платил бы
+    # за HTTP-пробы цепочки моделей (~1-3 c). Делается через REST, в кэше
+    # держится имя выбранной модели до перезапуска процесса.
+    try:
+        from app.agents.recommendation.llm import _resolve_gemini_model
+        picked = _resolve_gemini_model()
+        if picked:
+            logger.info("Gemini ready: model='%s'", picked)
+        else:
+            logger.info("Gemini не доступна — цепочка LLM пойдёт сразу в Groq")
+    except Exception as e:
+        logger.warning("Gemini probe failed: %s", e)
+
     yield
 
 
@@ -109,19 +123,21 @@ def _check_embeddings() -> dict:
 
 
 def _check_llm() -> dict:
-    """LLM (Groq) — проверяем наличие ключа и саму обёртку с fallback'ом.
-
-    Полноценный ping (invoke) дорогой и потенциально платный, поэтому
-    верифицируем только конфигурацию: ключ задан, обёртка строится.
+    """LLM-цепочка: проверяем что хоть один провайдер настроен,
+    показываем выбранную Gemini-модель (если автопроба нашла) и Groq
+    fallback'и. Полноценный invoke здесь не делаем — дорого и потенциально
+    тратит TPD-лимит.
     """
-    if not settings.groq_api_key:
-        return {"ok": False, "error": "GROQ_API_KEY is empty"}
+    if not settings.groq_api_key and not settings.google_api_key:
+        return {"ok": False, "error": "ни GROQ_API_KEY, ни GOOGLE_API_KEY не заданы"}
     try:
-        from app.agents.recommendation.llm import llm
+        from app.agents.recommendation.llm import _resolve_gemini_model, llm
+        gemini_model = _resolve_gemini_model() if settings.google_api_key else None
         return {
             "ok": True,
-            "primary_model": settings.groq_model,
-            "fallback_model": settings.groq_fallback_model,
+            "gemini_model": gemini_model,
+            "groq_primary": settings.groq_model if settings.groq_api_key else None,
+            "groq_fallback": settings.groq_fallback_model if settings.groq_api_key else None,
             "wrapper": type(llm).__name__,
         }
     except Exception as e:
@@ -150,3 +166,20 @@ def healthcheck(db: Session = Depends(get_db)):
 @app.get("/", tags=["system"])
 def root():
     return {"message": "EventMind API", "docs": "/docs", "health": "/health"}
+
+
+@app.post("/admin/llm/reprobe", tags=["system"])
+def reprobe_gemini():
+    """Сбросить кэш автопробы Gemini и выбрать модель заново.
+
+    Полезно после смены GOOGLE_API_KEY или когда квоты на текущую
+    выбранную модель закончились и хочется переключиться на следующую
+    без рестарта uvicorn.
+    """
+    from app.agents.recommendation.llm import (
+        _resolve_gemini_model,
+        reset_gemini_probe_cache,
+    )
+    reset_gemini_probe_cache()
+    picked = _resolve_gemini_model()
+    return {"selected": picked}
