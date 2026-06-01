@@ -18,6 +18,9 @@ class Settings(BaseSettings):
 
     # API
     api_host: str = "http://localhost:8000"
+    # Shared-secret между ботом и API. Если пустой — авторизация выключена
+    # (dev/тесты). На проде обязан быть задан в .env (читается middleware).
+    api_shared_secret: str = ""
 
     # Groq / LLM
     groq_api_key: str = ""
@@ -80,6 +83,13 @@ class Settings(BaseSettings):
     # ── Semantic deduplication ──────────────────────────────────────────
     dedup_enabled: bool = True
     dedup_threshold: float = 0.92          # cosine ≥ threshold → дубль
+
+    # ── Recommendation cache (TTL в БД) ─────────────────────────────────
+    # Кэш per-user снимает повторный пересчёт hybrid-скоринга на холодном
+    # GET /recommendations (особенно ощутимо под Supabase). Инвалидируется
+    # на feedback / edit профиля / analyze-bio.
+    recommendation_cache_enabled: bool = True
+    recommendation_cache_ttl_minutes: int = 15
 
     # ── LinUCB contextual bandit ────────────────────────────────────────
     bandit_enabled: bool = True

@@ -6,6 +6,7 @@ from fastapi import Depends, FastAPI
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
+from app.api.middleware import install_middleware_and_handlers
 from app.api.routers import (
     admin,
     agent_recommendations,
@@ -19,11 +20,18 @@ from app.api.routers import (
     vocabulary,
 )
 from app.core.config import settings
+from app.core.config_validate import validate_config
 from app.core.logging import setup_logging
 from app.db.dependencies import get_db
 
 setup_logging(debug=settings.debug)
 logger = logging.getLogger(__name__)
+
+# Не valid_or_exit: импорт `app.api.main` происходит во многих местах (тесты,
+# alembic), и жёсткий sys.exit там лишний. Strict=False пишет WARNING — uvicorn
+# на проде поднимется только если ENV заполнен. Прод-валидация — на старте
+# процесса (validate_or_exit) в run-скриптах/docker-entrypoint.
+validate_config("api", strict=False)
 
 # Глобальный флаг прогрева — выставляется в lifespan и читается /health.
 _EMBEDDING_READY = False
@@ -59,6 +67,11 @@ app = FastAPI(
     version="1.0.0",
     lifespan=lifespan,
 )
+
+# Request-логи с timing'ами + единый формат для HTTPException 4xx/5xx
+# (raw FastAPI access-log не различает 404 как нормальную бизнес-ветку
+# и пишет traceback для каждого).
+install_middleware_and_handlers(app)
 
 app.include_router(users.router)
 app.include_router(events.router)

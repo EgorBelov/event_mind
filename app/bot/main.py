@@ -9,12 +9,13 @@ from app.bot.handlers.search import router as search_router
 from app.bot.handlers.start import router as start_router
 from app.bot.handlers.subscriptions import router as subscriptions_router
 from app.core.config import BOT_TOKEN
+from app.core.config_validate import validate_or_exit
 
 
 async def main():
-    if not BOT_TOKEN:
-        raise ValueError("BOT_TOKEN не найден в .env")
-
+    # Жёсткая проверка ENV перед запуском polling. Раньше пустой BOT_TOKEN
+    # просто давал ValueError, без подсказки что ещё нужно (API_HOST и т.п.).
+    validate_or_exit("bot")
     bot = Bot(token=BOT_TOKEN)
     dp = Dispatcher()
 

@@ -26,3 +26,12 @@ exclude = ["alembic/"]
 testpaths = ["tests"]
 python_files = ["test_*.py"]
 python_functions = ["test_*"]
+# Гасим шум от стороннего кода, который мы не контролируем:
+#   - Pydantic v1-style `.dict()` зовётся внутри langchain/langchain-groq —
+#     в нашем коде вызовов нет (grep чистый), фиксить нечего до апгрейда зависимости.
+#   - httpx.AsyncClient(app=...) — наш TestClient в FastAPI 0.110 использует
+#     старый API, до апгрейда FastAPI/httpx менять нечего.
+filterwarnings = [
+    "ignore::pydantic.PydanticDeprecatedSince20",
+    "ignore:The 'app' shortcut is now deprecated:DeprecationWarning",
+]
