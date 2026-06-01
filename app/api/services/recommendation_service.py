@@ -1,6 +1,7 @@
 import contextlib
 import json
 import logging
+from datetime import UTC, datetime, timedelta
 
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
@@ -8,6 +9,7 @@ from sqlalchemy.orm import Session
 from app.core.config import settings
 from app.db.models.event import Event
 from app.db.models.interaction import Interaction
+from app.db.models.recommendation_cache import RecommendationCache
 from app.db.models.user import User
 from app.recommender.bayesian import update_stats_from_feedback
 from app.recommender.explain import explain_event_detailed
@@ -31,11 +33,14 @@ except Exception:
 def refresh_user_embedding(db: Session, user: User) -> None:
     """Посчитать и закэшировать персональный embedding пользователя (best-effort).
 
-    КРИТИЧНО: при сбое flush'а (SQLite locked, concurrent writer) обязательно
+    Вызывается ТОЛЬКО на пишущих путях: register/edit профиля, analyze-bio,
+    создание/откат interaction. На GET /recommendations НЕ дёргается —
+    раньше это превращало читающий запрос в писатель и под Supabase давало
+    лишний раунд-трип к Postgres на каждое открытие ленты.
+
+    При сбое flush'а (SQLite locked, concurrent writer) обязательно
     rollback'аем сессию. Иначе она остаётся в "rollback required" state и
-    любое следующее обращение к user.id/user.* пробрасывает PendingRollbackError —
-    в результате весь GET /recommendations отваливался 500-кой, а бот показывал
-    «Пока нет рекомендаций» при настроенном профиле.
+    любое следующее обращение к user.* пробрасывает PendingRollbackError.
     """
     try:
         from app.recommender.embeddings import build_rich_user_embedding
@@ -49,6 +54,81 @@ def refresh_user_embedding(db: Session, user: User) -> None:
             db.rollback()
 
 
+def _utcnow_naive() -> datetime:
+    return datetime.now(UTC).replace(tzinfo=None)
+
+
+def _read_recommendation_cache(db: Session, telegram_id: int, limit: int) -> list[dict] | None:
+    """Вернуть свежий кэш, если он есть и не истёк, иначе None."""
+    if not getattr(settings, "recommendation_cache_enabled", True):
+        return None
+    row = (
+        db.query(RecommendationCache)
+        .filter(RecommendationCache.telegram_id == telegram_id)
+        .first()
+    )
+    if row is None:
+        return None
+    if row.expires_at <= _utcnow_naive():
+        return None
+    if int(row.limit_used or 0) < limit:
+        # запросили больше, чем в кэше — не возвращаем, чтобы не подрезать
+        return None
+    try:
+        items = json.loads(row.items_json or "[]")
+    except Exception:
+        return None
+    return items[:limit] if isinstance(items, list) else None
+
+
+def _write_recommendation_cache(
+    db: Session, telegram_id: int, limit: int, items: list[dict]
+) -> None:
+    """UPSERT кэша. Best-effort: сбой не должен валить ответ."""
+    if not getattr(settings, "recommendation_cache_enabled", True):
+        return
+    ttl = max(1, int(getattr(settings, "recommendation_cache_ttl_minutes", 15)))
+    expires = _utcnow_naive() + timedelta(minutes=ttl)
+    try:
+        row = (
+            db.query(RecommendationCache)
+            .filter(RecommendationCache.telegram_id == telegram_id)
+            .first()
+        )
+        payload = json.dumps(items, ensure_ascii=False)
+        if row is None:
+            row = RecommendationCache(
+                telegram_id=telegram_id,
+                items_json=payload,
+                limit_used=int(limit),
+                expires_at=expires,
+            )
+            db.add(row)
+        else:
+            row.items_json = payload
+            row.limit_used = int(limit)
+            row.computed_at = _utcnow_naive()
+            row.expires_at = expires
+        db.commit()
+    except Exception as e:
+        logger.warning("recommendation_cache write failed: %s", e)
+        with contextlib.suppress(Exception):
+            db.rollback()
+
+
+def invalidate_recommendation_cache(db: Session, telegram_id: int) -> None:
+    """Сбросить кэш — вызывается при любом изменении профиля/истории."""
+    try:
+        db.query(RecommendationCache).filter(
+            RecommendationCache.telegram_id == telegram_id
+        ).delete(synchronize_session=False)
+        db.commit()
+    except Exception as e:
+        logger.warning("recommendation_cache invalidate failed: %s", e)
+        with contextlib.suppress(Exception):
+            db.rollback()
+
+
 def get_recommendations_for_user(
     db: Session, telegram_id: int, limit: int = 25
 ) -> list[dict]:
@@ -56,8 +136,23 @@ def get_recommendations_for_user(
     if not user:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
 
-    # Один раз на запрос: закэшировать вектор пользователя (user.embedding).
-    refresh_user_embedding(db, user)
+    # Hot-path: сначала кэш. Если есть свежая запись с не меньше limit
+    # элементов — возвращаем и пропускаем весь скоринг.
+    cached = _read_recommendation_cache(db, telegram_id, limit)
+    if cached is not None:
+        logger.info(
+            "/recommendations: served from cache (telegram_id=%s, limit=%d)",
+            telegram_id, limit,
+        )
+        return cached
+
+    # READ-ONLY HOT-PATH: ни refresh_user_embedding, ни ensure_event_embeddings
+    # здесь не вызываются — это превращало GET в писателя и под Supabase
+    # стоило отдельного раунд-трипа на каждое открытие ленты. Кэш user.embedding
+    # обновляется при register/edit/analyze-bio/interaction; event.embedding —
+    # при ingestion (см. _persist_normalized). Если кэш по какой-то причине
+    # пуст (старая запись до миграции), get_or_build_*_embedding ниже считают
+    # вектор in-memory без записи в БД.
 
     # Precompute user embedding с session-blend — ОДИН раз на запрос
     # (а не на каждое из N событий). Нужен и для cosine-компонента, и для
@@ -101,13 +196,15 @@ def get_recommendations_for_user(
         if candidate_ids else base_q.all()
     )
 
-    # Досчитать батчем недостающие векторы событий с записью в БД, чтобы
-    # cosine-компонент не пересчитывал их лениво по одному.
-    try:
-        from app.recommender.embeddings import ensure_event_embeddings
-        ensure_event_embeddings(db, events)
-    except Exception:
-        pass
+    # Диагностика: события без embedding попадают в cosine лениво (in-memory),
+    # это медленно. Backfill живёт в scheduler/ingestion, не здесь.
+    missing_emb = sum(1 for e in events if not getattr(e, "embedding", None))
+    if missing_emb:
+        logger.info(
+            "/recommendations: %d/%d events without cached embedding "
+            "(scheduler backfill will catch up)",
+            missing_emb, len(events),
+        )
 
     # Bayesian-параметры пользователя — грузим один раз на запрос.
     bayesian_stats = None
@@ -186,6 +283,56 @@ def get_recommendations_for_user(
             scored = mmr_rerank(scored, db, lambda_=settings.mmr_lambda)
         except Exception as e:
             logger.warning("MMR rerank failed: %s", e)
+
+    # Анти-флуд серий: оставляем максимум одну запись на series_slug — иначе
+    # три «Python MeetUp #14/15/16» выжмут из ленты другие темы. События без
+    # series_slug проходят все (распознать не получилось — считаем уникальными).
+    #
+    # При схлопывании серии выбираем НЕ первое попавшееся (как было), а
+    # ближайший к «сейчас» выпуск среди скоринг-эквивалентных. Раньше можно
+    # было потерять свежий выпуск, если устаревший шёл выше по MMR.
+    if scored:
+        now = _utcnow_naive()
+
+        def _date_key(item: dict) -> float:
+            ev = item.get("_event")
+            start_at = getattr(ev, "start_at", None) if ev else None
+            if start_at is None:
+                # Без даты — кладём «между прошлым и будущим», но хуже свежего.
+                return float("inf")
+            return abs((start_at - now).total_seconds())
+
+        # Группируем по series_slug и из каждой группы оставляем выпуск,
+        # ближайший по дате к «сейчас». Сохраняем порядок остального scored.
+        groups: dict[str, list[dict]] = {}
+        order: list[str | None] = []
+        items_no_series: list[dict] = []
+        for item in scored:
+            ev = item.get("_event")
+            series = getattr(ev, "series_slug", None) if ev else None
+            if not series:
+                items_no_series.append(item)
+                order.append(None)
+                continue
+            if series not in groups:
+                groups[series] = []
+                order.append(series)
+            groups[series].append(item)
+
+        picked_by_series: dict[str, dict] = {
+            s: min(grp, key=_date_key) for s, grp in groups.items()
+        }
+        deduped: list[dict] = []
+        no_series_iter = iter(items_no_series)
+        seen: set[str] = set()
+        for marker in order:
+            if marker is None:
+                deduped.append(next(no_series_iter))
+            elif marker not in seen:
+                seen.add(marker)
+                deduped.append(picked_by_series[marker])
+        scored = deduped
+
     if limit and limit > 0:
         scored = scored[:limit]
 
@@ -207,6 +354,9 @@ def get_recommendations_for_user(
             "history_signals": explanation["history_signals"],
         }
         results.append(item)
+
+    # Положим в кэш для следующего запроса. Best-effort: сбой записи не валит ответ.
+    _write_recommendation_cache(db, telegram_id, limit or 25, results)
 
     return results
 
@@ -252,6 +402,8 @@ def create_interaction(db: Session, telegram_id: int, event_id: int, action: str
             _safe_bayes_update(db, user.id, event_topics, action, direction=-1)
             _safe_bandit_update(db, user, event, action, direction=-1)
             db.commit()
+            refresh_user_embedding(db, user)
+            invalidate_recommendation_cache(db, telegram_id)
             return {"success": True, "message": f"Interaction '{action}' removed", "topic_weights": parse_topic_weights(user.topic_weights)}
 
         existing_opposite = (
@@ -279,6 +431,8 @@ def create_interaction(db: Session, telegram_id: int, event_id: int, action: str
             _safe_bayes_update(db, user.id, event_topics, "save", direction=-1)
             _safe_bandit_update(db, user, event, "save", direction=-1)
             db.commit()
+            refresh_user_embedding(db, user)
+            invalidate_recommendation_cache(db, telegram_id)
             return {"success": True, "message": "Interaction 'save' removed", "topic_weights": parse_topic_weights(user.topic_weights)}
 
     db.add(Interaction(user_id=user.id, event_id=event_id, action=action))
@@ -288,6 +442,12 @@ def create_interaction(db: Session, telegram_id: int, event_id: int, action: str
     _safe_bandit_update(db, user, event, action, direction=1)
     _safe_memory_extract(db, user, event, action, direction=1)
     db.commit()
+
+    # История изменилась → пересчитать user.embedding ЗДЕСЬ, чтобы /recommendations
+    # оставался read-only и получал свежий кэш «бесплатно».
+    refresh_user_embedding(db, user)
+    # Кэш ленты перестал отражать реальность — сбросим.
+    invalidate_recommendation_cache(db, telegram_id)
 
     return {"success": True, "message": f"Interaction '{action}' saved", "topic_weights": updated_weights}
 
@@ -648,6 +808,36 @@ def get_why_explanation_for_user(db: Session, telegram_id: int, event_id: int) -
     full = f"{llm_full}\n\n— — —\n\n{template}" if llm_full else template
 
     return {"short": short, "full": full}
+
+
+def get_feed_cursor(db: Session, telegram_id: int) -> int:
+    """Текущая позиция в ленте /recommend.
+
+    Курсор хранится в users.feed_cursor — раньше был module-dict в боте,
+    что ломалось при рестарте и под несколькими воркерами.
+    """
+    user = db.query(User).filter(User.telegram_id == telegram_id).first()
+    if not user:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+    return int(user.feed_cursor or 0)
+
+
+def set_feed_cursor(db: Session, telegram_id: int, index: int) -> int:
+    user = db.query(User).filter(User.telegram_id == telegram_id).first()
+    if not user:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+    user.feed_cursor = max(0, int(index))
+    db.commit()
+    return int(user.feed_cursor)
+
+
+def advance_feed_cursor(db: Session, telegram_id: int) -> int:
+    user = db.query(User).filter(User.telegram_id == telegram_id).first()
+    if not user:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+    user.feed_cursor = int(user.feed_cursor or 0) + 1
+    db.commit()
+    return int(user.feed_cursor)
 
 
 def get_event_interactions_for_user(db: Session, telegram_id: int, event_id: int) -> list[str]:

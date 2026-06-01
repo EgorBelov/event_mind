@@ -9,7 +9,10 @@ from app.bot.utils import esc, send
 router = Router()
 api_client = EventMindAPIClient()
 
-user_recommendation_index: dict[int, int] = {}
+# Курсор по ленте теперь живёт в users.feed_cursor (см. миграцию c3d4e5f6a7b8).
+# Раньше был module-dict — терялся при рестарте процесса и ломался при
+# нескольких воркерах. Через API он переживает и рестарт, и сценарий
+# «открыл в одном клиенте, продолжил в другом».
 
 
 _COMPONENT_LABELS = {
@@ -67,10 +70,10 @@ async def send_recommendation(target: Message | CallbackQuery, telegram_id: int)
         )
         return
 
-    current_index = user_recommendation_index.get(telegram_id, 0)
+    current_index = await api_client.get_feed_cursor(telegram_id)
 
     if current_index >= len(recommendations):
-        user_recommendation_index[telegram_id] = 0
+        await api_client.reset_feed_cursor(telegram_id)
         await send(
             target,
             "Это все рекомендации по текущему профилю.\n\n"
@@ -106,14 +109,14 @@ def _parse_event_cb(data: str) -> int:
 
 @router.message(Command("recommend"))
 async def cmd_recommend(message: Message):
-    user_recommendation_index[message.from_user.id] = 0
+    await api_client.reset_feed_cursor(message.from_user.id)
     await send_recommendation(message, message.from_user.id)
 
 
 @router.message(F.text == "🎯 Рекомендации")
 async def msg_recommend(message: Message):
     """Reply-кнопка главного меню — главный способ открыть ленту."""
-    user_recommendation_index[message.from_user.id] = 0
+    await api_client.reset_feed_cursor(message.from_user.id)
     await send_recommendation(message, message.from_user.id)
 
 
@@ -131,7 +134,7 @@ async def cmd_undo(message: Message):
 @router.callback_query(F.data == "show_recommendations")
 async def cb_show_recommendations(callback: CallbackQuery):
     await callback.answer()
-    user_recommendation_index[callback.from_user.id] = 0
+    await api_client.reset_feed_cursor(callback.from_user.id)
     await send_recommendation(callback, callback.from_user.id)
 
 
@@ -139,7 +142,7 @@ async def cb_show_recommendations(callback: CallbackQuery):
 async def cb_next(callback: CallbackQuery):
     user_id = callback.from_user.id
     await callback.answer("Показываю следующее событие")
-    user_recommendation_index[user_id] = user_recommendation_index.get(user_id, 0) + 1
+    await api_client.advance_feed_cursor(user_id)
     await send_recommendation(callback, user_id)
 
 

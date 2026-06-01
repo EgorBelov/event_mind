@@ -1,4 +1,7 @@
+import datetime as _dt
 import json
+import logging
+import re
 
 from langchain_core.prompts import ChatPromptTemplate
 
@@ -11,6 +14,47 @@ from app.core.topics import (
     SEED_TOPICS,
     slugify_code,
 )
+
+logger = logging.getLogger(__name__)
+
+# Принимаем строго YYYY-MM-DD (опционально с T<time>): берём только дату-префикс.
+_ISO_DATE_RE = re.compile(r"^(\d{4})-(\d{2})-(\d{2})(?:[T ]|$)")
+# Разумный диапазон: события прошлого года и до 3 лет вперёд. LLM иногда
+# галлюцинирует «1970» или «2099» — это явный мусор, не пускаем в БД.
+_DATE_YEAR_MIN = 2020
+_DATE_YEAR_MAX = 2035
+
+
+def _validate_iso_date(raw) -> str:
+    """Привести date от LLM к строгому YYYY-MM-DD или вернуть "".
+
+    LLM просят `YYYY-MM-DD`, но без валидации в БД попадало «лето 2026»,
+    «2026-13-45», `null` и т.п. — события молча получали start_at=None и
+    выпадали из freshness/сортировки. Здесь:
+    - вытаскиваем дату-префикс regex'ом (терпим `2026-05-29T18:00`);
+    - календарно валидируем через `date()` — отбрасываем 30 февраля;
+    - проверяем год в [2020..2035] — отсекаем явные галлюцинации.
+    Невалидные значения логируем (DEBUG) и возвращаем пустую строку, чтобы
+    раздел freshness честно показал «дата неизвестна», а не врал нулём.
+    """
+    if not isinstance(raw, str):
+        return ""
+    s = raw.strip()
+    if not s:
+        return ""
+    m = _ISO_DATE_RE.match(s)
+    if not m:
+        logger.debug("normalizer: rejecting non-ISO date %r", s)
+        return ""
+    try:
+        d = _dt.date(int(m.group(1)), int(m.group(2)), int(m.group(3)))
+    except ValueError:
+        logger.debug("normalizer: rejecting invalid calendar date %r", s)
+        return ""
+    if not (_DATE_YEAR_MIN <= d.year <= _DATE_YEAR_MAX):
+        logger.debug("normalizer: rejecting out-of-range date %r", s)
+        return ""
+    return d.isoformat()
 
 
 def _strip_fences(text: str) -> str:
@@ -77,10 +121,41 @@ seniority: junior | middle | senior | any
 - quality_score (1-10) — информативность для IT-специалиста.
 - hype_score (1-10) — актуальность темы в IT сейчас.
 
-ВАЖНО — фильтрация не-IT событий:
-- Если событие не относится к IT (маркетинг, HR, спорт, медицина и т.п.) → topics = [].
-- Примеры НЕ-IT: PR-премии, HR-конференции, маркетинг без IT-составляющей.
-- Примеры IT: DevOps-конференции, AI/ML митапы, хакатоны, аналитика данных.
+ВАЖНО — ФИЛЬТРАЦИЯ НЕ-IT СОБЫТИЙ (строгий режим):
+
+Правило отсечения: если событие НЕ про разработку ПО / данные / инфраструктуру /
+кибербезопасность / IT-продукт / IT-инжиниринг — `topics = []` (даже если в
+описании есть слова «инновации», «технологии», «диджитал», «AI» без сути).
+
+❌ НЕ IT (`topics = []`), даже если звучит «технологично»:
+- PR / маркетинг / SMM / контент-стратегия без разработки
+- HR / эйчар / рекрутинг (включая «нанимаем айтишников»)
+- продажи / сейлз / B2B-конференции без технического стека
+- лидерство, soft skills, коучинг, психология, продуктивность
+- мода, дизайн интерьеров, фитнес, спорт, медицина (если без IT-фокуса)
+- бухгалтерия / финансы / инвестиции / трейдинг без AI/ML-составляющей
+- криптовалюты как актив (без разработки), NFT-арт
+- юриспруденция, образование как процесс (если не EdTech-разработка)
+- бизнес-завтраки, нетворкинг-вечеринки, премии, конкурсы без технической программы
+
+✅ IT (минимум одна тема в `topics`):
+- разработка ПО (backend/frontend/mobile/embedded), архитектура
+- DevOps, SRE, облака, инфраструктура, observability
+- AI/ML/LLM/Data Science/Data Engineering/MLOps
+- кибербезопасность, AppSec, pentest
+- продукт-менеджмент / системный анализ / QA — только если про IT-продукт
+- хакатоны, CTF, codefest'ы, IT-конференции и митапы
+
+ПРАВИЛО ГРАНИЦЫ: «AI в маркетинге» / «no-code для бухгалтеров» — IT, если
+программа реально содержит технический контент (модели, инструменты,
+интеграции). Если только лозунги «использовать ИИ» без сути — НЕ-IT.
+
+Примеры решений:
+- «Конференция PR-2026: новые медиа» → `topics = []`
+- «HR-Tech Forum» (только про подбор и адаптацию) → `topics = []`
+- «MeetUp DevOps Moscow: Kubernetes, Argo CD, observability» → `topics=["devops"]`
+- «AI в e-commerce: рекомендации и поиск, доклады инженеров» → `topics=["ai_ml","backend"]`
+- «PyCon Russia» → `topics=["backend","ai_ml"]` (с учётом программы)
 """
 
 _USER_PROMPT = """
@@ -145,6 +220,10 @@ def _postprocess_normalized(normalized: dict) -> dict:
     # tech_stack гарантированно должен быть списком
     if not isinstance(normalized.get("tech_stack"), list):
         normalized["tech_stack"] = []
+
+    # Строгая валидация даты: мусорные значения от LLM в events.date не пускаем —
+    # либо валидная YYYY-MM-DD, либо пустая строка.
+    normalized["date"] = _validate_iso_date(normalized.get("date"))
 
     return normalized
 

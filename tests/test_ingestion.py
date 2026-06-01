@@ -388,3 +388,64 @@ def test_retry_count_increments_and_caps(db, monkeypatch):
     assert res["picked"] == 0
     db.refresh(r)
     assert r.retry_count == 3
+
+
+# ── валидация ISO-даты от LLM ─────────────────────────────────────────────
+
+
+@pytest.mark.parametrize(
+    "raw,expected",
+    [
+        ("2026-06-01", "2026-06-01"),
+        ("2026-06-01T19:00", "2026-06-01"),  # ISO с временем — допускается
+        ("2026-06-01 19:00", "2026-06-01"),  # пробельный разделитель — допускается
+        ("  2026-06-01  ", "2026-06-01"),
+        ("", ""),
+        (None, ""),
+        ("лето 2026", ""),          # текст
+        ("01.06.2026", ""),         # русский формат — не пускаем
+        ("2026-13-01", ""),         # 13-й месяц
+        ("2026-02-30", ""),         # 30 февраля
+        ("2099-01-01", ""),         # год вне разумного диапазона
+        ("1970-01-01", ""),         # epoch-галлюцинация
+        (42, ""),                   # не строка
+    ],
+)
+def test_validate_iso_date(raw, expected):
+    from app.agents.event_normalization.agent import _validate_iso_date
+    assert _validate_iso_date(raw) == expected
+
+
+def test_normalize_drops_garbage_date(db, monkeypatch):
+    """Мусорная дата от LLM не должна попадать в events.date / start_at."""
+    def fake_agent(state):
+        return {
+            "normalized_event": {
+                "title": "Garbage Date Event",
+                "description": "x",
+                "format": "online",
+                "city": "any",
+                "level": "beginner",
+                "date": "лето 2026",  # ← мусор
+                "topics": ["ai_ml"],
+            }
+        }
+
+    monkeypatch.setattr(
+        "app.agents.event_normalization.agent.event_normalizer_agent", fake_agent
+    )
+    monkeypatch.setattr(
+        "app.recommender.embeddings.build_event_embedding", lambda e: [0.1, 0.2, 0.3]
+    )
+    db.add(RawEvent(title="garbage raw", raw_description="x", status="raw"))
+    db.commit()
+    raw = db.query(RawEvent).first()
+
+    status = ingestion_service._normalize_single(db, raw)
+
+    assert status == "normalized"
+    event = db.query(Event).filter(Event.title == "Garbage Date Event").first()
+    assert event is not None
+    # Ключевое: ни date, ни start_at не унаследовали мусор
+    assert event.date == ""
+    assert event.start_at is None

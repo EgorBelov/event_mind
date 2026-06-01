@@ -320,8 +320,14 @@ def _persist_normalized(db: Session, raw: RawEvent, item: dict) -> str:
         tech_stack = item.get("tech_stack", [])
         # Дата начала: строку оставляем для UI, плюс парсим в DateTime
         # (start_at) для freshness/сортировки. Не распарсилась → None.
+        # Boundary-валидация на ВХОДЕ в БД: даже если кто-то отдаст dict
+        # в обход event_normalizer_agent (тесты, ручной import), мусор
+        # в events.date не попадёт. Дубль с _validate_iso_date в агенте
+        # сознателен — defence in depth.
+        from app.agents.event_normalization.agent import _validate_iso_date
         from app.recommender.hybrid import _parse_event_date
-        date_str = item.get("date", "")
+        date_str = _validate_iso_date(item.get("date", ""))
+        from app.recommender.series import compute_series_slug
         event = Event(
             title=item["title"],
             description=item["description"],
@@ -337,6 +343,7 @@ def _persist_normalized(db: Session, raw: RawEvent, item: dict) -> str:
             seniority=item.get("seniority"),
             quality_score=item.get("quality_score"),
             hype_score=item.get("hype_score"),
+            series_slug=compute_series_slug(item.get("title"), item.get("city")),
         )
         db.add(event)
         db.flush()
@@ -445,8 +452,35 @@ def _normalize_chunk(db: Session, chunk: list[RawEvent]) -> tuple[int, int, int,
     return normalized, non_it, failed, False
 
 
+def _adaptive_batch_size(
+    events: list[RawEvent],
+    *,
+    target_chars: int = 6000,
+    min_size: int = 2,
+    max_size: int = 10,
+) -> int:
+    """Подобрать batch_size по средней длине описаний.
+
+    Раньше был жёсткий 5: на коротких telegram-постах это недоиспользовало
+    бюджет токенов (можно было кидать по 10), на длинных habr-простынях —
+    наоборот, переваливало за лимит и провоцировало 429. Целимся в ~6000
+    символов на чанк (~1500 токенов для русского), но зажимаем в
+    [min_size..max_size], чтобы не уходить ни в 1 (медленно), ни в 50
+    (LLM начинает терять элементы).
+    """
+    if not events:
+        return max_size
+    avg = sum(
+        len(getattr(r, "raw_description", "") or "") + len(getattr(r, "title", "") or "")
+        for r in events
+    ) / len(events)
+    if avg <= 0:
+        return max_size
+    return max(min_size, min(max_size, int(target_chars / avg)))
+
+
 def _normalize_by_ids(
-    db: Session, raw_ids: list[int], batch_size: int = 5
+    db: Session, raw_ids: list[int], batch_size: int | None = None
 ) -> tuple[int, int, int]:
     """Прогнать строки raw_events через AI-нормализатор пачками.
 
@@ -454,6 +488,9 @@ def _normalize_by_ids(
     без него ingestion быстро выжигал дневной лимит Groq. При rate-limit
     обработка останавливается рано: недообработанные остаются в статусе 'raw'
     и доберутся следующим вызовом /normalize.
+
+    `batch_size=None` — выбрать адаптивно по длине описаний; явное число
+    оставляет старое поведение (используется в тестах).
 
     Возвращает (normalized, non_it, failed).
     """
@@ -463,16 +500,26 @@ def _normalize_by_ids(
     raw_events = db.query(RawEvent).filter(RawEvent.id.in_(raw_ids)).all()
     normalized = non_it = failed = 0
 
-    for start in range(0, len(raw_events), max(1, batch_size)):
-        chunk = raw_events[start:start + batch_size]
+    effective_batch = (
+        batch_size if batch_size is not None else _adaptive_batch_size(raw_events)
+    )
+    import logging
+    logger = logging.getLogger(__name__)
+    if batch_size is None:
+        logger.info(
+            "normalize: adaptive batch_size=%d for %d events",
+            effective_batch, len(raw_events),
+        )
+
+    for start in range(0, len(raw_events), max(1, effective_batch)):
+        chunk = raw_events[start:start + effective_batch]
         n, ni, f, rate_limited = _normalize_chunk(db, chunk)
         normalized += n
         non_it += ni
         failed += f
         if rate_limited:
-            import logging
             left = len(raw_events) - (start + len(chunk))
-            logging.getLogger(__name__).warning(
+            logger.warning(
                 "normalize stopped early on rate-limit; %d events left as 'raw'", left,
             )
             break

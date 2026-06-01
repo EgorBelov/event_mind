@@ -22,7 +22,14 @@ def _jobs(scheduler) -> dict:
 def test_ingest_jobs_present_when_enabled(enable_ingest):
     jobs = _jobs(digest.build_scheduler())
 
-    assert set(jobs) == {"daily_digest", "ingest_habr", "ingest_rss", "compact_memories"}
+    assert set(jobs) == {
+        "daily_digest",
+        "ingest_habr",
+        "ingest_rss",
+        "compact_memories",
+        "backfill_event_embeddings",
+        "backfill_user_embeddings",
+    }
 
 
 def test_ingest_jobs_run_on_startup(enable_ingest):
@@ -54,8 +61,22 @@ def test_ingestion_disabled_leaves_only_digest(monkeypatch):
 
     jobs = _jobs(digest.build_scheduler())
 
-    # compact_memories независим от INGEST_ENABLED — он про memory-агент.
-    assert set(jobs) == {"daily_digest", "compact_memories"}
+    # compact_memories + backfill-джобы независимы от INGEST_ENABLED.
+    assert set(jobs) == {
+        "daily_digest",
+        "compact_memories",
+        "backfill_event_embeddings",
+        "backfill_user_embeddings",
+    }
+
+
+def test_backfill_event_embeddings_runs_on_startup(enable_ingest):
+    jobs = _jobs(digest.build_scheduler())
+    bf = jobs["backfill_event_embeddings"]
+    # Запускается со сдвигом ~90 с от старта.
+    now = datetime.now().timestamp()
+    assert bf.next_run_time is not None
+    assert now <= bf.next_run_time.timestamp() <= now + 180
 
 
 def test_compact_memories_job_does_not_run_on_startup(enable_ingest):

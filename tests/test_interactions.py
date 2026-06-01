@@ -160,3 +160,62 @@ def test_like_toggle(db, user_and_event):
         Interaction.action == "like",
     ).count()
     assert likes == 0
+
+
+def test_create_interaction_refreshes_user_embedding(db, user_and_event, monkeypatch):
+    """create_interaction обязан прогреть user.embedding — иначе
+    /recommendations пришлось бы считать вектор сам (как раньше)."""
+    user, event = user_and_event
+    assert user.embedding is None
+
+    # Стабим build_rich_user_embedding, чтобы не грузить sentence-transformers.
+    monkeypatch.setattr(
+        "app.recommender.embeddings.build_rich_user_embedding",
+        lambda u, interactions=None: [0.42] * 4,
+    )
+
+    create_interaction(db, user.telegram_id, event.id, "like")
+
+    db.refresh(user)
+    assert user.embedding is not None
+    assert json.loads(user.embedding) == [0.42] * 4
+
+
+def test_get_recommendations_does_not_write(db, user_and_event, monkeypatch):
+    """GET /recommendations должен быть read-only: ни user.embedding,
+    ни event.embedding не пишутся внутри хот-пасса."""
+    from app.api.services.recommendation_service import get_recommendations_for_user
+
+    user, event = user_and_event
+    # БД заведомо без embedding'ов.
+    assert user.embedding is None
+    assert event.embedding is None
+
+    # Стабим всё тяжёлое, чтобы тест не зависел от sentence-transformers.
+    monkeypatch.setattr(
+        "app.recommender.embeddings.build_rich_user_embedding",
+        lambda u, interactions=None: [0.1] * 4,
+    )
+    monkeypatch.setattr(
+        "app.recommender.embeddings.build_event_embedding",
+        lambda e: [0.1] * 4,
+    )
+    monkeypatch.setattr(
+        "app.recommender.embeddings.build_session_embedding",
+        lambda db, u, window=5: None,
+    )
+    # Жёстко падать, если кто-то попробует написать в БД из read-path.
+    def _no_writes(db, events):
+        raise AssertionError("ensure_event_embeddings must NOT be called from /recommendations")
+    monkeypatch.setattr(
+        "app.recommender.embeddings.ensure_event_embeddings", _no_writes
+    )
+
+    results = get_recommendations_for_user(db, user.telegram_id, limit=5)
+    assert isinstance(results, list)
+
+    db.refresh(user)
+    db.refresh(event)
+    # Ключевое: кэши остались пустыми — никто не записал
+    assert user.embedding is None
+    assert event.embedding is None

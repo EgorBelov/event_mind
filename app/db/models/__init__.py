@@ -7,6 +7,7 @@ from .copilot_session import CopilotSession
 from .event import Event
 from .interaction import Interaction
 from .raw_event import RawEvent
+from .recommendation_cache import RecommendationCache
 from .topic import EventTopic, Topic, UserTopic
 from .user import User
 from .user_bandit_state import UserBanditState
@@ -20,6 +21,7 @@ __all__ = [
     "EventTopic",
     "Interaction",
     "RawEvent",
+    "RecommendationCache",
     "Topic",
     "User",
     "UserBanditState",

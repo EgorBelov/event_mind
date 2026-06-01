@@ -25,6 +25,9 @@ class Event(Base):
     seniority = Column(String, nullable=True)     # junior/middle/senior/any
     quality_score = Column(Integer, nullable=True)  # 1-10, оценка качества от AI
     hype_score = Column(Integer, nullable=True)   # 1-10, актуальность темы
+    # Идентификатор серии: одинаковый slug у разных выпусков одной серии
+    # (Python MeetUp #14 / #15 / #16). Считается при ingestion из title.
+    series_slug = Column(String(120), nullable=True, index=True)
     created_at = Column(DateTime, server_default=func.now(), nullable=False)
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now(), nullable=False)
 
