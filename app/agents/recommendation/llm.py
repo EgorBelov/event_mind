@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 import logging
+import time
 
 from dotenv import load_dotenv
 from langchain_groq import ChatGroq
@@ -18,6 +19,45 @@ from app.core.config import settings
 load_dotenv()
 
 logger = logging.getLogger(__name__)
+
+
+# ─── Circuit-breaker ──────────────────────────────────────────────────────
+# Защита от каскадных таймаутов: если Groq много раз подряд падает (rate-limit,
+# 5xx, сеть), на cooldown_seconds открываем circuit — invoke сразу поднимает
+# исключение, не дожидаясь httpx-таймаута. После cooldown пробуем снова.
+class _CircuitBreaker:
+    def __init__(self, failure_threshold: int = 5, cooldown_seconds: float = 120.0):
+        self.failure_threshold = failure_threshold
+        self.cooldown_seconds = cooldown_seconds
+        self._consecutive_failures = 0
+        self._opened_at: float | None = None
+
+    def is_open(self) -> bool:
+        if self._opened_at is None:
+            return False
+        # half-open: первый запрос после cooldown пройдёт
+        return time.monotonic() - self._opened_at < self.cooldown_seconds
+
+    def record_success(self) -> None:
+        self._consecutive_failures = 0
+        self._opened_at = None
+
+    def record_failure(self) -> None:
+        self._consecutive_failures += 1
+        if self._consecutive_failures >= self.failure_threshold:
+            if self._opened_at is None:
+                logger.warning(
+                    "Groq circuit breaker OPEN after %d consecutive failures (cooldown %ss)",
+                    self._consecutive_failures, self.cooldown_seconds,
+                )
+            self._opened_at = time.monotonic()
+
+
+_breaker = _CircuitBreaker()
+
+
+class CircuitOpenError(RuntimeError):
+    """Поднимается, когда circuit-breaker открыт и invoke не пытается ходить в Groq."""
 
 
 def _build_llm(model_name: str) -> ChatGroq:
@@ -60,14 +100,29 @@ class _GroqWithFallback:
         return base.bind_tools(self._tools) if self._tools else base
 
     def invoke(self, *args, **kwargs):
+        # Если circuit открыт — отрубаем быстро, не дожидаясь httpx-таймаута.
+        # Caller'ы /copilot и /why уже завёрнуты в try/except и красиво
+        # деградируют (rule-based ответ).
+        if _breaker.is_open():
+            raise CircuitOpenError("Groq circuit breaker is open — fast fail")
+
         try:
-            return self._bound(self._primary).invoke(*args, **kwargs)
+            res = self._bound(self._primary).invoke(*args, **kwargs)
+            _breaker.record_success()
+            return res
         except Exception as e:
             logger.warning(
                 "Groq primary model %s failed: %s; falling back to %s",
                 settings.groq_model, e, settings.groq_fallback_model,
             )
-            return self._bound(self._fallback).invoke(*args, **kwargs)
+            try:
+                res = self._bound(self._fallback).invoke(*args, **kwargs)
+                _breaker.record_success()
+                return res
+            except Exception:
+                # Оба упали — это сигнал для breaker'а.
+                _breaker.record_failure()
+                raise
 
     def with_structured_output(self, *args, **kwargs):
         # Структурированный output живёт на primary; на fallback не дублируем,

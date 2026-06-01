@@ -33,7 +33,68 @@ def _utcnow() -> datetime:
 router = APIRouter(prefix="/copilot", tags=["copilot"])
 
 _DEFAULT_K = 10
-_MAX_HISTORY = 10  # храним в state последние N сообщений; раньше — compaction
+_MAX_HISTORY = 10  # храним в state последние N сообщений; средние — через compaction
+
+
+def _compact_history(history: list[dict], *, keep_head: int, keep_tail: int) -> list[dict]:
+    """Сжать длинную историю диалога: голова + LLM-summary середины + хвост.
+
+    Раньше при превышении лимита тупо отрезали голову — терялись цель и
+    ранние установки. Здесь голову сохраняем, середину сжимаем одной
+    `system`-ноткой через LLM. При сбое LLM (rate-limit, circuit open) —
+    деградируем в исходный sliding window, чтобы не блокировать ответ.
+    """
+    if len(history) <= keep_head + keep_tail:
+        return history
+
+    head = history[:keep_head]
+    middle = history[keep_head:-keep_tail] if keep_tail > 0 else history[keep_head:]
+    tail = history[-keep_tail:] if keep_tail > 0 else []
+
+    if not middle:
+        return head + tail
+
+    # Формируем текст для суммаризации.
+    lines: list[str] = []
+    for msg in middle:
+        role = msg.get("role", "?")
+        content = (msg.get("content") or "").strip()
+        if not content:
+            continue
+        lines.append(f"[{role}] {content[:400]}")
+    if not lines:
+        return head + tail
+
+    summary_text: str | None = None
+    try:
+        from app.agents.recommendation.llm import llm
+        sys_prompt = (
+            "Ты сжимаешь середину диалога между пользователем и AI-помощником "
+            "EventMind в КРАТКУЮ выжимку (3-6 предложений). Сохрани:\n"
+            "1) цели пользователя и его текущий контекст;\n"
+            "2) ключевые факты, на которые помощник уже опирался;\n"
+            "3) принятые решения и предпочтения.\n"
+            "Не выдумывай. Не цитируй дословно — пересказывай."
+        )
+        user_prompt = "Сжать в выжимку:\n\n" + "\n".join(lines)
+        resp = llm.invoke([
+            {"role": "system", "content": sys_prompt},
+            {"role": "user", "content": user_prompt},
+        ])
+        summary_text = (getattr(resp, "content", None) or "").strip() or None
+    except Exception as e:
+        logger.warning("copilot history compaction failed, falling back to slice: %s", e)
+        summary_text = None
+
+    if summary_text is None:
+        return head + tail
+
+    summary_msg = {
+        "role": "system",
+        "content": f"[Сводка предыдущих {len(middle)} сообщений диалога]\n{summary_text}",
+        "ts": _utcnow().isoformat(),
+    }
+    return head + [summary_msg] + tail
 
 
 class CopilotRequest(BaseModel):
@@ -111,14 +172,25 @@ def copilot(
     db: Session = Depends(get_db),
 ):
     """One-shot Copilot (без сохранения сессии). Сохранён ради обратной совместимости."""
+    from app.core.prompt_safety import (
+        DEFAULT_COPILOT_MAX_CHARS,
+        has_injection_hints,
+        sanitize_user_text,
+    )
+
     user = db.query(User).filter(User.telegram_id == telegram_id).first()
     if not user:
         return {"success": False, "message": "Профиль не найден. Сначала настрой профиль через /start."}
 
+    safe_goal = sanitize_user_text(payload.goal, max_chars=DEFAULT_COPILOT_MAX_CHARS)
+    if has_injection_hints(safe_goal):
+        logger.info(
+            "Copilot one-shot: goal contains injection hints (telegram_id=%s)", telegram_id,
+        )
     try:
         result = _invoke_graph(
             db=db, user=user, telegram_id=telegram_id,
-            goal=payload.goal, history=[], k=k, limit=limit,
+            goal=safe_goal, history=[], k=k, limit=limit,
         )
         ids = result.get("recommended_event_ids", [])[:limit]
         return {
@@ -154,9 +226,22 @@ def copilot_turn(
     db: Session = Depends(get_db),
 ):
     """Multi-turn copilot. Если session_id не передан — создаёт новую сессию."""
+    from app.core.prompt_safety import (
+        DEFAULT_COPILOT_MAX_CHARS,
+        has_injection_hints,
+        sanitize_user_text,
+    )
+
     user = db.query(User).filter(User.telegram_id == telegram_id).first()
     if not user:
         return {"success": False, "message": "Профиль не найден."}
+
+    # Sanitize user-message ДО того как класть в history (БД) и в LLM-промпт.
+    safe_message = sanitize_user_text(payload.message, max_chars=DEFAULT_COPILOT_MAX_CHARS)
+    if has_injection_hints(safe_message):
+        logger.info(
+            "Copilot turn: message contains injection hints (telegram_id=%s)", telegram_id,
+        )
 
     # Получаем или создаём сессию
     if payload.session_id is not None:
@@ -172,10 +257,10 @@ def copilot_turn(
         db.flush()
         history = []
 
-    # User-message → history
-    history.append({"role": "user", "content": payload.message, "ts": _utcnow().isoformat()})
+    # User-message → history (уже sanitized)
+    history.append({"role": "user", "content": safe_message, "ts": _utcnow().isoformat()})
     # Цель из последнего user-message (для retrieve)
-    goal = payload.message
+    goal = safe_message
 
     try:
         result = _invoke_graph(
@@ -192,9 +277,12 @@ def copilot_turn(
             "recommended_ids": ids,
             "ts": _utcnow().isoformat(),
         })
-        # Обрезка длинной истории (простой sliding window; compaction TODO).
+        # Compaction: вместо тупого среза сжимаем средние сообщения
+        # 1-2 LLM-summary turn'ами. Первые 2 и последние _MAX_HISTORY*2 - 2
+        # сохраняются как есть — голова диалога часто содержит цель/роль,
+        # а хвост важен для текущего turn'а.
         if len(history) > _MAX_HISTORY * 2:
-            history = history[-_MAX_HISTORY * 2:]
+            history = _compact_history(history, keep_head=2, keep_tail=_MAX_HISTORY * 2 - 2)
         _save_history(db, sess, history)
 
         # Long-term memory: best-effort extract из этого turn'а

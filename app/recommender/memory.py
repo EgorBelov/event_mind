@@ -39,6 +39,10 @@ _VALID_CATEGORIES = {"interest", "dislike", "goal", "constraint", "context", "ev
 DEFAULT_MIN_SALIENCE = 4.0      # фильтр шумных заметок
 COMPACT_THRESHOLD = 50          # после стольких заметок — сжимаем
 COMPACT_TARGET_PER_CATEGORY = 5 # сколько оставить в каждой категории
+# Жёсткий потолок на одного пользователя. Compaction сжимает раз в неделю,
+# но если он упал/выключен — без верхней границы таблица будет расти неограниченно.
+# При превышении просто удаляем самые низкоsalience'ные заметки до cap'а — без LLM.
+USER_MEMORY_HARD_CAP = 500
 
 
 def _utcnow() -> datetime:
@@ -96,7 +100,39 @@ def write_memory(
     )
     db.add(row)
     db.flush()
+
+    # Hard-cap. Compaction может никогда не выполниться (выключен / упал) —
+    # без него таблица user_memories растёт бесконечно. Здесь дёшево сносим
+    # наименее значимое поверх лимита, без LLM-вызова.
+    _enforce_hard_cap(db, user_id)
     return row
+
+
+def _enforce_hard_cap(db: Session, user_id: int) -> None:
+    """Удалить самые низкоsalience'ные заметки выше USER_MEMORY_HARD_CAP."""
+    try:
+        n = (
+            db.query(UserMemory).filter(UserMemory.user_id == user_id).count()
+        )
+        if n <= USER_MEMORY_HARD_CAP:
+            return
+        excess = n - USER_MEMORY_HARD_CAP
+        # ASC по salience, при равных — ASC по id (старее → раньше идёт под нож)
+        victims = (
+            db.query(UserMemory)
+            .filter(UserMemory.user_id == user_id)
+            .order_by(UserMemory.salience.asc(), UserMemory.id.asc())
+            .limit(excess)
+            .all()
+        )
+        for v in victims:
+            db.delete(v)
+        db.flush()
+        logger.info(
+            "memory hard-cap: pruned %d / %d for user %s", len(victims), n, user_id,
+        )
+    except Exception as e:
+        logger.warning("memory hard-cap enforce failed for user %s: %s", user_id, e)
 
 
 def recall(
