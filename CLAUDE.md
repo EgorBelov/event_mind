@@ -203,8 +203,26 @@ Postgres-`DATABASE_URL` 3 SQLite-PRAGMA теста пропускаются.
 
 - `docs/Обзор_проекта_EventMind.docx` — авторитетный summary архитектуры.
 - `docs/План_показа_EventMind.docx` — план защиты на 15–20 минут.
-- `docs/отчет_Курсовая.docx` — HSE-стилизованный отчёт.
+- `docs/отчет_Курсовая.docx` — HSE-стилизованный отчёт (Глава 4 содержит
+  Таблицу 4.2 — Recall@k / nDCG@k и Таблицу 4.3 — оценки LLM-судьи;
+  обе сгенерированы воспроизводимыми скриптами с фиксированным `seed=42`).
+- Бэкап последней «чистой» версии отчёта — `docs/отчет_Курсовая_backup_*.docx`.
 - Все три перегенерируются `python -m scripts.regenerate_docs`.
+
+## Оценочные скрипты (offline eval)
+
+- `scripts/eval_offline.py` — leave-one-out на реальной БД (требует
+  ≥3 positive-сигнала на пользователя). Output: Recall@k, nDCG@k для
+  rule / hybrid / bayesian.
+- `scripts/eval_offline_synthetic.py` — тот же leave-one-out на
+  изолированном синтетическом датасете (in-memory SQLite, seed=42,
+  20 пользователей × 80 событий × 8 тем). Используется на этапе
+  прототипа, когда реальных positive-сигналов недостаточно.
+- `scripts/llm_judge.py` — LLM-as-judge на реальной БД.
+- `scripts/llm_judge_synthetic.py` — LLM-as-judge на синтетическом
+  датасете (через `build_synthetic_db()` из первого). Прямые
+  `SystemMessage`/`HumanMessage` (без `ChatPromptTemplate` — JSON-промпт
+  ломал placeholder-синтаксис).
 
 ## Ingestion
 
@@ -233,7 +251,7 @@ telegram. Эндпоинты в `app/api/routers/ingestion.py`:
 открытые `[ ]`, с привязкой к файлам, по приоритету). **Держать в актуальном
 состоянии при каждом изменении** (как и этот файл).
 
-## Текущее состояние (1 июня 2026)
+## Текущее состояние (2 июня 2026)
 
 Активная ветка: `dev`.
 
@@ -241,7 +259,7 @@ telegram. Эндпоинты в `app/api/routers/ingestion.py`:
 pgvector 0.8.0. `DATABASE_URL` в `.env`. `pool_pre_ping=True` +
 `pool_recycle=1500` (Supabase pooler режет idle ~5 мин).
 
-**Свежие фичи** (этой серией коммитов):
+**Свежие фичи**:
 
 1. **LLM-цепочка**: Gemini (REST-транспорт, автопроба модели) → Groq 70b →
    Groq 8b. Circuit-breaker + per-provider cooldown. `POST /admin/llm/reprobe`.
@@ -256,5 +274,11 @@ pgvector 0.8.0. `DATABASE_URL` в `.env`. `pool_pre_ping=True` +
    `f6a7` (feed_cursor, recommendation_cache, series_slug, telegram_id BIGINT).
 7. **CI**: добавлен `test-postgres` job (pgvector/pgvector:pg16) рядом с
    SQLite-job.
-8. **Cleanup**: вынесли `utcnow_naive` в `app/core/utils.py` (раньше был
+8. **Данные**: строгая enum-валидация полей нормализатора + idempotent
+   re-ingestion + локализация дат в боте (Europe/Moscow через `zoneinfo`).
+9. **Cleanup**: вынесли `utcnow_naive` в `app/core/utils.py` (раньше был
    продублирован в 7 файлах); удалили dead `_user_profile_snapshot`.
+10. **Отчёт**: проведён научный аудит, сокращены 5 разделов (~3 стр), Глава 4
+    наполнена цифрами через `eval_offline_synthetic.py` (Таблица 4.2) и
+    `llm_judge_synthetic.py` (Таблица 4.3). Зафиксирован классический trade-off
+    «релевантность ↔ разнообразие», компенсируемый MMR-rerank.

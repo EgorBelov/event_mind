@@ -257,18 +257,20 @@ eventmind/
 │   │
 │   └── scheduler/digest.py                  # APScheduler: digest + ingestion + memory compact
 │
-├── alembic/versions/                        # 10 миграций
+├── alembic/versions/                        # 14 миграций
 ├── data/                                    # справочные источники
 ├── docs/                                    # обзор, план показа, отчёт (HSE)
 │   └── diagrams/                            # PNG-диаграммы
-├── tests/                                   # 180 тестов в 25 файлах
+├── tests/                                   # 285 тестов в ~36 файлах
 ├── scripts/
-│   ├── eval_offline.py                      # leave-one-out Recall@k / nDCG@k
-│   ├── llm_judge.py                         # LLM-as-judge для оценки выдачи
+│   ├── eval_offline.py                      # leave-one-out Recall@k / nDCG@k (реальная БД)
+│   ├── eval_offline_synthetic.py            # тот же эвал на in-memory синтетике (seed=42)
+│   ├── llm_judge.py                         # LLM-as-judge на реальной БД
+│   ├── llm_judge_synthetic.py               # LLM-as-judge на синтетическом датасете
 │   ├── train_gnn.py                         # тренировка LightGCN
 │   ├── compact_memories.py                  # ручной запуск compaction
 │   ├── backfill_pgvector.py                 # SQLite → Postgres embedding-кэш
-│   ├── append_overview_chapter.py           # глава 6 в обзоре (исторически)
+│   ├── backfill_series_slug.py              # series_slug для существующих событий
 │   └── regenerate_docs.py                   # полная регенерация всех 3 .docx
 ├── .env / .env.example
 ├── alembic.ini
@@ -653,10 +655,24 @@ priority-тем, пишет «виртуальные» Bayesian-обновлен
 
 **Offline-эвал:**
 ```bash
+# Реальная БД — требует ≥3 positive-сигнала на пользователя
 python -m scripts.eval_offline --k 5
 python -m scripts.llm_judge --k 5 --variants rule hybrid bandit_on
-python -m scripts.train_gnn          # если GNN_ENABLED=true
+
+# Воспроизводимый синтетический бенчмарк (in-memory SQLite, seed=42)
+python -m scripts.eval_offline_synthetic         # Recall@k / nDCG@k
+python -m scripts.llm_judge_synthetic --max-users 6 --k 5
+
+python -m scripts.train_gnn                       # если GNN_ENABLED=true
 ```
+
+Результаты синтетического бенчмарка (rule → hybrid → bayesian) сохранены
+в Главе 4 отчёта (`docs/отчет_Курсовая.docx`, таблицы 4.2 и 4.3):
+- **Recall@10**: 0,80 → 0,85 → 0,85 (+0,05 от семантической компоненты).
+- **nDCG@10**: 0,36 → 0,44 → 0,45 (Bayesian слегка улучшает позицию цели).
+- **LLM-судья (relevance, 1–5)**: 4,33 → 4,40 → 4,40.
+- **LLM-судья (diversity_contribution, 1–5)**: 2,53 → 2,10 → 2,03 —
+  ожидаемый trade-off, компенсируется MMR-rerank (λ=0,7) в конвейере.
 
 ---
 
