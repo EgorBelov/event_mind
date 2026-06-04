@@ -50,10 +50,71 @@ SEED_FORMAT_LABELS: dict[str, str] = {
 SEED_CITY_LABELS: dict[str, str] = {
     "moscow": "Москва",
     "spb": "Санкт-Петербург",
-    "kazan": "Казань",
+    "novosibirsk": "Новосибирск",
     "ekb": "Екатеринбург",
+    "kazan": "Казань",
+    "nizhny_novgorod": "Нижний Новгород",
+    "chelyabinsk": "Челябинск",
+    "samara": "Самара",
+    "ufa": "Уфа",
+    "rostov": "Ростов-на-Дону",
+    "krasnodar": "Краснодар",
+    "voronezh": "Воронеж",
+    "perm": "Пермь",
+    "tomsk": "Томск",
+    "innopolis": "Иннополис",
+    "sochi": "Сочи",
+    "vladivostok": "Владивосток",
     "any": "Любой",
     "unknown": "Не указан",
+}
+
+# Канонические slug-и крупных IT-городов России. Используются как
+# whitelist для CITY_ALIASES: алиасы должны схлопываться только сюда.
+CANONICAL_CITIES: frozenset[str] = frozenset(
+    code for code in SEED_CITY_LABELS if code not in {"any", "unknown"}
+)
+
+# Алиасы городов: схлопывают распространённые транслитерации/сокращения к
+# одному каноническому slug'у. Это спасает словарь от дублей вида
+# moscow/msk/moskva — все они приведут к "moscow". Поддерживаем вручную:
+# покрываем только бесспорные случаи (известные сокращения, английские формы,
+# латинские транслиты с альтернативной орфографией). Экзотика остаётся
+# как есть и попадает в open-domain словарь через humanize_code.
+CITY_ALIASES: dict[str, str] = {
+    # Москва
+    "msk": "moscow",
+    "moskva": "moscow",
+    "moscow_city": "moscow",
+    # Санкт-Петербург
+    "saint_petersburg": "spb",
+    "sankt_peterburg": "spb",
+    "st_petersburg": "spb",
+    "piter": "spb",
+    "saint_p": "spb",
+    "leningrad": "spb",
+    # Екатеринбург
+    "ekaterinburg": "ekb",
+    "yekaterinburg": "ekb",
+    "yekb": "ekb",
+    "ekat": "ekb",
+    # Новосибирск
+    "nsk": "novosibirsk",
+    "novosib": "novosibirsk",
+    # Нижний Новгород
+    "nn": "nizhny_novgorod",
+    "nizhniy_novgorod": "nizhny_novgorod",
+    "n_novgorod": "nizhny_novgorod",
+    "nizhny": "nizhny_novgorod",
+    # Казань
+    "kazan_city": "kazan",
+    # Челябинск
+    "chel": "chelyabinsk",
+    # Уфа / Ростов / Краснодар / Воронеж / Пермь / Томск / Сочи
+    "rostov_on_don": "rostov",
+    "rostov_na_donu": "rostov",
+    # Иннополис / Владивосток
+    "vladik": "vladivostok",
 }
 
 SEED_LEVEL_LABELS: dict[str, str] = {
@@ -124,6 +185,25 @@ def city_label(code: str | None) -> str:
     if not code:
         return ""
     return SEED_CITY_LABELS.get(code) or humanize_code(code)
+
+
+def canonicalize_city(code: str | None) -> str:
+    """Привести slug города к каноническому виду.
+
+    1) Пропускает через `slugify_code` (нормализация регистра, пробелов).
+    2) Если slug в `CITY_ALIASES` — возвращает каноническое значение
+       (например `msk` → `moscow`, `piter` → `spb`).
+    3) Если slug уже в `CANONICAL_CITIES` или `any`/`unknown` — оставляет.
+    4) Любой другой slug возвращается как есть — это open-domain, экзотика
+       сохраняется (например `omsk`, `barnaul`), но через humanize_code
+       будет показана как Title Case латиницей.
+    """
+    if not code:
+        return ""
+    slug = slugify_code(code)
+    if not slug:
+        return ""
+    return CITY_ALIASES.get(slug, slug)
 
 
 def level_label(code: str | None) -> str:
