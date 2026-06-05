@@ -31,27 +31,62 @@ def format_event_date(event: dict, tz: ZoneInfo = _DEFAULT_TZ) -> str:
     с локализацией в таймзону пользователя («1 июня 2026, 19:00 MSK»).
     Если `start_at` нет — fallback на строку `event["date"]` (то, что
     показывает источник; может быть «лето 2026», диапазон, и т.п. —
-    рисуем как есть).
+    рисуем как есть, но если это голый ISO «2026-06-16» — переводим
+    в человеческий «16 июня 2026»).
+
+    Важно: если источник не дал часы/минуты, `start_at` лежит как
+    `00:00:00` UTC — после конвертации в MSK получилось бы «03:00»,
+    что вводит в заблуждение. В таких случаях показываем только дату.
     """
     raw_iso = event.get("start_at")
     if raw_iso:
         try:
             dt = datetime.fromisoformat(raw_iso)
-            # start_at из БД — naive UTC. Привязываем UTC, потом конвертируем.
+            # Запоминаем «было ли вообще время» ДО конвертации зоны:
+            # 00:00 UTC после astimezone(MSK) превратится в 03:00 — это не
+            # реальное время мероприятия, источник его просто не дал.
+            time_known = bool(dt.hour or dt.minute or dt.second)
             if dt.tzinfo is None:
                 dt = dt.replace(tzinfo=ZoneInfo("UTC"))
             local = dt.astimezone(tz)
             month = _MONTHS_RU_GEN[local.month - 1]
-            time_part = f", {local:%H:%M}" if (local.hour or local.minute) else ""
-            return f"{local.day} {month} {local.year}{time_part} {tz.key.split('/')[-1]}"
+            if time_known:
+                return (
+                    f"{local.day} {month} {local.year}, "
+                    f"{local:%H:%M} {tz.key.split('/')[-1]}"
+                )
+            return f"{local.day} {month} {local.year}"
         except Exception:
             pass
-    return event.get("date") or "—"
+
+    raw_date = (event.get("date") or "").strip()
+    if not raw_date:
+        return "—"
+    # ISO-строка «2026-06-16» без времени → переводим в человеческий вид.
+    try:
+        d = datetime.fromisoformat(raw_date).date()
+        return f"{d.day} {_MONTHS_RU_GEN[d.month - 1]} {d.year}"
+    except ValueError:
+        return raw_date
 
 
 def esc(value) -> str:
     """Экранировать произвольное значение для HTML parse_mode Telegram."""
     return html.escape("" if value is None else str(value))
+
+
+def event_url_line(event: dict, label: str = "🔗 Открыть на источнике") -> str:
+    """HTML-строка со ссылкой на источник события, либо пустая.
+
+    Возвращает либо `\\n<a href="...">label</a>`, либо `""`. URL экранируется
+    как HTML-атрибут — Telegram строго парсит href и роняет всё сообщение
+    при невалидной кавычке.
+    """
+    url = (event.get("source_url") or "").strip()
+    if not url:
+        return ""
+    safe_url = html.escape(url, quote=True)
+    return f'\n<a href="{safe_url}">{html.escape(label)}</a>'
 
 
 def to_plain(text: str) -> str:

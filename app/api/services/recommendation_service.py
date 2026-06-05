@@ -187,7 +187,11 @@ def get_recommendations_for_user(
             logger.warning("pgvector candidate fetch failed: %s", e)
             candidate_ids = []
 
-    base_q = db.query(Event).options(joinedload(Event.event_topics))
+    from app.db.event_filters import upcoming_only
+
+    base_q = upcoming_only(
+        db.query(Event).options(joinedload(Event.event_topics))
+    )
     events = (
         base_q.filter(Event.id.in_(candidate_ids)).all()
         if candidate_ids else base_q.all()

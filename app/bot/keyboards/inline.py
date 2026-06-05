@@ -92,10 +92,10 @@ def recommendation_keyboard(
 ) -> InlineKeyboardMarkup:
     """Клавиатура карточки события.
 
-    Единая выдача — hybrid по 9 компонентам (никакого отдельного AI-режима).
-    Объяснение «почему» — две независимые кнопки, всегда доступны:
-      ❓ Почему — короткий человеческий ответ в поп-апе.
-      📖 Подробнее — развёрнутый разбор + советы + метрики отдельным сообщением.
+    Одна кнопка «📖 Подробнее» вместо прежней пары «❓ Почему / 📖 Подробнее»:
+    она даёт человеческое описание события (что это, для кого, о чём) без
+    скоров и метрик. Старые две кнопки путали пользователей — особенно те,
+    кто не понимал, чем «почему» отличается от «подробнее».
     """
     actions = actions or set()
 
@@ -104,14 +104,13 @@ def recommendation_keyboard(
     save_text = "⭐ Сохранено" if "save" in actions else "Сохранить"
 
     builder = InlineKeyboardBuilder()
-    builder.button(text="❓ Почему", callback_data=f"why:{event_id}")
-    builder.button(text="📖 Подробнее", callback_data=f"why_full:{event_id}")
+    builder.button(text="📖 Подробнее", callback_data=f"explain:{event_id}")
     builder.button(text=like_text, callback_data=f"like:{event_id}")
     builder.button(text=dislike_text, callback_data=f"dislike:{event_id}")
     builder.button(text=save_text, callback_data=f"save:{event_id}")
     builder.button(text="Похожие", callback_data=f"similar:{event_id}")
     builder.button(text="Следующее", callback_data="next")
-    builder.adjust(2, 2, 2, 1)
+    builder.adjust(1, 2, 1, 1, 1)
     return builder.as_markup()
 
 

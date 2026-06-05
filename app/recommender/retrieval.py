@@ -10,6 +10,7 @@ from typing import Any
 
 from sqlalchemy.orm import Session
 
+from app.db.event_filters import upcoming_only
 from app.db.models.event import Event
 from app.db.models.interaction import Interaction
 from app.db.models.user import User
@@ -55,16 +56,19 @@ def retrieve_events_for_query(
             combined = q_emb
 
         # Fast path: pgvector — оператор <=> сам отсортирует и ограничит до k.
-        pg_ids = pgvector_top_k_events(db, combined.tolist(), k=k)
+        # Берём с запасом (k*3): часть pg_ids после фильтра прошедших событий
+        # отвалится, нам нужно ≥k оставшихся.
+        pg_ids = pgvector_top_k_events(db, combined.tolist(), k=k * 3)
         if pg_ids:
             id_to_event = {
-                e.id: e for e in db.query(Event).filter(Event.id.in_(pg_ids)).all()
+                e.id: e for e in upcoming_only(db.query(Event))
+                .filter(Event.id.in_(pg_ids)).all()
             }
-            ordered = [id_to_event[i] for i in pg_ids if i in id_to_event]
+            ordered = [id_to_event[i] for i in pg_ids if i in id_to_event][:k]
             return [_serialize_event(e, score=None) for e in ordered]
 
         # Slow path (SQLite / нет pgvector): подгружаем кандидатов, считаем cosine в Python.
-        events = db.query(Event).limit(candidate_pool).all()
+        events = upcoming_only(db.query(Event)).limit(candidate_pool).all()
         if not events:
             return []
         ensure_event_embeddings(db, events)
@@ -87,7 +91,7 @@ def retrieve_events_for_query(
 
     except Exception:
         # Fallback: грубое совпадение по подстроке.
-        events = db.query(Event).limit(candidate_pool).all()
+        events = upcoming_only(db.query(Event)).limit(candidate_pool).all()
         q_low = query.lower()
         ranked = sorted(
             events,

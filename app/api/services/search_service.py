@@ -1,6 +1,7 @@
 from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
+from app.db.event_filters import upcoming_only
 from app.db.models.event import Event
 from app.recommender.scoring import _get_event_topic_codes
 
@@ -44,7 +45,7 @@ def search_events(
     city: str | None = None,
 ) -> list[dict]:
     """Поиск по ключевым словам: фильтры по title/description, темам, формату, городу."""
-    q = db.query(Event)
+    q = upcoming_only(db.query(Event))
 
     if query:
         like_pattern = f"%{query.lower()}%"
@@ -83,7 +84,7 @@ def semantic_search_events(db: Session, query: str, limit: int = 5) -> list[dict
         )
 
         query_emb = embed_text(query)
-        events = db.query(Event).all()
+        events = upcoming_only(db.query(Event)).all()
 
         scored: list[tuple[float, Event]] = []
         for event in events:
@@ -169,7 +170,7 @@ def get_similar_events(db: Session, event_id: int, limit: int = 3) -> list[dict]
     if not base_topics:
         return []
 
-    others = db.query(Event).filter(Event.id != event_id).all()
+    others = upcoming_only(db.query(Event)).filter(Event.id != event_id).all()
     scored = [
         (len(_get_event_topic_codes(e).intersection(base_topics)), e)
         for e in others

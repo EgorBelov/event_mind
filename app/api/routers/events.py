@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 
+from app.api.services.event_explain_service import explain_event
 from app.api.services.event_service import (
     get_all_events,
     get_event_topic_codes,
@@ -101,6 +102,28 @@ def combined_search_endpoint(
     )
 
 
+# ── ВАЖНО: строковые маршруты ОБЯЗАНЫ идти ВЫШЕ /{event_id} ──────────────
+# FastAPI берёт первый совпавший маршрут. `GET /{event_id}` с типом int
+# матчит до проверки типа, и для запроса /events/nl-search возвращает 422
+# («не int») вместо того, чтобы попасть в nl_search_endpoint. Решение —
+# объявлять конкретные пути до параметризованного.
+
+
+@router.get("/nl-search")
+def nl_search_endpoint(
+    q: str = Query(..., description="Запрос на естественном языке"),
+    limit: int = Query(default=10, ge=1, le=30),
+    db: Session = Depends(get_db),
+):
+    """Поиск по NL-запросу: LLM достаёт фильтры (даты/город/тип) → SQL.
+
+    Пример запроса: «конференции по AI/ML с 3 по 10 июня в Москве».
+    Возвращает {events, filters, extracted, fallback_used, relaxed, dropped}.
+    """
+    from app.api.services.nl_search_service import nl_search
+    return nl_search(db, query=q, limit=limit)
+
+
 @router.get("/{event_id}")
 def get_event_by_id(event_id: int, db: Session = Depends(get_db)):
     """Получить одну карточку события — нужно для deep-link'а в боте."""
@@ -117,3 +140,13 @@ def similar_events(
     db: Session = Depends(get_db),
 ):
     return get_similar_events(db, event_id=event_id, limit=limit)
+
+
+@router.get("/{event_id}/explain")
+def explain(event_id: int, db: Session = Depends(get_db)):
+    """Человеческое описание события: что это, для кого, о чём.
+
+    Без скоров и алгоритмических деталей. Используется единой кнопкой
+    «📖 Подробнее» в Telegram-боте. Результат кэшируется (TTL 6 ч).
+    """
+    return explain_event(db, event_id)

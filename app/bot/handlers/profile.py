@@ -13,7 +13,7 @@ from app.bot.keyboards.inline import (
     profile_actions_keyboard,
 )
 from app.bot.services.api_client import EventMindAPIClient
-from app.bot.utils import esc, send
+from app.bot.utils import esc, event_url_line, format_event_date, send
 from app.core.topics import city_label, format_label, topic_title
 
 
@@ -90,7 +90,8 @@ async def _send_saved(target: Message | CallbackQuery, telegram_id: int):
         f"Тема: {esc(', '.join(_topic(t) for t in e.get('topics', [])))}\n"
         f"Формат: {esc(_format(e['format']))}\n"
         f"Город: {esc(_city(e['city']))}\n"
-        f"Дата: {esc(e['date'])}"
+        f"Дата: {esc(format_event_date(e))}"
+        f"{event_url_line(e)}"
         for e in events
     ]
     await send(target, "<b>Сохраненные события:</b>\n\n" + "\n\n".join(chunks))
@@ -196,7 +197,8 @@ async def _send_trending(target: Message | CallbackQuery):
         events_text = "\n\n".join(
             f"<b>{esc(e['title'])}</b>\n"
             f"Формат: {esc(_format(e.get('format')))}\n"
-            f"Дата: {esc(e.get('date', ''))}\n"
+            f"Дата: {esc(format_event_date(e))}"
+            f"{event_url_line(e)}\n"
             f"Рейтинг: {esc(e.get('trending_score', '?'))}"
             for e in hot_events[:5]
         )
@@ -275,7 +277,6 @@ async def cb_more_help(callback: CallbackQuery):
         "/profile — мой профиль и быстрые действия\n"
         "/recommend — лента рекомендаций (hybrid из 9 компонент)\n"
         "🔍 Поиск (кнопка) — точные совпадения + похожие по смыслу одним ответом\n"
-        "/copilot &lt;цель&gt; — AI Copilot под твою цель\n"
         "/bio &lt;текст&gt; — описать себя и обновить темы\n"
         "/trending — горячие события\n"
         "/saved — сохранённые события\n"

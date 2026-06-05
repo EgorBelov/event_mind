@@ -46,25 +46,24 @@ _TOUR_PAGES: list[tuple[str, str]] = [
         "<b>/recommend</b> или кнопка «🎯 Рекомендации» — лента событий, "
         "отсортированных под тебя hybrid-скорингом по 9 компонентам "
         "(темы, смысл, история, скиллы и др.).\n\n"
-        "В каждой карточке: ❓ Почему / 👍 / 👎 / ⭐ / Похожие / Следующее.\n"
-        "Нажми «❓ Почему» — увидишь, какие факторы дали рейтинг; "
-        "потом «📖 Подробнее» — развёрнутый разбор от ИИ отдельным сообщением.",
+        "В каждой карточке: 📖 Подробнее / 👍 / 👎 / ⭐ / Похожие / Следующее.\n"
+        "«📖 Подробнее» — простое человеческое описание события от ИИ "
+        "(что это, для кого, о чём).",
     ),
     (
         "🔍 Шаг 2/4 — Поиск",
-        "Нажми кнопку «🔍 Поиск» или напиши <code>Найти: &lt;запрос&gt;</code>.\n\n"
-        "Один поиск делает два прохода сразу:\n"
-        "• 🎯 Точные совпадения по ключевым словам (до 3 событий)\n"
-        "• 🤖 Похожие по смыслу через эмбеддинги (до 5 событий)\n\n"
-        "Можно писать как угодно: <code>python митап</code> или "
-        "<code>хочу научиться деплоить микросервисы</code>.",
+        "Нажми кнопку «🔍 Поиск» и напиши, что искать — обычным языком.\n\n"
+        "ИИ сам выдернет даты, город и тип события:\n"
+        "• <code>конференции по AI с 3 по 10 июня в Москве</code>\n"
+        "• <code>митапы по DevOps на следующей неделе</code>\n"
+        "• <code>хочу научиться деплоить микросервисы</code>\n\n"
+        "Под каждым результатом — кнопка ⭐ «Сохранить».",
     ),
     (
-        "🤖 Шаг 3/4 — AI Copilot и тренды",
-        "<b>/copilot &lt;цель&gt;</b> — мультиагентный помощник: roadmap, "
-        "анализ карьеры, объяснение событий. Поддерживает многоtuровый диалог.\n\n"
+        "🔥 Шаг 3/4 — Тренды и дайджест",
         "<b>/trending</b> — горячие темы за неделю с ASCII-графиком.\n"
-        "<b>/subscribe</b> — ежедневный AI-дайджест в личку.",
+        "<b>/subscribe</b> — ежедневный AI-дайджест в личку.\n\n"
+        "В разделе «⚙️ Ещё» собраны тренды и помощь по командам.",
     ),
     (
         "⚙️ Шаг 4/4 — Профиль и быстрые действия",
@@ -117,14 +116,14 @@ async def cmd_start_deep_link(message: Message, command: CommandObject):
             except Exception:
                 event = None
             if event:
+                from app.bot.utils import event_url_line, format_event_date
                 text = (
                     f"<b>{event.get('title', '')}</b>\n\n"
-                    f"📅 {event.get('date', '')}\n"
-                    f"📍 {event.get('city', '')} · {event.get('format', '')}\n\n"
+                    f"📅 {format_event_date(event)}\n"
+                    f"📍 {event.get('city', '')} · {event.get('format', '')}"
+                    f"{event_url_line(event)}\n\n"
                     f"{(event.get('description') or '')[:600]}"
                 )
-                if event.get("source_url"):
-                    text += f"\n\n<a href=\"{event['source_url']}\">Подробнее</a>"
                 await message.answer(text, parse_mode="HTML", disable_web_page_preview=False)
                 return
     # Неизвестный payload — обычный приветственный экран.
@@ -218,6 +217,11 @@ async def _extra_city_codes() -> list[str]:
 async def cb_start_setup(callback: CallbackQuery):
     await callback.answer()
     state = get_state(callback.from_user.id)
+
+    # Тур завершён — убираем сообщение с навигацией тура (иначе кнопка
+    # «Пропустить тур» висит уже после старта настройки и сбивает с толку).
+    with contextlib.suppress(Exception):
+        await callback.message.delete()
 
     await callback.message.answer(
         "Выбери интересующие темы. Можно выбрать несколько.",

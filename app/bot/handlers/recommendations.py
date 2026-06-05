@@ -4,7 +4,7 @@ from aiogram.types import CallbackQuery, Message
 
 from app.bot.keyboards.inline import recommendation_keyboard
 from app.bot.services.api_client import EventMindAPIClient
-from app.bot.utils import esc, format_event_date, send
+from app.bot.utils import esc, event_url_line, format_event_date, send
 
 router = Router()
 api_client = EventMindAPIClient()
@@ -53,7 +53,8 @@ def format_event_card(event: dict) -> str:
         f"Формат: {esc(event['format'])}\n"
         f"Город: {esc(event['city'])}\n"
         f"Уровень: {esc(event['level'])}\n"
-        f"Дата: {esc(format_event_date(event))}\n\n"
+        f"Дата: {esc(format_event_date(event))}"
+        f"{event_url_line(event)}\n\n"
         f"{esc(event['description'])}"
     )
 
@@ -194,32 +195,26 @@ async def cb_similar(callback: CallbackQuery):
             f"<b>{esc(e['title'])}</b>\n"
             f"Тема: {esc(topics)}\n"
             f"Формат: {esc(e['format'])} · Город: {esc(e['city'])} · "
-            f"Дата: {esc(e['date'])}"
+            f"Дата: {esc(format_event_date(e))}"
+            f"{event_url_line(e)}"
         )
-        if e.get("source_url"):
-            block += f"\n{esc(e['source_url'])}"
         lines.append(block)
 
     await send(callback, "\n\n".join(lines))
 
 
-# ─── «Почему?» / «📖 Подробнее» ──────────────────────────────────────────
+# ─── «📖 Подробнее» — единая кнопка с LLM-описанием события ─────────────
 
 
-@router.callback_query(F.data.startswith("why:"))
-async def cb_why_short(callback: CallbackQuery):
-    """Короткий ответ ИИ в поп-апе (1–2 предложения, без цифр)."""
+@router.callback_query(F.data.startswith("explain:"))
+async def cb_explain(callback: CallbackQuery):
+    """Человеческое описание события: что это, для кого, о чём.
+
+    Без скоров, метрик и фраз «вам подходит». Просто понятный пересказ
+    карточки. Один и тот же текст для всех — кэшируется на API (TTL 6 ч).
+    """
     event_id = int(callback.data.split(":", 1)[1])
-    why_data = await api_client.get_why_explanation(callback.from_user.id, event_id)
-    short = why_data.get("short") or "Подобрано по совпадению темы и формата с твоим профилем."
-    await callback.answer(short[:200], show_alert=True)
-
-
-@router.callback_query(F.data.startswith("why_full:"))
-async def cb_why_full(callback: CallbackQuery):
-    """Развёрнутый разбор отдельным сообщением: LLM-нарратив, советы, метрики."""
-    event_id = int(callback.data.split(":", 1)[1])
-    await callback.answer("Готовлю подробное объяснение…")
-    why_data = await api_client.get_why_explanation(callback.from_user.id, event_id)
-    full = why_data.get("full") or why_data.get("short") or "Объяснение недоступно."
-    await send(callback, f"<b>Почему именно это событие</b>\n\n{esc(full)}")
+    await callback.answer("Готовлю описание…")
+    data = await api_client.get_event_explanation(event_id)
+    summary = data.get("summary") or "Описание недоступно."
+    await send(callback, f"<b>📖 Подробнее о событии</b>\n\n{esc(summary)}")

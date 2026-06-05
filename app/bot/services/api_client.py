@@ -119,7 +119,11 @@ class EventMindAPIClient:
             return {}
 
     async def get_why_explanation(self, telegram_id: int, event_id: int) -> dict:
-        """Получить объяснение «почему рекомендовано» — {short, full}."""
+        """Получить объяснение «почему рекомендовано» — {short, full}.
+
+        Сейчас в боте не используется (после редизайна #3): осталось как
+        служебный метод для будущей доработки персональных объяснений.
+        """
         try:
             async with httpx.AsyncClient(timeout=_TIMEOUT, headers=self._headers) as c:
                 r = await c.get(
@@ -129,6 +133,35 @@ class EventMindAPIClient:
                 return r.json()
         except httpx.HTTPError:
             return {"short": "", "full": ""}
+
+    async def get_event_explanation(self, event_id: int) -> dict:
+        """Человеческое описание события — {summary, cached}.
+
+        Не персонализированно: одно описание на event_id для всех.
+        Кэшируется на стороне API (TTL 6 ч)."""
+        try:
+            async with httpx.AsyncClient(timeout=_TIMEOUT, headers=self._headers) as c:
+                r = await c.get(f"{self.base_url}/events/{event_id}/explain")
+                r.raise_for_status()
+                return r.json()
+        except httpx.HTTPError:
+            return {"summary": ""}
+
+    async def nl_search(self, query: str, limit: int = 10) -> dict:
+        """NL-поиск: «конференции с 3 по 10 июня в Москве».
+
+        Возвращает {events, filters, extracted, fallback_used}.
+        """
+        try:
+            async with httpx.AsyncClient(timeout=_TIMEOUT, headers=self._headers) as c:
+                r = await c.get(
+                    f"{self.base_url}/events/nl-search",
+                    params={"q": query, "limit": limit},
+                )
+                r.raise_for_status()
+                return r.json()
+        except httpx.HTTPError:
+            return {"events": [], "filters": {}, "extracted": False, "fallback_used": True}
 
     async def get_event_interactions(self, telegram_id: int, event_id: int) -> dict:
         try:

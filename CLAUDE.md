@@ -21,8 +21,9 @@ EventMind — система агрегации IT-мероприятий и п�
 - FastAPI 0.110, aiogram 3.13, SQLAlchemy 2.0 + Alembic 1.13, Pydantic 2
 - LangGraph 0.2; **LLM-цепочка** (см. ниже): Gemini → Groq 70b → Groq 8b
 - sentence-transformers 2.7 (MiniLM-L12-v2, 384 dim, multilingual/русский)
-- SQLite (dev fallback) / **PostgreSQL + pgvector** на Supabase (prod/dev)
-- pytest 8.2 (285 тестов), ruff 0.6
+- **PostgreSQL + pgvector** на Supabase (dev и prod). SQLite остаётся только
+  для in-memory модульных тестов; CI прогоняется на pgvector/pgvector:pg16.
+- pytest 8.2 (369 тестов), ruff 0.6
 
 ## LLM (важно для модификаций)
 
@@ -133,20 +134,68 @@ Copy-Item .env.example .env   # вписать BOT_TOKEN, GOOGLE_API_KEY, GROQ_A
 `recommendation_cache` (PK `telegram_id`, TTL 15 мин). Hit пропускает весь
 скоринг. Инвалидируется на feedback / register / edit / analyze-bio.
 
-## AI Copilot
+## AI Copilot (временно скрыт в боте)
 
 LangGraph Supervisor-Worker граф в `app/agents/copilot/`:
-`retrieve → supervisor → один из 5 specialists → finalize`.
+`retrieve → supervisor → один из 5 specialists → finalize`. Код и API
+остаются (`POST /copilot/{tid}/turn`, таблица `copilot_sessions`), но
+**роутер `app/bot/handlers/copilot.py` не подключается в `app/bot/main.py`**:
+после демонстрации руководителю UX признан кривым и будет переработан.
+Кнопки/команды `/copilot` из меню и тура убраны.
 
 5 специалистов: `recommendation`, `career_coach`, `roadmap`, `explainer`,
-`summary`. 6 function-calling tools в `app/agents/copilot/tools.py`:
-`search_events`, `get_user_profile`, `get_interactions_summary`,
-`explain_event`, `recall_about_user`, `mark_saved`.
+`summary`. 6 function-calling tools в `app/agents/copilot/tools.py`.
+**LLM-compaction**: при превышении истории сжимаем середину одним
+system-summary turn'ом (см. `copilot.py::_compact_history`).
 
-Сессии мульти-туровые — состояние в таблице `copilot_sessions`. В боте —
-`app/bot/handlers/copilot.py`. **LLM-compaction**: при превышении
-истории сжимаем середину одним system-summary turn'ом (см.
-`copilot.py::_compact_history`).
+## NL-поиск событий
+
+`POST/GET /events/nl-search?q=<...>` — пользователь пишет фразу обычным
+языком («конференции по AI с 3 по 10 июня в Москве», «онлайн вебинары»),
+LLM с `with_structured_output` извлекает фильтры в Pydantic-схему
+`SearchFilters`: `{date_from, date_to, city, event_type, format, topics,
+free_text}`.
+
+Сервис: `app/api/services/nl_search_service.py`.
+- **LRU-кэш** по нормализованному запросу (256 записей) — одна и та же
+  фраза не дёргает LLM повторно.
+- **Канонизация** на постпроцессе: `canonicalize_city` сворачивает алиасы
+  (msk→moscow, piter→spb), event_type/format проверяются против closed-доменов
+  нормализатора (`_ALLOWED_EVENT_TYPE`, `_ALLOWED_FORMAT`).
+- **Строгий проход** → до 5 совпадений.
+- **Relax-fallback** при 0: поэтапно снимаем фильтры в порядке
+  `free_text → topics → format → event_type → city → date`, при первом
+  непустом наборе показываем **1 ближайшее событие** + CTA «🎯 К рекомендациям».
+- **NULL-сейф для дат только в `upcoming_only`**: при явном диапазоне
+  (`date_from`/`date_to`) события без `start_at` ОТСЕИВАЮТСЯ (раньше
+  хабровские статьи без даты пролезали в выдачу под «в августе»).
+
+UI бота: `app/bot/handlers/search.py`. Sticky waiting-state (60 мин),
+после ввода НЕ сбрасывается — пользователь может писать запрос за
+запросом. Под последним результатом — кнопки «⭐ Сохранить» (Interaction
+`save`) и «🔍 Новый поиск».
+
+## Карточка события и кнопки
+
+- **Одна кнопка «📖 Подробнее»** в карточке рекомендации (была пара
+  «❓ Почему / 📖 Подробнее»). Зовёт `GET /events/{id}/explain` — сервис
+  `app/api/services/event_explain_service.py`: LLM пишет человеческое
+  описание события без скоров и метрик. In-memory кэш TTL 6 ч, общий
+  для всех пользователей.
+- **Ссылка на источник** во всех местах рендера — хелпер
+  `app/bot/utils.py::event_url_line(event)`. URL экранируется как
+  HTML-атрибут (Telegram строго парсит href).
+- **Локализация даты**: `format_event_date` смотрит на **raw** `start_at`
+  ДО конвертации зоны — если часы/минуты нулевые, показываем только дату
+  (без вымышленного «03:00 Moscow» от полночи UTC). Голая ISO-строка
+  `"2026-06-16"` тоже переводится в «16 июня 2026».
+
+## Фильтр прошедших событий
+
+`app/db/event_filters.py::upcoming_only(query, grace_hours=6)` — общий
+SQL-фильтр. NULL-сейф: события без `start_at` остаются. Применён в
+рекомендациях, всех видах поиска, `cb_similar` и `retrieval` (copilot).
+БД ничего не удаляет — interactions/история продолжают учить bayesian/bandit.
 
 ## API security / ops
 
@@ -178,7 +227,7 @@ LangGraph Supervisor-Worker граф в `app/agents/copilot/`:
 
 ## Тесты
 
-**285 кейсов** в `tests/`. Запуск: `.venv/bin/pytest -q` (~80–95 с на тёплом
+**369 кейсов** в `tests/`. Запуск: `.venv/bin/pytest -q` (~80–95 с на тёплом
 кэше; первый прогон дольше — докачивается MiniLM ~120 МБ). На
 Postgres-`DATABASE_URL` 3 SQLite-PRAGMA теста пропускаются.
 
@@ -187,6 +236,10 @@ Postgres-`DATABASE_URL` 3 SQLite-PRAGMA теста пропускаются.
   `test_bandit`, `test_gnn`, `test_skill_gap`.
 - Рекомендер: `test_get_recommendations`, `test_recommendation_cache`,
   `test_feed_cursor`, `test_dedup`, `test_series`, `test_retrieval`.
+- Поиск: `test_nl_search` (27), `test_events_router_routing` (3),
+  `test_past_events_filter` (5).
+- Бот: `test_event_url_line` (4), `test_date_localization` (6),
+  `test_event_explain` (6).
 - Ingestion: `test_ingestion`, `test_multi_source`.
 - Память: `test_memory`/`test_memory_integration`, `test_memory_hard_cap`,
   `test_cold_start`.
@@ -195,7 +248,7 @@ Postgres-`DATABASE_URL` 3 SQLite-PRAGMA теста пропускаются.
 - Security/ops: `test_api_key_auth`, `test_config_validate`, `test_middleware`,
   `test_prompt_safety`.
 - Данные: `test_enum_validation`, `test_ingestion_idempotent`,
-  `test_date_localization`.
+  `test_city_canonicalization`.
 - Прочее: `test_scheduler`, `test_interactions`, `test_pgvector`,
   `test_db_session`.
 
@@ -251,34 +304,48 @@ telegram. Эндпоинты в `app/api/routers/ingestion.py`:
 открытые `[ ]`, с привязкой к файлам, по приоритету). **Держать в актуальном
 состоянии при каждом изменении** (как и этот файл).
 
-## Текущее состояние (2 июня 2026)
+## Текущее состояние (5 июня 2026)
 
 Активная ветка: `dev`.
 
-**Инфраструктура:** dev-БД на **Supabase Postgres** (session pooler, IPv4),
-pgvector 0.8.0. `DATABASE_URL` в `.env`. `pool_pre_ping=True` +
-`pool_recycle=1500` (Supabase pooler режет idle ~5 мин).
+**Инфраструктура:** dev-БД и CI — **Supabase / pgvector pg16** (session
+pooler, IPv4). `DATABASE_URL` в `.env`. `pool_pre_ping=True` +
+`pool_recycle=1500` (Supabase pooler режет idle ~5 мин). SQLite-job
+из CI удалён — на проде/деве везде Postgres, дублирование себя не оправдало.
 
 **Свежие фичи**:
 
-1. **LLM-цепочка**: Gemini (REST-транспорт, автопроба модели) → Groq 70b →
+1. **NL-поиск событий** (`GET /events/nl-search`): LLM-extract фильтров
+   (`SearchFilters`: даты/город/тип/формат/темы), LRU-кэш, канонизация,
+   relax-fallback при 0 → 1 ближайшее событие + CTA «🎯 К рекомендациям».
+   В боте sticky waiting (60 мин) — не нужно жать «🔍 Поиск» перед каждым
+   запросом.
+2. **Единая «📖 Подробнее»** в карточке: одна кнопка вместо «❓ Почему /
+   📖 Подробнее». Новый сервис `event_explain_service.py` пишет
+   человеческое описание (без скоров/метрик), кэш TTL 6 ч.
+3. **Ссылки на источник везде**: `event_url_line` в bot/utils. Прошито в
+   recommendations, search, profile/saved, trending, similar, deep-link.
+4. **Фикс «00 UTC» в датах**: `format_event_date` смотрит на raw `start_at`
+   до конвертации зоны — если часы нулевые, показываем только дату.
+5. **Фильтр прошедших событий**: `app/db/event_filters.py::upcoming_only`,
+   применён везде в выдаче. БД ничего не удаляет.
+6. **Copilot скрыт в боте**: роутер не подключается в `app/bot/main.py`,
+   упоминания убраны из меню и тура (UX признан кривым на демо).
+7. **CI: только Postgres**. `test-sqlite` job удалён, полный suite на
+   `pgvector/pgvector:pg16`.
+8. **LLM-цепочка**: Gemini (REST-транспорт, автопроба модели) → Groq 70b →
    Groq 8b. Circuit-breaker + per-provider cooldown. `POST /admin/llm/reprobe`.
-2. **Read-only `/recommendations`** + TTL-кэш + курсор ленты в БД.
-3. **pgvector-dedup** + adaptive batch + series anti-flood +
-   усиленный фильтр не-IT в системном промпте.
-4. **Security/ops**: `X-API-Key` shared-secret + request-middleware с
-   timing'ами + 4xx WARNING без traceback + fail-fast config validation.
-5. **LLM-устойчивость**: prompt-injection sanitize + memory hard-cap (500) +
-   copilot LLM-compaction истории + scheduler-backfill для embedding'ов.
-6. **DB**: `users.telegram_id` → BIGINT; миграции `c3d4`, `d4e5`, `e5f6`,
-   `f6a7` (feed_cursor, recommendation_cache, series_slug, telegram_id BIGINT).
-7. **CI**: добавлен `test-postgres` job (pgvector/pgvector:pg16) рядом с
-   SQLite-job.
-8. **Данные**: строгая enum-валидация полей нормализатора + idempotent
-   re-ingestion + локализация дат в боте (Europe/Moscow через `zoneinfo`).
-9. **Cleanup**: вынесли `utcnow_naive` в `app/core/utils.py` (раньше был
-   продублирован в 7 файлах); удалили dead `_user_profile_snapshot`.
-10. **Отчёт**: проведён научный аудит, сокращены 5 разделов (~3 стр), Глава 4
+9. **Read-only `/recommendations`** + TTL-кэш + курсор ленты в БД.
+10. **pgvector-dedup** + adaptive batch + series anti-flood +
+    усиленный фильтр не-IT/не-событий в системном промпте нормализатора.
+11. **Security/ops**: `X-API-Key` shared-secret + request-middleware с
+    timing'ами + 4xx WARNING без traceback + fail-fast config validation.
+12. **LLM-устойчивость**: prompt-injection sanitize + memory hard-cap (500) +
+    scheduler-backfill для embedding'ов.
+13. **DB**: `users.telegram_id` → BIGINT; миграции `c3d4`, `d4e5`, `e5f6`,
+    `f6a7` (feed_cursor, recommendation_cache, series_slug, telegram_id BIGINT).
+14. **Данные**: строгая enum-валидация полей нормализатора + idempotent
+    re-ingestion + локализация дат в боте + 19-городный seed и CITY_ALIASES.
+15. **Отчёт**: проведён научный аудит, сокращены 5 разделов (~3 стр), Глава 4
     наполнена цифрами через `eval_offline_synthetic.py` (Таблица 4.2) и
-    `llm_judge_synthetic.py` (Таблица 4.3). Зафиксирован классический trade-off
-    «релевантность ↔ разнообразие», компенсируемый MMR-rerank.
+    `llm_judge_synthetic.py` (Таблица 4.3).
