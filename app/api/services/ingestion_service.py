@@ -177,6 +177,13 @@ def load_telegram_events(db: Session, limit_per_channel: int = 20) -> dict:
     return _load_and_normalize(db, items, source="telegram")
 
 
+def load_timepad_events(db: Session, limit: int = 20) -> dict:
+    """Скачать события из Timepad (JSON API, требуется TIMEPAD_TOKEN)."""
+    from app.ingestion.sources.timepad import fetch_timepad_events
+    items = fetch_timepad_events(limit=limit)
+    return _load_and_normalize(db, items, source="timepad")
+
+
 def load_all_events(db: Session, limit: int = 20) -> dict:
     """Прогнать ВСЕ источники ingestion по очереди и собрать сводку.
 
@@ -192,8 +199,11 @@ def load_all_events(db: Session, limit: int = 20) -> dict:
 
     logger = logging.getLogger(__name__)
 
-    # (имя, вызов) — порядок = очередь выполнения.
+    # (имя, вызов) — порядок = очередь выполнения. Timepad ставим первым:
+    # у него самые чистые данные, идёт быстрее всего и заполняет «золотой»
+    # пул events до того, как пойдёт более шумный поток с RSS/Habr.
     sources: list[tuple[str, callable]] = [
+        ("timepad", lambda: load_timepad_events(db, limit=limit)),
         ("habr", lambda: load_habr_events(db, limit=limit)),
         ("rss", lambda: load_rss_events(db, limit_per_feed=limit)),
         ("kudago", lambda: load_kudago_events(db, limit=limit)),

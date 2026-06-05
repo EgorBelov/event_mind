@@ -61,6 +61,13 @@ class Settings(BaseSettings):
     tg_api_hash: str = ""
     tg_ingest_channels: str = ""    # @channel_user_1,@channel_user_2
 
+    # Timepad API (https://dev.timepad.ru/) — bearer-токен.
+    timepad_token: str = ""
+    # Категории Timepad через запятую. По умолчанию 452 = «IT и интернет».
+    timepad_category_ids: str = "452"
+    # Опциональный фильтр по городам (Москва,Санкт-Петербург,…). Пустой — все.
+    timepad_cities: str = ""
+
     # Периодический ingestion через APScheduler (часы между запусками)
     ingest_interval_hours: int = 6
     # Включать ли периодический ingestion вместе с digest-планировщиком

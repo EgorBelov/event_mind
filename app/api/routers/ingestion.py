@@ -11,6 +11,7 @@ from app.api.services.ingestion_service import (
     load_raw_events,
     load_rss_events,
     load_telegram_events,
+    load_timepad_events,
     normalize_raw_events,
     retry_failed_events,
 )
@@ -62,9 +63,15 @@ def load_tg(limit_per_channel: int = 20, db: Session = Depends(get_db)):
     return load_telegram_events(db, limit_per_channel=limit_per_channel)
 
 
+@router.post("/load-timepad")
+def load_timepad(limit: int = 20, db: Session = Depends(get_db)):
+    """Скачать события из Timepad (JSON API, требуется TIMEPAD_TOKEN)."""
+    return load_timepad_events(db, limit=limit)
+
+
 @router.post("/load-all")
 def load_all(limit: int = 20, db: Session = Depends(get_db)):
-    """Запустить ВСЕ источники по очереди: habr, rss, kudago, luma, meetup, telegram.
+    """Запустить ВСЕ источники по очереди: timepad, habr, rss, kudago, luma, meetup, telegram.
 
     Ненастроенные/упавшие источники пропускаются, не прерывая остальные.
     Возвращает per-source разбивку + агрегированные totals. Операция тяжёлая
