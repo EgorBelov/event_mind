@@ -31,7 +31,7 @@ import sys
 import time
 
 from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy.orm import Session, sessionmaker
 
 from app.db.base import Base
 from app.db.models import (
@@ -41,7 +41,6 @@ from app.db.models import (
     Topic,
     User,
     UserTopic,
-    UserTopicStat,
 )
 from app.recommender.bayesian import update_stats_from_feedback
 from scripts.eval_offline import evaluate
@@ -127,7 +126,7 @@ def _add_interaction(db, user: User, event: Event, action: str) -> None:
     update_stats_from_feedback(db, user.id, codes, action, direction=1)
 
 
-def build_synthetic_db() -> SessionLocal:  # type: ignore[valid-type]
+def build_synthetic_db() -> Session:
     """Создаёт in-memory SQLite БД с синтетическим датасетом и возвращает Session."""
     engine = create_engine("sqlite:///:memory:", connect_args={"check_same_thread": False})
     Base.metadata.create_all(engine)
