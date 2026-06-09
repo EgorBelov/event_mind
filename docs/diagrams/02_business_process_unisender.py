@@ -264,7 +264,6 @@ def compute_route(src_id: str, dst_id: str, route: str) -> list[tuple[float, flo
     dl, dr, dt_, db = node_bounds(dst_id)
     src_cx = (sl + sr) / 2
     src_cy = (st + sb) / 2
-    dst_cx = (dl + dr) / 2
     dst_cy = (dt_ + db) / 2
 
     if route == 'h':
@@ -298,8 +297,8 @@ def render() -> str:
         f'width="{CANVAS_W}" height="{CANVAS_H}">',
         # Arrowhead marker
         '<defs>',
-        f'<marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" '
-        f'markerHeight="8" orient="auto-start-reverse">',
+        '<marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" '
+        'markerHeight="8" orient="auto-start-reverse">',
         f'<path d="M 0,0 L 10,5 L 0,10 z" fill="{C_FLOW}"/>',
         '</marker>',
         '</defs>',
