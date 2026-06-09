@@ -1,0 +1,169 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<bpmn:definitions xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+                  xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                  xmlns:bpmndi="http://www.omg.org/spec/BPMN/20100524/DI"
+                  xmlns:dc="http://www.omg.org/spec/DD/20100524/DC"
+                  xmlns:di="http://www.omg.org/spec/DD/20100524/DI"
+                  id="EventMind_Definitions"
+                  targetNamespace="http://eventmind/bpmn">
+  <bpmn:collaboration id="Collab_1">
+    <bpmn:participant id="Participant_Ingest" name="Ingest pipeline" processRef="Process_Ingest"/>
+    <bpmn:participant id="Participant_Reco" name="Recommendation flow" processRef="Process_Reco"/>
+  </bpmn:collaboration>
+
+  <bpmn:process id="Process_Ingest" isExecutable="false">
+    <bpmn:startEvent id="Start_Ingest" name="Срабатывание&#10;планировщика">
+      <bpmn:outgoing>Flow_I1</bpmn:outgoing>
+    </bpmn:startEvent>
+    <bpmn:task id="Task_Fetch" name="Сбор данных из&#10;внешних источников">
+      <bpmn:incoming>Flow_I1</bpmn:incoming>
+      <bpmn:outgoing>Flow_I2</bpmn:outgoing>
+    </bpmn:task>
+    <bpmn:task id="Task_Stage" name="Сохранение в&#10;staging (raw_events)">
+      <bpmn:incoming>Flow_I2</bpmn:incoming>
+      <bpmn:outgoing>Flow_I3</bpmn:outgoing>
+    </bpmn:task>
+    <bpmn:task id="Task_Normalize" name="AI-нормализация&#10;(LLM + Pydantic)">
+      <bpmn:incoming>Flow_I3</bpmn:incoming>
+      <bpmn:outgoing>Flow_I4</bpmn:outgoing>
+    </bpmn:task>
+    <bpmn:exclusiveGateway id="GW_IsIT" name="IT-событие?">
+      <bpmn:incoming>Flow_I4</bpmn:incoming>
+      <bpmn:outgoing>Flow_I5</bpmn:outgoing>
+      <bpmn:outgoing>Flow_I6</bpmn:outgoing>
+    </bpmn:exclusiveGateway>
+    <bpmn:endEvent id="End_NonIT" name="Помечено&#10;non_it">
+      <bpmn:incoming>Flow_I5</bpmn:incoming>
+    </bpmn:endEvent>
+    <bpmn:task id="Task_Dedup" name="Семантический&#10;дедуп">
+      <bpmn:incoming>Flow_I6</bpmn:incoming>
+      <bpmn:outgoing>Flow_I7</bpmn:outgoing>
+    </bpmn:task>
+    <bpmn:task id="Task_Enrich" name="AI-обогащение&#10;(quality/hype/embedding)">
+      <bpmn:incoming>Flow_I7</bpmn:incoming>
+      <bpmn:outgoing>Flow_I8</bpmn:outgoing>
+    </bpmn:task>
+    <bpmn:endEvent id="End_Catalog" name="Запись в каталог&#10;events">
+      <bpmn:incoming>Flow_I8</bpmn:incoming>
+    </bpmn:endEvent>
+
+    <bpmn:sequenceFlow id="Flow_I1" sourceRef="Start_Ingest" targetRef="Task_Fetch"/>
+    <bpmn:sequenceFlow id="Flow_I2" sourceRef="Task_Fetch" targetRef="Task_Stage"/>
+    <bpmn:sequenceFlow id="Flow_I3" sourceRef="Task_Stage" targetRef="Task_Normalize"/>
+    <bpmn:sequenceFlow id="Flow_I4" sourceRef="Task_Normalize" targetRef="GW_IsIT"/>
+    <bpmn:sequenceFlow id="Flow_I5" name="нет" sourceRef="GW_IsIT" targetRef="End_NonIT"/>
+    <bpmn:sequenceFlow id="Flow_I6" name="да" sourceRef="GW_IsIT" targetRef="Task_Dedup"/>
+    <bpmn:sequenceFlow id="Flow_I7" sourceRef="Task_Dedup" targetRef="Task_Enrich"/>
+    <bpmn:sequenceFlow id="Flow_I8" sourceRef="Task_Enrich" targetRef="End_Catalog"/>
+  </bpmn:process>
+
+  <bpmn:process id="Process_Reco" isExecutable="false">
+    <bpmn:startEvent id="Start_Reco" name="Запрос&#10;пользователя">
+      <bpmn:outgoing>Flow_R1</bpmn:outgoing>
+    </bpmn:startEvent>
+    <bpmn:task id="Task_Bot" name="Telegram-бот&#10;принимает команду">
+      <bpmn:incoming>Flow_R1</bpmn:incoming>
+      <bpmn:outgoing>Flow_R2</bpmn:outgoing>
+    </bpmn:task>
+    <bpmn:task id="Task_Backend" name="Backend (FastAPI):&#10;маршрутизация">
+      <bpmn:incoming>Flow_R2</bpmn:incoming>
+      <bpmn:outgoing>Flow_R3</bpmn:outgoing>
+    </bpmn:task>
+    <bpmn:task id="Task_Hybrid" name="Hybrid-ранжирование&#10;(9 компонент)">
+      <bpmn:incoming>Flow_R3</bpmn:incoming>
+      <bpmn:outgoing>Flow_R4</bpmn:outgoing>
+    </bpmn:task>
+    <bpmn:task id="Task_MMR" name="MMR-rerank +&#10;series anti-flood">
+      <bpmn:incoming>Flow_R4</bpmn:incoming>
+      <bpmn:outgoing>Flow_R5</bpmn:outgoing>
+    </bpmn:task>
+    <bpmn:endEvent id="End_Cards" name="Карточки в&#10;Telegram">
+      <bpmn:incoming>Flow_R5</bpmn:incoming>
+    </bpmn:endEvent>
+
+    <bpmn:sequenceFlow id="Flow_R1" sourceRef="Start_Reco" targetRef="Task_Bot"/>
+    <bpmn:sequenceFlow id="Flow_R2" sourceRef="Task_Bot" targetRef="Task_Backend"/>
+    <bpmn:sequenceFlow id="Flow_R3" sourceRef="Task_Backend" targetRef="Task_Hybrid"/>
+    <bpmn:sequenceFlow id="Flow_R4" sourceRef="Task_Hybrid" targetRef="Task_MMR"/>
+    <bpmn:sequenceFlow id="Flow_R5" sourceRef="Task_MMR" targetRef="End_Cards"/>
+  </bpmn:process>
+
+  <bpmndi:BPMNDiagram id="BPMNDiagram_1">
+    <bpmndi:BPMNPlane id="BPMNPlane_1" bpmnElement="Collab_1">
+      <bpmndi:BPMNShape id="Shape_PartIngest" bpmnElement="Participant_Ingest" isHorizontal="true">
+        <dc:Bounds x="100" y="60" width="1400" height="180"/>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_PartReco" bpmnElement="Participant_Reco" isHorizontal="true">
+        <dc:Bounds x="100" y="280" width="1100" height="160"/>
+      </bpmndi:BPMNShape>
+
+      <bpmndi:BPMNShape id="Shape_StartIngest" bpmnElement="Start_Ingest">
+        <dc:Bounds x="160" y="135" width="36" height="36"/>
+        <bpmndi:BPMNLabel><dc:Bounds x="140" y="178" width="80" height="30"/></bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Fetch" bpmnElement="Task_Fetch">
+        <dc:Bounds x="240" y="113" width="120" height="80"/>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Stage" bpmnElement="Task_Stage">
+        <dc:Bounds x="400" y="113" width="120" height="80"/>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Normalize" bpmnElement="Task_Normalize">
+        <dc:Bounds x="560" y="113" width="120" height="80"/>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_GW" bpmnElement="GW_IsIT" isMarkerVisible="true">
+        <dc:Bounds x="720" y="128" width="50" height="50"/>
+        <bpmndi:BPMNLabel><dc:Bounds x="708" y="98" width="80" height="20"/></bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_EndNonIT" bpmnElement="End_NonIT">
+        <dc:Bounds x="820" y="80" width="36" height="36"/>
+        <bpmndi:BPMNLabel><dc:Bounds x="810" y="50" width="60" height="30"/></bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Dedup" bpmnElement="Task_Dedup">
+        <dc:Bounds x="820" y="113" width="120" height="80"/>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Enrich" bpmnElement="Task_Enrich">
+        <dc:Bounds x="980" y="113" width="140" height="80"/>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_EndCatalog" bpmnElement="End_Catalog">
+        <dc:Bounds x="1160" y="135" width="36" height="36"/>
+        <bpmndi:BPMNLabel><dc:Bounds x="1140" y="178" width="80" height="30"/></bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+
+      <bpmndi:BPMNShape id="Shape_StartReco" bpmnElement="Start_Reco">
+        <dc:Bounds x="160" y="335" width="36" height="36"/>
+        <bpmndi:BPMNLabel><dc:Bounds x="148" y="378" width="60" height="30"/></bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Bot" bpmnElement="Task_Bot">
+        <dc:Bounds x="240" y="313" width="140" height="80"/>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Backend" bpmnElement="Task_Backend">
+        <dc:Bounds x="420" y="313" width="140" height="80"/>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Hybrid" bpmnElement="Task_Hybrid">
+        <dc:Bounds x="600" y="313" width="140" height="80"/>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_MMR" bpmnElement="Task_MMR">
+        <dc:Bounds x="780" y="313" width="140" height="80"/>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_EndCards" bpmnElement="End_Cards">
+        <dc:Bounds x="960" y="335" width="36" height="36"/>
+        <bpmndi:BPMNLabel><dc:Bounds x="945" y="378" width="70" height="30"/></bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+
+      <bpmndi:BPMNEdge id="Edge_I1" bpmnElement="Flow_I1"><di:waypoint x="196" y="153"/><di:waypoint x="240" y="153"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_I2" bpmnElement="Flow_I2"><di:waypoint x="360" y="153"/><di:waypoint x="400" y="153"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_I3" bpmnElement="Flow_I3"><di:waypoint x="520" y="153"/><di:waypoint x="560" y="153"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_I4" bpmnElement="Flow_I4"><di:waypoint x="680" y="153"/><di:waypoint x="720" y="153"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_I5" bpmnElement="Flow_I5"><di:waypoint x="745" y="128"/><di:waypoint x="745" y="98"/><di:waypoint x="820" y="98"/><bpmndi:BPMNLabel><dc:Bounds x="770" y="80" width="30" height="14"/></bpmndi:BPMNLabel></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_I6" bpmnElement="Flow_I6"><di:waypoint x="770" y="153"/><di:waypoint x="820" y="153"/><bpmndi:BPMNLabel><dc:Bounds x="780" y="135" width="20" height="14"/></bpmndi:BPMNLabel></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_I7" bpmnElement="Flow_I7"><di:waypoint x="940" y="153"/><di:waypoint x="980" y="153"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_I8" bpmnElement="Flow_I8"><di:waypoint x="1120" y="153"/><di:waypoint x="1160" y="153"/></bpmndi:BPMNEdge>
+
+      <bpmndi:BPMNEdge id="Edge_R1" bpmnElement="Flow_R1"><di:waypoint x="196" y="353"/><di:waypoint x="240" y="353"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_R2" bpmnElement="Flow_R2"><di:waypoint x="380" y="353"/><di:waypoint x="420" y="353"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_R3" bpmnElement="Flow_R3"><di:waypoint x="560" y="353"/><di:waypoint x="600" y="353"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_R4" bpmnElement="Flow_R4"><di:waypoint x="740" y="353"/><di:waypoint x="780" y="353"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_R5" bpmnElement="Flow_R5"><di:waypoint x="920" y="353"/><di:waypoint x="960" y="353"/></bpmndi:BPMNEdge>
+    </bpmndi:BPMNPlane>
+  </bpmndi:BPMNDiagram>
+</bpmn:definitions>

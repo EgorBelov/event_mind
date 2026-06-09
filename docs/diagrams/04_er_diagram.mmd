@@ -6,7 +6,6 @@ erDiagram
     USERS ||--o| USER_BANDIT_STATES : has
     USERS ||--o| USER_SKILL_PROFILES : has
     USERS ||--o{ USER_MEMORIES : has
-    USERS ||--o{ COPILOT_SESSIONS : has
 
     EVENTS ||--o{ INTERACTIONS : referenced_by
     EVENTS ||--o{ EVENT_TOPICS : has
@@ -87,10 +86,4 @@ erDiagram
         string category
         float salience
         text embedding "JSON"
-    }
-
-    COPILOT_SESSIONS {
-        int id PK
-        int user_id FK
-        text messages_json "JSON"
     }

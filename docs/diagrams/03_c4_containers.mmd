@@ -9,11 +9,11 @@ flowchart TB
     USER(("👤 Пользователь<br/>IT-специалист"))
     class USER person
 
-    subgraph EVMIND["Система EventMind"]
+    subgraph EVMIND["Разрабатываемая система"]
         BOT["Telegram-бот<br/>━━━━━━━━━━━<br/>aiogram 3<br/><br/>Обрабатывает команды<br/>и сообщения пользователя"]
-        API["REST API<br/>━━━━━━━━━━━<br/>FastAPI + Uvicorn<br/><br/>Основная бизнес-логика,<br/>рекомендатель, агенты"]
+        API["Backend (FastAPI)<br/>━━━━━━━━━━━<br/>FastAPI + Uvicorn<br/><br/>HTTP-эндпоинты + сервисный слой:<br/>рекомендатель, поиск, ингест"]
         SCHED["Планировщик задач<br/>━━━━━━━━━━━<br/>APScheduler<br/><br/>Дайджест, ингест,<br/>уплотнение памяти"]
-        DB[("База данных<br/>━━━━━━━━━━━<br/>SQLite (WAL mode)<br/><br/>users, events, interactions,<br/>memory, bandit, sessions")]
+        DB[("База данных<br/>━━━━━━━━━━━<br/>PostgreSQL + pgvector<br/><br/>users, events, interactions,<br/>memory, bandit")]
     end
 
     class BOT,API,SCHED container

@@ -16,9 +16,8 @@ flowchart TD
 
     USER(["👤 Пользователь"]):::user
     BOT["Telegram-бот"]:::sys
-    API["REST API"]:::sys
+    API["Backend (FastAPI)"]:::sys
     RECO["Рекомендатель<br/>(hybrid + MMR)"]:::ai
-    COPILOT["Мультиагентный<br/>Copilot"]:::ai
 
     USERMODEL[("Модель пользователя<br/>profile + Beta + LinUCB + memory")]:::db
 
@@ -41,9 +40,3 @@ flowchart TD
     USER -.->|лайк/дизлайк/сейв| BOT
     BOT -.-> API
     API -.->|обновление| USERMODEL
-
-    USER -.->|вопрос| BOT
-    BOT -.-> COPILOT
-    COPILOT --> EVDB
-    COPILOT --> USERMODEL
-    COPILOT -.->|ответ| USER
