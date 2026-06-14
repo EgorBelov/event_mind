@@ -10,14 +10,13 @@
 from __future__ import annotations
 
 import argparse
-import copy
 from pathlib import Path
 
 from pptx import Presentation
 from pptx.dml.color import RGBColor
 from pptx.enum.text import MSO_ANCHOR, PP_ALIGN
 from pptx.oxml.ns import qn
-from pptx.util import Emu, Inches, Pt
+from pptx.util import Inches, Pt
 
 # --- палитра темы шаблона --------------------------------------------------
 NAVY = RGBColor(0x0F, 0x2C, 0x68)
@@ -58,8 +57,16 @@ def _clear(tf):
     return p0
 
 
-def add_textbox(slide, l, t, w, h, anchor=None):
-    tb = slide.shapes.add_textbox(Inches(l), Inches(t), Inches(w), Inches(h))
+def addrun(para, text, size=None, bold=None, color=None, italic=None):
+    """Добавить run с текстом и форматированием в один вызов."""
+    run = para.add_run()
+    run.text = text
+    _set_font(run, size, bold, color, italic)
+    return run
+
+
+def add_textbox(slide, left, top, w, h, anchor=None):
+    tb = slide.shapes.add_textbox(Inches(left), Inches(top), Inches(w), Inches(h))
     tf = tb.text_frame
     tf.word_wrap = True
     if anchor is not None:
@@ -75,28 +82,20 @@ def add_footer(slide):
     на эти элементы.
     """
     tb = add_textbox(slide, 1.08, 0.27, 3.0, 0.55, anchor=MSO_ANCHOR.MIDDLE)
-    p = _clear(tb.text_frame)
-    r = p.add_run(); r.text = PROJ_TITLE
-    _set_font(r, 10.5, bold=True, color=NAVY)
+    addrun(_clear(tb.text_frame), PROJ_TITLE, 10.5, bold=True, color=NAVY)
 
     tb = add_textbox(slide, 4.2, 0.27, 2.2, 0.55, anchor=MSO_ANCHOR.MIDDLE)
-    p = _clear(tb.text_frame)
-    r = p.add_run(); r.text = AUTHOR
-    _set_font(r, 10.5, color=GREY)
+    addrun(_clear(tb.text_frame), AUTHOR, 10.5, color=GREY)
 
     tb = add_textbox(slide, 7.46, 0.27, 2.0, 0.6, anchor=MSO_ANCHOR.MIDDLE)
     tf = tb.text_frame
-    p = _clear(tf)
-    r = p.add_run(); r.text = EVENT[0]; _set_font(r, 10.5, bold=True, color=NAVY)
-    p2 = tf.add_paragraph()
-    r = p2.add_run(); r.text = EVENT[1]; _set_font(r, 10.5, color=GREY)
+    addrun(_clear(tf), EVENT[0], 10.5, bold=True, color=NAVY)
+    addrun(tf.add_paragraph(), EVENT[1], 10.5, color=GREY)
 
 
 def add_heading(slide, text):
     tb = add_textbox(slide, 0.5, 1.02, 12.3, 0.8)
-    p = _clear(tb.text_frame)
-    r = p.add_run(); r.text = text
-    _set_font(r, 32, bold=True, color=NAVY)
+    addrun(_clear(tb.text_frame), text, 32, bold=True, color=NAVY)
 
 
 def new_slide(prs, heading=None):
@@ -110,9 +109,9 @@ def new_slide(prs, heading=None):
     return slide
 
 
-def bullets(slide, l, t, w, h, items, size=16, gap=8, anchor=MSO_ANCHOR.TOP):
+def bullets(slide, left, top, w, h, items, size=16, gap=8, anchor=MSO_ANCHOR.TOP):
     """items: список (text, level) либо строк. level 0 — буллет, 1 — подпункт."""
-    tb = add_textbox(slide, l, t, w, h, anchor=anchor)
+    tb = add_textbox(slide, left, top, w, h, anchor=anchor)
     tf = tb.text_frame
     first = True
     for it in items:
@@ -125,29 +124,29 @@ def bullets(slide, l, t, w, h, items, size=16, gap=8, anchor=MSO_ANCHOR.TOP):
         p.level = level
         p.space_after = Pt(gap)
         marker = "•  " if level == 0 else "–  "
-        r = p.add_run(); r.text = marker + text
-        _set_font(r, size if level == 0 else size - 2,
-                  bold=False, color=NAVY if level == 0 else GREY)
+        addrun(p, marker + text, size if level == 0 else size - 2,
+               bold=False, color=NAVY if level == 0 else GREY)
     return tb
 
 
-def card(slide, l, t, w, h, title, body, fill=LIGHT, title_color=NAVY):
+def card(slide, left, top, w, h, title, body, fill=LIGHT, title_color=NAVY):
     """Прямоугольная карточка с заголовком и текстом."""
-    sh = slide.shapes.add_shape(1, Inches(l), Inches(t), Inches(w), Inches(h))
-    sh.fill.solid(); sh.fill.fore_color.rgb = fill
-    sh.line.color.rgb = NAVY; sh.line.width = Pt(0.75)
+    sh = slide.shapes.add_shape(1, Inches(left), Inches(top), Inches(w), Inches(h))
+    sh.fill.solid()
+    sh.fill.fore_color.rgb = fill
+    sh.line.color.rgb = NAVY
+    sh.line.width = Pt(0.75)
     sh.shadow.inherit = False
-    tf = sh.text_frame; tf.word_wrap = True
+    tf = sh.text_frame
+    tf.word_wrap = True
     tf.vertical_anchor = MSO_ANCHOR.TOP
     for m in ("left", "right", "top", "bottom"):
         setattr(tf, f"margin_{m}", Pt(8))
-    p = _clear(tf)
-    r = p.add_run(); r.text = title
-    _set_font(r, 15, bold=True, color=title_color)
+    addrun(_clear(tf), title, 15, bold=True, color=title_color)
     for line in body:
-        bp = tf.add_paragraph(); bp.space_before = Pt(3)
-        r = bp.add_run(); r.text = line
-        _set_font(r, 12.5, color=GREY)
+        bp = tf.add_paragraph()
+        bp.space_before = Pt(3)
+        addrun(bp, line, 12.5, color=GREY)
     return sh
 
 
@@ -163,11 +162,11 @@ def add_image_fit(slide, path, area_l, area_t, area_w, area_h):
                                     width=Inches(w), height=Inches(h))
 
 
-def caption(slide, text, t=7.05):
-    tb = add_textbox(slide, 0.55, t, 12.2, 0.4)
-    p = _clear(tb.text_frame); p.alignment = PP_ALIGN.CENTER
-    r = p.add_run(); r.text = text
-    _set_font(r, 12, italic=True, color=GREY)
+def caption(slide, text, top=7.05):
+    tb = add_textbox(slide, 0.55, top, 12.2, 0.4)
+    p = _clear(tb.text_frame)
+    p.alignment = PP_ALIGN.CENTER
+    addrun(p, text, 12, italic=True, color=GREY)
 
 
 def style_table(table, header_fill=NAVY, col_widths=None, header_size=12.5,
@@ -178,7 +177,8 @@ def style_table(table, header_fill=NAVY, col_widths=None, header_size=12.5,
     n_cols = len(table.columns)
     for ci in range(n_cols):
         cell = table.cell(0, ci)
-        cell.fill.solid(); cell.fill.fore_color.rgb = header_fill
+        cell.fill.solid()
+        cell.fill.fore_color.rgb = header_fill
         cell.vertical_anchor = MSO_ANCHOR.MIDDLE
         for p in cell.text_frame.paragraphs:
             for r in p.runs:
@@ -196,15 +196,14 @@ def style_table(table, header_fill=NAVY, col_widths=None, header_size=12.5,
                               color=NAVY if (first_col_bold and ci == 0) else GREY)
 
 
-def add_table(slide, data, l, t, w, h, col_widths=None, header_size=12.5,
+def add_table(slide, data, left, top, w, h, col_widths=None, header_size=12.5,
               body_size=11):
     rows, cols = len(data), len(data[0])
-    gf = slide.shapes.add_table(rows, cols, Inches(l), Inches(t),
+    gf = slide.shapes.add_table(rows, cols, Inches(left), Inches(top),
                                 Inches(w), Inches(h))
     table = gf.table
     # отключаем «банд» стандартного стиля — красим сами
-    tbl = table._tbl
-    tblPr = tbl.tblPr
+    tblPr = table._tbl.tblPr
     tblPr.set("firstRow", "1")
     tblPr.set("bandRow", "0")
     for ri, row in enumerate(data):
@@ -220,11 +219,8 @@ def add_table(slide, data, l, t, w, h, col_widths=None, header_size=12.5,
     return table
 
 
-# ===========================================================================
-def build(template: str, out: str):
-    prs = Presentation(template)
-
-    # --- Слайд 1: обложка — правим текст по месту -------------------------
+def _build_cover(prs):
+    """Слайд 1: обложка — правим текст по месту, сохраняя дизайн шаблона."""
     s1 = prs.slides[0]
     by_name = {}
     for sh in s1.shapes:
@@ -237,18 +233,16 @@ def build(template: str, out: str):
         for ln in lines:
             pp = p if first else tf.add_paragraph()
             first = False
-            r = pp.add_run(); r.text = ln
-            _set_font(r, size, bold=bold, color=NAVY)
+            addrun(pp, ln, size, bold=bold, color=NAVY)
 
     set_title(by_name["Заголовок 1"][0],
               ["EventMind — система агрегации IT-мероприятий",
                "и персонализированных AI-рекомендаций"], size=30)
 
     # «Пермь / 2026»
-    t4 = by_name["Текст 4"][0]
-    tf = t4.text_frame; p = _clear(tf)
-    r = p.add_run(); r.text = "Пермь"; _set_font(r, 14)
-    p2 = tf.add_paragraph(); r = p2.add_run(); r.text = "2026"; _set_font(r, 14)
+    tf = by_name["Текст 4"][0].text_frame
+    addrun(_clear(tf), "Пермь", 14)
+    addrun(tf.add_paragraph(), "2026", 14)
 
     # автор / руководитель — берём текстблоки по позиции
     for sh in s1.shapes:
@@ -256,33 +250,38 @@ def build(template: str, out: str):
             continue
         txt = sh.text_frame.text
         if txt.startswith("Работу выполнил"):
-            tf = sh.text_frame; p = _clear(tf)
-            r = p.add_run(); r.text = "Работу выполнил студент: "
-            _set_font(r, 18)
-            r = p.add_run(); r.text = "Белов Е.А."
-            _set_font(r, 18, bold=True)
+            tf = sh.text_frame
+            p = _clear(tf)
+            addrun(p, "Работу выполнил студент: ", 18)
+            addrun(p, "Белов Е.А.", 18, bold=True)
         elif txt.startswith("Руководитель"):
-            tf = sh.text_frame; p = _clear(tf)
-            r = p.add_run(); r.text = "Руководитель:"
-            _set_font(r, 18)
-            p2 = tf.add_paragraph()
-            r = p2.add_run()
-            r.text = "Доцент к.ф.-м.н., доцент кафедры информационных технологий в бизнесе"
-            _set_font(r, 14)
-            p3 = tf.add_paragraph()
-            r = p3.add_run(); r.text = "Замятина Е.Б."
-            _set_font(r, 14, bold=True)
+            tf = sh.text_frame
+            p = _clear(tf)
+            addrun(p, "Руководитель:", 18)
+            addrun(tf.add_paragraph(),
+                   "Доцент к.ф.-м.н., доцент кафедры информационных "
+                   "технологий в бизнесе", 14)
+            addrun(tf.add_paragraph(), "Замятина Е.Б.", 14, bold=True)
 
-    # --- удаляем старые контентные слайды 2..N ----------------------------
-    # важно сбросить и rel, иначе старые части слайдов остаются достижимы и
-    # при записи конфликтуют по имени с новыми (slideN.xml).
+
+def _drop_content_slides(prs):
+    """Удаляем старые контентные слайды 2..N.
+
+    Важно сбросить и rel, иначе старые части слайдов остаются достижимы и
+    при записи конфликтуют по имени с новыми (slideN.xml).
+    """
     xml_slides = prs.slides._sldIdLst
     for sld in list(xml_slides)[1:]:
-        rId = sld.get(qn("r:id"))
-        prs.part.drop_rel(rId)
+        prs.part.drop_rel(sld.get(qn("r:id")))
         xml_slides.remove(sld)
 
-    # ---------------------------------------------------------------------
+
+# ===========================================================================
+def build(template: str, out: str):
+    prs = Presentation(template)
+    _build_cover(prs)
+    _drop_content_slides(prs)
+
     # Слайд 2 — Актуальность
     s = new_slide(prs, "Актуальность")
     bullets(s, 0.6, 1.95, 7.2, 4.8, [
@@ -307,7 +306,6 @@ def build(template: str, out: str):
          ["Учитываем не только темы, но и карьерную цель и историю реакций "
           "пользователя."], fill=RGBColor(0xFD, 0xEF, 0xE3))
 
-    # ---------------------------------------------------------------------
     # Слайд 3 — Объект и предмет
     s = new_slide(prs, "Объект и предмет исследования")
     card(s, 0.7, 2.2, 5.8, 3.2, "Объект исследования",
@@ -320,7 +318,6 @@ def build(template: str, out: str):
           "AI-копилота вокруг общей базы данных."],
          fill=RGBColor(0xE3, 0xF0, 0xE6))
 
-    # ---------------------------------------------------------------------
     # Слайд 4 — Цель и задачи
     s = new_slide(prs, "Цель и задачи")
     card(s, 0.6, 1.95, 5.5, 3.3, "Цель",
@@ -338,23 +335,25 @@ def build(template: str, out: str):
         "Тестирование и оценка качества рекомендаций",
     ], size=16, gap=14)
     tb = add_textbox(s, 6.4, 1.0, 4, 0.6)
-    p = _clear(tb.text_frame); r = p.add_run(); r.text = "Задачи"
-    _set_font(r, 20, bold=True, color=ORANGE)
+    addrun(_clear(tb.text_frame), "Задачи", 20, bold=True, color=ORANGE)
 
-    # ---------------------------------------------------------------------
     # Слайд 5 — Проблемы (овалы)
     s = new_slide(prs)
-    # центральный овал
-    def oval(l, t, w, h, text, fill, size=14, tcolor=WHITE, bold=False):
-        o = s.shapes.add_shape(9, Inches(l), Inches(t), Inches(w), Inches(h))
-        o.fill.solid(); o.fill.fore_color.rgb = fill
-        o.line.color.rgb = WHITE; o.line.width = Pt(1.25)
+
+    def oval(left, top, w, h, text, fill, size=14, tcolor=WHITE, bold=False):
+        o = s.shapes.add_shape(9, Inches(left), Inches(top), Inches(w), Inches(h))
+        o.fill.solid()
+        o.fill.fore_color.rgb = fill
+        o.line.color.rgb = WHITE
+        o.line.width = Pt(1.25)
         o.shadow.inherit = False
-        tf = o.text_frame; tf.word_wrap = True
-        p = _clear(tf); p.alignment = PP_ALIGN.CENTER
-        r = p.add_run(); r.text = text
-        _set_font(r, size, bold=bold, color=tcolor)
+        tf = o.text_frame
+        tf.word_wrap = True
+        p = _clear(tf)
+        p.alignment = PP_ALIGN.CENTER
+        addrun(p, text, size, bold=bold, color=tcolor)
         return o
+
     oval(4.42, 3.05, 4.5, 1.5, "Проблемы", NAVY, size=27, bold=True)
     oval(0.5, 1.45, 3.6, 1.45, "Фрагментированность источников событий", BLUE)
     oval(0.65, 4.7, 3.6, 1.45, "Информационный шум и дубли анонсов", BLUE)
@@ -362,7 +361,6 @@ def build(template: str, out: str):
     oval(9.2, 1.45, 3.6, 1.45, "Рекомендации без объяснения выбора", BLUE)
     oval(9.05, 4.7, 3.6, 1.45, "Ручная фильтрация отнимает время", BLUE)
 
-    # ---------------------------------------------------------------------
     # Слайд 6 — Анализ подходов
     s = new_slide(prs, "Анализ подходов к рекомендациям")
     data = [
@@ -386,7 +384,6 @@ def build(template: str, out: str):
     caption(s, "Гибрид объединяет сильные стороны подходов и снимает "
                "холодный старт — выбран основным алгоритмом.")
 
-    # ---------------------------------------------------------------------
     # Слайд 7 — Use case
     s = new_slide(prs, "Диаграмма вариантов использования")
     add_image_fit(s, DIAGRAMS / "01_use_case.png", 0.6, 1.85, 5.6, 5.15)
@@ -399,14 +396,12 @@ def build(template: str, out: str):
         "Диалог с AI-копилотом: план развития под цель",
     ], size=15, gap=13)
 
-    # ---------------------------------------------------------------------
     # Слайд 8 — Бизнес-процесс
     s = new_slide(prs, "Бизнес-процесс системы")
     add_image_fit(s, DIAGRAMS / "02_business_process.png", 0.6, 1.85, 12.1, 5.15)
     caption(s, "От сбора и нормализации событий до доставки "
                "персональной ленты и обработки обратной связи.")
 
-    # ---------------------------------------------------------------------
     # Слайд 9 — Архитектура C4
     s = new_slide(prs, "Архитектура системы")
     add_image_fit(s, DIAGRAMS / "03_c4_containers.png", 0.5, 1.85, 8.4, 5.15)
@@ -420,14 +415,12 @@ def build(template: str, out: str):
     ], size=13.5, gap=10)
     caption(s, "Модульная схема на уровне контейнеров (C4).")
 
-    # ---------------------------------------------------------------------
     # Слайд 10 — ER
     s = new_slide(prs, "Модель данных")
     add_image_fit(s, DIAGRAMS / "04_er_diagram.png", 0.6, 1.85, 12.1, 5.15)
     caption(s, "Пользователи, события, взаимодействия, embedding'и, "
                "состояние бандита и долговременная память.")
 
-    # ---------------------------------------------------------------------
     # Слайд 11 — Технологический стек
     s = new_slide(prs, "Выбор средств реализации")
     data = [
@@ -445,7 +438,6 @@ def build(template: str, out: str):
     add_table(s, data, 0.55, 1.9, 12.25, 5.1,
               col_widths=[2.6, 4.3, 5.35], body_size=12)
 
-    # ---------------------------------------------------------------------
     # Слайд 12 — 9 компонент рекомендатора
     s = new_slide(prs, "Гибридный рекомендатель: 9 компонент")
     data = [
@@ -470,14 +462,12 @@ def build(template: str, out: str):
         ("TTL-кэш выдачи 15 мин", 0),
     ], size=12.5, gap=10)
 
-    # ---------------------------------------------------------------------
     # Слайд 13 — Sequence рекомендации
     s = new_slide(prs, "Как строится рекомендация")
     add_image_fit(s, DIAGRAMS / "05_sequence_recommend.png", 0.6, 1.85, 12.1, 5.1)
     caption(s, "GET /recommendations → hybrid отбирает top-N → один "
                "LLM-вызов пишет объяснения батчем (RAG, без галлюцинаций).")
 
-    # ---------------------------------------------------------------------
     # Слайд 14 — Нормализация ingestion
     s = new_slide(prs, "Сбор и нормализация событий")
     add_image_fit(s, DIAGRAMS / "06_activity_normalization.png", 0.5, 1.85, 8.6, 5.1)
@@ -491,7 +481,6 @@ def build(template: str, out: str):
     ], size=12.5, gap=9)
     caption(s, "Батчевая нормализация с адаптивным размером чанка.")
 
-    # ---------------------------------------------------------------------
     # Слайд 15 — AI-Copilot
     s = new_slide(prs, "AI-копилот: Supervisor-Worker")
     add_image_fit(s, DIAGRAMS / "07_copilot_graph.png", 0.5, 1.85, 8.4, 5.1)
@@ -504,7 +493,6 @@ def build(template: str, out: str):
         ("Явный, тестируемый граф — не «магия»", 0),
     ], size=12.5, gap=9)
 
-    # ---------------------------------------------------------------------
     # Слайд 16 — LLM-цепочка и надёжность
     s = new_slide(prs, "LLM-цепочка и надёжность")
     card(s, 0.6, 1.95, 6.0, 3.4, "Цепочка провайдеров",
@@ -524,7 +512,6 @@ def build(template: str, out: str):
         ("Read-only hot-path + TTL-кэш рекомендаций", 0),
     ], size=14, gap=10)
 
-    # ---------------------------------------------------------------------
     # Слайд 17 — Оценка качества
     s = new_slide(prs, "Оценка качества")
     t1 = [
@@ -537,9 +524,8 @@ def build(template: str, out: str):
     add_table(s, t1, 0.6, 2.0, 6.0, 2.7,
               col_widths=[1.7, 0.8, 1.1, 1.3, 1.1], body_size=12)
     tb = add_textbox(s, 0.6, 1.6, 6, 0.4)
-    p = _clear(tb.text_frame); r = p.add_run()
-    r.text = "Leave-one-out (Recall@k / nDCG@k)"
-    _set_font(r, 13, bold=True, color=ORANGE)
+    addrun(_clear(tb.text_frame), "Leave-one-out (Recall@k / nDCG@k)",
+           13, bold=True, color=ORANGE)
 
     t2 = [
         ["Алгоритм", "relevance", "diversity"],
@@ -550,9 +536,8 @@ def build(template: str, out: str):
     add_table(s, t2, 7.0, 2.0, 5.6, 2.4,
               col_widths=[2.4, 1.6, 1.6], body_size=12)
     tb = add_textbox(s, 7.0, 1.6, 6, 0.4)
-    p = _clear(tb.text_frame); r = p.add_run()
-    r.text = "LLM-судья (оценка 1–5)"
-    _set_font(r, 13, bold=True, color=ORANGE)
+    addrun(_clear(tb.text_frame), "LLM-судья (оценка 1–5)",
+           13, bold=True, color=ORANGE)
 
     bullets(s, 0.6, 5.0, 12.2, 1.9, [
         "Гибрид превосходит rule-only по Recall@5 (0,65 против 0,50) "
@@ -562,7 +547,6 @@ def build(template: str, out: str):
         "Воспроизводимые скрипты оценки с фиксированным seed=42.",
     ], size=14, gap=8)
 
-    # ---------------------------------------------------------------------
     # Слайд 18 — Заключение
     s = new_slide(prs, "Заключение")
     bullets(s, 0.6, 1.9, 6.1, 5.0, [
@@ -582,36 +566,38 @@ def build(template: str, out: str):
           "• Развитие в магистерскую работу"],
          fill=RGBColor(0xFD, 0xEF, 0xE3), title_color=ORANGE)
 
-    # ---------------------------------------------------------------------
     # Слайд 19 — Спасибо
     s = prs.slides.add_slide(prs.slide_layouts[1])
     for ph in list(s.placeholders):
         ph._element.getparent().remove(ph._element)
     add_footer(s)
     box = s.shapes.add_shape(1, Inches(1.6), Inches(2.3), Inches(10.1), Inches(2.2))
-    box.fill.solid(); box.fill.fore_color.rgb = NAVY
-    box.line.fill.background(); box.shadow.inherit = False
-    tf = box.text_frame; tf.word_wrap = True
+    box.fill.solid()
+    box.fill.fore_color.rgb = NAVY
+    box.line.fill.background()
+    box.shadow.inherit = False
+    tf = box.text_frame
+    tf.word_wrap = True
     tf.vertical_anchor = MSO_ANCHOR.MIDDLE
-    p = _clear(tf); p.alignment = PP_ALIGN.CENTER
-    r = p.add_run(); r.text = "Благодарю за внимание!"
-    _set_font(r, 40, bold=True, color=WHITE)
-    p2 = tf.add_paragraph(); p2.alignment = PP_ALIGN.CENTER
-    r = p2.add_run(); r.text = "Готов ответить на ваши вопросы"
-    _set_font(r, 20, color=RGBColor(0xCF, 0xDA, 0xEE))
+    p = _clear(tf)
+    p.alignment = PP_ALIGN.CENTER
+    addrun(p, "Благодарю за внимание!", 40, bold=True, color=WHITE)
+    p2 = tf.add_paragraph()
+    p2.alignment = PP_ALIGN.CENTER
+    addrun(p2, "Готов ответить на ваши вопросы", 20,
+           color=RGBColor(0xCF, 0xDA, 0xEE))
 
     tb = add_textbox(s, 1.6, 5.0, 10.1, 1.6)
     tf = tb.text_frame
-    p = _clear(tf); p.alignment = PP_ALIGN.CENTER
-    r = p.add_run(); r.text = "Белов Егор Александрович"
-    _set_font(r, 16, bold=True, color=NAVY)
-    p2 = tf.add_paragraph(); p2.alignment = PP_ALIGN.CENTER
-    r = p2.add_run()
-    r.text = "НИУ ВШЭ — Пермь · Программная инженерия"
-    _set_font(r, 14, color=GREY)
-    p3 = tf.add_paragraph(); p3.alignment = PP_ALIGN.CENTER
-    r = p3.add_run(); r.text = "Проект: EventMind"
-    _set_font(r, 14, color=GREY)
+    p = _clear(tf)
+    p.alignment = PP_ALIGN.CENTER
+    addrun(p, "Белов Егор Александрович", 16, bold=True, color=NAVY)
+    p2 = tf.add_paragraph()
+    p2.alignment = PP_ALIGN.CENTER
+    addrun(p2, "НИУ ВШЭ — Пермь · Программная инженерия", 14, color=GREY)
+    p3 = tf.add_paragraph()
+    p3.alignment = PP_ALIGN.CENTER
+    addrun(p3, "Проект: EventMind", 14, color=GREY)
 
     Path(out).parent.mkdir(parents=True, exist_ok=True)
     prs.save(out)
