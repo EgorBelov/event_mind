@@ -68,32 +68,32 @@ def add_textbox(slide, l, t, w, h, anchor=None):
 
 
 def add_footer(slide):
-    """Верхний колонтитул: название проекта · автор · событие — как в шаблоне."""
-    tb = add_textbox(slide, 0.55, 0.18, 3.6, 0.55)
+    """Верхний колонтитул: вписываем текст в ячейки шапки макета «Текст_1».
+
+    Сам макет рисует логотип ВШЭ (слева), номер слайда (справа) и сетку
+    разделителей — поэтому позиции берём из оригинала, чтобы не наезжать
+    на эти элементы.
+    """
+    tb = add_textbox(slide, 1.08, 0.27, 3.0, 0.55, anchor=MSO_ANCHOR.MIDDLE)
     p = _clear(tb.text_frame)
     r = p.add_run(); r.text = PROJ_TITLE
     _set_font(r, 10.5, bold=True, color=NAVY)
 
-    tb = add_textbox(slide, 4.7, 0.18, 1.5, 0.55)
+    tb = add_textbox(slide, 4.2, 0.27, 2.2, 0.55, anchor=MSO_ANCHOR.MIDDLE)
     p = _clear(tb.text_frame)
     r = p.add_run(); r.text = AUTHOR
     _set_font(r, 10.5, color=GREY)
 
-    tb = add_textbox(slide, 10.6, 0.18, 2.4, 0.6)
+    tb = add_textbox(slide, 7.46, 0.27, 2.0, 0.6, anchor=MSO_ANCHOR.MIDDLE)
     tf = tb.text_frame
-    p = _clear(tf); p.alignment = PP_ALIGN.RIGHT
+    p = _clear(tf)
     r = p.add_run(); r.text = EVENT[0]; _set_font(r, 10.5, bold=True, color=NAVY)
-    p2 = tf.add_paragraph(); p2.alignment = PP_ALIGN.RIGHT
+    p2 = tf.add_paragraph()
     r = p2.add_run(); r.text = EVENT[1]; _set_font(r, 10.5, color=GREY)
-
-    # тонкая разделительная линия под колонтитулом
-    ln = slide.shapes.add_connector(2, Inches(0.55), Inches(0.82), Inches(12.78), Inches(0.82))
-    ln.line.color.rgb = NAVY
-    ln.line.width = Pt(1.0)
 
 
 def add_heading(slide, text):
-    tb = add_textbox(slide, 0.55, 0.95, 12.2, 0.8)
+    tb = add_textbox(slide, 0.5, 1.02, 12.3, 0.8)
     p = _clear(tb.text_frame)
     r = p.add_run(); r.text = text
     _set_font(r, 32, bold=True, color=NAVY)
@@ -323,7 +323,7 @@ def build(template: str, out: str):
     # ---------------------------------------------------------------------
     # Слайд 4 — Цель и задачи
     s = new_slide(prs, "Цель и задачи")
-    card(s, 0.6, 1.95, 5.5, 4.9, "Цель",
+    card(s, 0.6, 1.95, 5.5, 3.3, "Цель",
          ["Разработать систему, которая автоматически собирает "
           "анонсы IT-мероприятий из множества источников, "
           "нормализует их и строит для каждого пользователя "
@@ -355,7 +355,7 @@ def build(template: str, out: str):
         r = p.add_run(); r.text = text
         _set_font(r, size, bold=bold, color=tcolor)
         return o
-    oval(4.9, 3.05, 3.55, 1.5, "Проблемы", NAVY, size=28, bold=True)
+    oval(4.42, 3.05, 4.5, 1.5, "Проблемы", NAVY, size=27, bold=True)
     oval(0.5, 1.45, 3.6, 1.45, "Фрагментированность источников событий", BLUE)
     oval(0.65, 4.7, 3.6, 1.45, "Информационный шум и дубли анонсов", BLUE)
     oval(4.9, 5.5, 3.55, 1.45, "Нет персонализации под уровень и цель", BLUE)
@@ -507,7 +507,7 @@ def build(template: str, out: str):
     # ---------------------------------------------------------------------
     # Слайд 16 — LLM-цепочка и надёжность
     s = new_slide(prs, "LLM-цепочка и надёжность")
-    card(s, 0.6, 1.95, 6.0, 4.9, "Цепочка провайдеров",
+    card(s, 0.6, 1.95, 6.0, 3.4, "Цепочка провайдеров",
          ["1.  Gemini — primary (REST-транспорт, автопроба модели)",
           "2.  Groq llama-3.3-70b — fallback",
           "3.  Groq llama-3.1-8b — last-resort",
@@ -574,7 +574,7 @@ def build(template: str, out: str):
         "Сбор из 6 источников с AI-нормализацией и дедупом.",
         "Качество подтверждено метриками и 369 тестами.",
     ], size=15.5, gap=11)
-    card(s, 7.0, 1.9, 5.8, 5.0, "Направления развития",
+    card(s, 7.0, 1.9, 5.8, 3.5, "Направления развития",
          ["• Расширение списка источников событий",
           "• Включение GNN-сигнала на большем датасете",
           "• Переработка UX AI-копилота в боте",
