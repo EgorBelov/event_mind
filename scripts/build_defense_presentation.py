@@ -240,6 +240,12 @@ def _build_cover(prs):
                "об IT-событиях и выдачи персональных рекомендаций "
                "на основе модели пользователя"], size=26)
 
+    # факультет и образовательная программа — по данным отчёта
+    addrun(_clear(by_name["Текст 2"][0].text_frame),
+           "Факультет магистерская школа", 16)
+    addrun(_clear(by_name["Текст 3"][0].text_frame),
+           "«Бизнес-аналитика»", 12)
+
     # «Пермь / 2026»
     tf = by_name["Текст 4"][0].text_frame
     addrun(_clear(tf), "Пермь", 14)
@@ -594,7 +600,7 @@ def build(template: str, out: str):
     addrun(p, "Белов Егор Александрович", 16, bold=True, color=NAVY)
     p2 = tf.add_paragraph()
     p2.alignment = PP_ALIGN.CENTER
-    addrun(p2, "НИУ ВШЭ — Пермь · Программная инженерия", 14, color=GREY)
+    addrun(p2, "НИУ ВШЭ — Пермь · Бизнес-аналитика", 14, color=GREY)
     p3 = tf.add_paragraph()
     p3.alignment = PP_ALIGN.CENTER
     addrun(p3, "Проект: EventMind", 14, color=GREY)
