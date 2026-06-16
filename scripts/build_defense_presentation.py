@@ -14,7 +14,7 @@ from pathlib import Path
 
 from pptx import Presentation
 from pptx.dml.color import RGBColor
-from pptx.enum.text import MSO_ANCHOR, PP_ALIGN
+from pptx.enum.text import MSO_ANCHOR, MSO_AUTO_SIZE, PP_ALIGN
 from pptx.oxml.ns import qn
 from pptx.util import Inches, Pt
 
@@ -29,10 +29,15 @@ FONT = "HSE Sans"
 
 DIAGRAMS = Path("docs/diagrams")
 
-# колонтитул (повторяется на каждом контентном слайде) — геометрия из шаблона
+# колонтитул (повторяется на каждом контентном слайде) — геометрия из шаблона.
+# Все блоки шапки (название, автор, событие, номер слайда) центрируем по
+# одной вертикали HEADER_TOP..HEADER_TOP+HEADER_H, чтобы текст лёг в один уровень.
 PROJ_TITLE = "EventMind — IT-события и AI-рекомендации"
 AUTHOR = "Белов Егор"
 EVENT = ("Защита курсовой", "Пермь, 2026")
+HEADER_TOP = 0.21
+HEADER_H = 0.64
+HEADER_SIZE = 10.5
 
 
 def _set_font(run, size=None, bold=None, color=None, italic=None):
@@ -74,23 +79,44 @@ def add_textbox(slide, left, top, w, h, anchor=None):
     return tb
 
 
-def add_footer(slide):
-    """Верхний колонтитул: вписываем текст в ячейки шапки макета «Текст_1».
+def align_layout_header(prs):
+    """Привести номер слайда в шапке макета «Текст_1» к уровню колонтитула.
 
-    Сам макет рисует логотип ВШЭ (слева), номер слайда (справа) и сетку
-    разделителей — поэтому позиции берём из оригинала, чтобы не наезжать
-    на эти элементы.
+    В шаблоне поле «‹#› / 19» набрано 20pt и центрируется ниже мелкого
+    колонтитула — из-за этого номер выглядит крупнее, ниже и «другим стилем».
+    Уменьшаем его до HEADER_SIZE и центрируем в той же вертикальной полосе.
     """
-    tb = add_textbox(slide, 1.08, 0.27, 3.0, 0.55, anchor=MSO_ANCHOR.MIDDLE)
-    addrun(_clear(tb.text_frame), PROJ_TITLE, 10.5, bold=True, color=NAVY)
+    layout = prs.slide_layouts[1]
+    for sh in layout.shapes:
+        if sh.name != "TextBox 16" or not sh.has_text_frame:
+            continue
+        sh.top = Inches(HEADER_TOP)
+        sh.height = Inches(HEADER_H)
+        tf = sh.text_frame
+        tf.auto_size = MSO_AUTO_SIZE.NONE
+        tf.vertical_anchor = MSO_ANCHOR.MIDDLE
+        # размер задаём на всех run-properties, включая поле slidenum (a:fld)
+        for rPr in tf._txBody.iter(qn("a:rPr")):
+            rPr.set("sz", str(int(HEADER_SIZE * 100)))
+        break
 
-    tb = add_textbox(slide, 4.2, 0.27, 2.2, 0.55, anchor=MSO_ANCHOR.MIDDLE)
-    addrun(_clear(tb.text_frame), AUTHOR, 10.5, color=GREY)
 
-    tb = add_textbox(slide, 7.46, 0.27, 2.0, 0.6, anchor=MSO_ANCHOR.MIDDLE)
+def add_footer(slide):
+    """Верхний колонтитул: название · автор · событие в одну вертикаль.
+
+    Макет рисует логотип ВШЭ (слева), номер слайда (справа) и сетку
+    разделителей; позиции колонок берём из оригинала, чтобы попасть в сетку.
+    """
+    tb = add_textbox(slide, 1.08, HEADER_TOP, 3.0, HEADER_H, anchor=MSO_ANCHOR.MIDDLE)
+    addrun(_clear(tb.text_frame), PROJ_TITLE, HEADER_SIZE, bold=True, color=NAVY)
+
+    tb = add_textbox(slide, 4.2, HEADER_TOP, 2.2, HEADER_H, anchor=MSO_ANCHOR.MIDDLE)
+    addrun(_clear(tb.text_frame), AUTHOR, HEADER_SIZE, color=GREY)
+
+    tb = add_textbox(slide, 7.46, HEADER_TOP, 2.0, HEADER_H, anchor=MSO_ANCHOR.MIDDLE)
     tf = tb.text_frame
-    addrun(_clear(tf), EVENT[0], 10.5, bold=True, color=NAVY)
-    addrun(tf.add_paragraph(), EVENT[1], 10.5, color=GREY)
+    addrun(_clear(tf), EVENT[0], HEADER_SIZE, bold=True, color=NAVY)
+    addrun(tf.add_paragraph(), EVENT[1], HEADER_SIZE, color=GREY)
 
 
 def add_heading(slide, text):
@@ -285,6 +311,7 @@ def _drop_content_slides(prs):
 # ===========================================================================
 def build(template: str, out: str):
     prs = Presentation(template)
+    align_layout_header(prs)
     _build_cover(prs)
     _drop_content_slides(prs)
 
