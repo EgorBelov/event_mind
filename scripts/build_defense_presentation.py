@@ -236,8 +236,9 @@ def _build_cover(prs):
             addrun(pp, ln, size, bold=bold, color=NAVY)
 
     set_title(by_name["Заголовок 1"][0],
-              ["EventMind — система агрегации IT-мероприятий",
-               "и персонализированных AI-рекомендаций"], size=30)
+              ["Разработка приложения для агрегации информации "
+               "об IT-событиях и выдачи персональных рекомендаций "
+               "на основе модели пользователя"], size=26)
 
     # «Пермь / 2026»
     tf = by_name["Текст 4"][0].text_frame
@@ -259,9 +260,8 @@ def _build_cover(prs):
             p = _clear(tf)
             addrun(p, "Руководитель:", 18)
             addrun(tf.add_paragraph(),
-                   "Доцент к.ф.-м.н., доцент кафедры информационных "
-                   "технологий в бизнесе", 14)
-            addrun(tf.add_paragraph(), "Замятина Е.Б.", 14, bold=True)
+                   "Доцент кафедры информационных технологий в бизнесе", 14)
+            addrun(tf.add_paragraph(), "Городилов А.Ю.", 14, bold=True)
 
 
 def _drop_content_slides(prs):
