@@ -101,6 +101,23 @@ def align_layout_header(prs):
         break
 
 
+def set_header_total(prs, total):
+    """Проставить общее число слайдов в поле «‹#› / N» шапки макета.
+
+    Статическое «N» в шаблоне зашито константой и не пересчитывается при
+    изменении числа слайдов — обновляем его под фактический размер колоды.
+    """
+    layout = prs.slide_layouts[1]
+    for sh in layout.shapes:
+        if sh.name != "TextBox 16" or not sh.has_text_frame:
+            continue
+        for para in sh.text_frame.paragraphs:
+            for r in para.runs:
+                if r.text.strip().isdigit():
+                    r.text = str(total)
+        break
+
+
 def add_footer(slide):
     """Верхний колонтитул: название · автор · событие в одну вертикаль.
 
@@ -347,8 +364,8 @@ def build(template: str, out: str):
           "пользователей."])
     card(s, 6.9, 2.2, 5.8, 3.2, "Предмет исследования",
          ["Программная система, объединяющая сбор и нормализацию "
-          "событий, гибридный рекомендатель и мультиагентного "
-          "AI-копилота вокруг общей базы данных."],
+          "событий, гибридный рекомендатель и Telegram-интерфейс "
+          "вокруг общей базы данных."],
          fill=RGBColor(0xE3, 0xF0, 0xE6))
 
     # Слайд 4 — Цель и задачи
@@ -364,7 +381,7 @@ def build(template: str, out: str):
         "Проектирование архитектуры (API, бот, планировщик)",
         "Сбор и AI-нормализация событий из 6 источников",
         "Реализация гибридного рекомендатора (9 компонент)",
-        "Разработка Telegram-интерфейса и AI-копилота",
+        "Разработка Telegram-интерфейса и обратной связи",
         "Тестирование и оценка качества рекомендаций",
     ], size=16, gap=14)
     tb = add_textbox(s, 6.4, 1.0, 4, 0.6)
@@ -426,7 +443,7 @@ def build(template: str, out: str):
         "Обратная связь: 👍 / 👎 / ⭐ — лента адаптируется",
         "Объяснение «❓ Почему» и «📖 Подробнее» по событию",
         "Семантический поиск событий обычным языком",
-        "Диалог с AI-копилотом: план развития под цель",
+        "Подписка на дайджест и уведомления",
     ], size=15, gap=13)
 
     # Слайд 8 — Бизнес-процесс
@@ -464,8 +481,7 @@ def build(template: str, out: str):
         ["БД", "PostgreSQL + pgvector", "Данные + семантический поиск"],
         ["ORM / миграции", "SQLAlchemy 2.0 + Alembic", "Модели и версии схемы"],
         ["Эмбеддинги", "sentence-transformers (MiniLM)", "384-мерные векторы, рус."],
-        ["AI-агенты", "LangGraph + LangChain", "Supervisor-Worker граф"],
-        ["LLM", "Gemini → Groq 70b → Groq 8b", "Нормализация, объяснения, копилот"],
+        ["LLM", "Gemini → Groq 70b → Groq 8b", "Нормализация и объяснения рекомендаций"],
         ["Планировщик", "APScheduler", "Дайджест, ingestion, backfill"],
     ]
     add_table(s, data, 0.55, 1.9, 12.25, 5.1,
@@ -514,19 +530,7 @@ def build(template: str, out: str):
     ], size=12.5, gap=9)
     caption(s, "Батчевая нормализация с адаптивным размером чанка.")
 
-    # Слайд 15 — AI-Copilot
-    s = new_slide(prs, "AI-копилот: Supervisor-Worker")
-    add_image_fit(s, DIAGRAMS / "07_copilot_graph.png", 0.5, 1.85, 8.4, 5.1)
-    bullets(s, 9.0, 1.95, 3.9, 5.0, [
-        ("Граф LangGraph: retrieve → supervisor → specialist → finalize", 0),
-        ("5 специалистов: recommendation, career_coach, roadmap, "
-         "explainer, summary", 0),
-        ("6 function-calling tools", 0),
-        ("Мульти-туровый диалог + long-term память", 0),
-        ("Явный, тестируемый граф — не «магия»", 0),
-    ], size=12.5, gap=9)
-
-    # Слайд 16 — LLM-цепочка и надёжность
+    # Слайд 15 — LLM-цепочка и надёжность
     s = new_slide(prs, "LLM-цепочка и надёжность")
     card(s, 0.6, 1.95, 6.0, 3.4, "Цепочка провайдеров",
          ["1.  Gemini — primary (REST-транспорт, автопроба модели)",
@@ -536,16 +540,15 @@ def build(template: str, out: str):
           "Circuit-breaker: 5 фейлов подряд → cooldown 120 с.",
           "Per-provider cooldown: 2 фейла → skip на 10 мин."])
     bullets(s, 6.9, 2.0, 6.0, 4.8, [
-        ("Три уровня graceful-degradation:", 0),
+        ("Graceful-degradation на двух уровнях:", 0),
         ("LLM → следующий провайдер цепочки", 1),
         ("hybrid → rule-only выдача при сбое", 1),
-        ("Copilot → сохранение сессии, «AI временно недоступен»", 1),
         ("X-API-Key shared-secret + request-логирование", 0),
         ("Prompt-injection sanitize пользовательского ввода", 0),
         ("Read-only hot-path + TTL-кэш рекомендаций", 0),
     ], size=14, gap=10)
 
-    # Слайд 17 — Оценка качества
+    # Слайд 16 — Оценка качества
     s = new_slide(prs, "Оценка качества")
     t1 = [
         ["Метрика", "k", "rule", "hybrid", "bayes"],
@@ -576,30 +579,30 @@ def build(template: str, out: str):
         "Гибрид превосходит rule-only по Recall@5 (0,65 против 0,50) "
         "и nDCG@5 (0,38 против 0,26).",
         "369 автотестов в tests/ (scoring, bayesian, bandit, gnn, "
-        "memory, ingestion, copilot, security).",
+        "memory, ingestion, security).",
         "Воспроизводимые скрипты оценки с фиксированным seed=42.",
     ], size=14, gap=8)
 
-    # Слайд 18 — Заключение
+    # Слайд 17 — Заключение
     s = new_slide(prs, "Заключение")
     bullets(s, 0.6, 1.9, 6.1, 5.0, [
         "Все поставленные задачи выполнены.",
         "Собрана рабочая система: API + бот + планировщик вокруг "
         "общей БД (PostgreSQL + pgvector).",
         "Реализован гибридный рекомендатель из 9 компонент с "
-        "объяснениями и AI-копилот на LangGraph.",
+        "объяснением выбора.",
         "Сбор из 6 источников с AI-нормализацией и дедупом.",
         "Качество подтверждено метриками и 369 тестами.",
     ], size=15.5, gap=11)
     card(s, 7.0, 1.9, 5.8, 3.5, "Направления развития",
          ["• Расширение списка источников событий",
           "• Включение GNN-сигнала на большем датасете",
-          "• Переработка UX AI-копилота в боте",
+          "• Расширение пользовательских сценариев бота",
           "• A/B-тестирование весов рекомендатора",
           "• Развитие в магистерскую работу"],
          fill=RGBColor(0xFD, 0xEF, 0xE3), title_color=ORANGE)
 
-    # Слайд 19 — Спасибо
+    # Слайд 18 — Спасибо
     s = prs.slides.add_slide(prs.slide_layouts[1])
     for ph in list(s.placeholders):
         ph._element.getparent().remove(ph._element)
@@ -631,6 +634,8 @@ def build(template: str, out: str):
     p3 = tf.add_paragraph()
     p3.alignment = PP_ALIGN.CENTER
     addrun(p3, "Проект: EventMind", 14, color=GREY)
+
+    set_header_total(prs, len(prs.slides))
 
     Path(out).parent.mkdir(parents=True, exist_ok=True)
     prs.save(out)
