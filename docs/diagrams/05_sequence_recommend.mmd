@@ -1,4 +1,4 @@
-%%{init: {'theme':'default'}}%%
+%%{init: {'theme':'default','themeVariables':{'fontSize':'17px','fontFamily':'Arial'}}}%%
 sequenceDiagram
     autonumber
     participant U as 👤 Пользователь
@@ -18,7 +18,7 @@ sequenceDiagram
     rect rgb(245, 245, 255)
         Note over SVC,EMB: Предрасчёт один раз за запрос
         SVC->>EMB: построить user_embedding<br/>(долгосрочный + сессионный)
-        SVC->>DB: загрузить bandit_state (A, b)
+        SVC->>DB: загрузить состояние бандита (A, b)
         SVC->>DB: загрузить параметры Beta
         SVC->>DB: загрузить все события
     end
@@ -30,12 +30,12 @@ sequenceDiagram
 
     SVC->>SVC: сортировка по сумме компонент
     SVC->>MMR: переранжировать top-30
-    MMR->>DB: batch-загрузка эмбеддингов
+    MMR->>DB: пакетная загрузка эмбеддингов
     MMR-->>SVC: диверсифицированный список
 
     SVC-->>API: список карточек с объяснениями
     API-->>B: JSON-ответ
-    B-->>U: отображает карточки с inline-клавиатурой
+    B-->>U: отображает карточки со встроенными кнопками
 
     U->>B: ❤️ лайк по событию
     B->>API: POST /interactions

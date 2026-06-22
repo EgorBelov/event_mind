@@ -2,7 +2,7 @@
 
 Process: Получение персональной рекомендации.
 Pool: Разрабатываемая система.
-Lanes (top→bottom): Пользователь, Telegram-бот, Backend, Рекомендатель.
+Lanes (top→bottom): Пользователь, Telegram-бот, Серверная часть, Рекомендатель.
 """
 from __future__ import annotations
 
@@ -16,7 +16,7 @@ POOL_PAD_BOTTOM = 20
 LANES = [
     ('Пользователь', 10, 200),
     ('Telegram-бот', 210, 200),
-    ('Backend (FastAPI)', 410, 200),
+    ('Серверная часть', 410, 200),
     ('Рекомендатель', 610, 200),
 ]
 POOL_BOTTOM = LANES[-1][1] + LANES[-1][2]  # 810
@@ -56,7 +56,7 @@ def lane_center(idx: int) -> int:
 NODES = {
     'start':       ('',                            0, 170,  'start'),
     't_req':       ('Запросить\nрекомендации',     0, 320,  'task'),
-    't_send':      ('Отправить\nзапрос в API',     1, 500,  'task'),
+    't_send':      ('Отправить\nзапрос',           1, 500,  'task'),
     'g_cache':     ('Кэш\nактуален?',              2, 700,  'gate_xor'),
     't_candidates':('Сформировать\nпул кандидатов', 3, 880,  'task'),
     't_rank':      ('Гибридное\nранжирование',     3, 1080, 'task'),

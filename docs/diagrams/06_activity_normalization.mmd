@@ -1,42 +1,30 @@
-%%{init: {'theme':'default'}}%%
-flowchart TD
-    classDef start fill:#000,stroke:#000,color:#fff
+%%{init: {'theme':'base','themeVariables':{'fontSize':'19px','fontFamily':'Arial'},'flowchart':{'htmlLabels':true,'nodeSpacing':40,'rankSpacing':55}}}%%
+flowchart LR
+    classDef start fill:#0F2C68,stroke:#0F2C68,color:#fff
     classDef proc fill:#e3f2fd,stroke:#1565c0,color:#000
     classDef ai fill:#f3e5f5,stroke:#6a1b9a,color:#000
     classDef dec fill:#fff9c4,stroke:#f57f17,color:#000
     classDef db fill:#e8f5e9,stroke:#2e7d32,color:#000
     classDef err fill:#ffebee,stroke:#c62828,color:#000
-    classDef endn fill:#000,stroke:#000,color:#fff
 
     START(("●")):::start
-    GET["Получить запись<br/>из raw_events"]:::proc
-    LLM["Вызвать LLM<br/>(нормализация)"]:::ai
-    PARSE["Распарсить ответ<br/>как Pydantic-схему"]:::proc
-    VALID{"Парсинг<br/>успешен?"}:::dec
-    FAIL["status = 'failed'<br/>сохранить ошибку"]:::err
-    ISIT{"is_it_event<br/>== True?"}:::dec
-    NONIT["status = 'non_it'"]:::err
-    EMBED["Построить<br/>embedding события"]:::ai
-    SIMSEARCH["Поиск похожих<br/>событий в окне"]:::proc
-    DUP{"cos_sim ><br/>порог?"}:::dec
-    SKIP["status = 'duplicate'"]:::err
-    ENRICH["AI-обогащение:<br/>quality, hype, summary,<br/>tech_stack, audience"]:::ai
-    SAVE["Создать запись<br/>в таблице events"]:::db
-    MARK["status = 'normalized'<br/>в raw_events"]:::db
-    END_N(("●")):::endn
+    GET["Запись из<br/>raw_events"]:::proc
+    LLM["Нормализация<br/>через LLM"]:::ai
+    VALID{"Схема<br/>верна?"}:::dec
+    FAIL["status =<br/>failed"]:::err
+    ISIT{"IT-событие?"}:::dec
+    NONIT["status =<br/>non_it"]:::err
+    EMBED["Построить<br/>вектор события"]:::ai
+    DUP{"Дубликат?<br/>cosine ≥ 0.92"}:::dec
+    SKIP["status =<br/>duplicate"]:::err
+    ENRICH["Оценки качества,<br/>хайпа, темы,<br/>стек, аудитория"]:::ai
+    SAVE["Запись в<br/>таблицу events"]:::db
+    END_N(("●")):::start
 
-    START --> GET
-    GET --> LLM
-    LLM --> PARSE
-    PARSE --> VALID
-    VALID -->|"нет"| FAIL --> END_N
+    START --> GET --> LLM --> VALID
+    VALID -->|"нет"| FAIL
     VALID -->|"да"| ISIT
-    ISIT -->|"нет"| NONIT --> END_N
-    ISIT -->|"да"| EMBED
-    EMBED --> SIMSEARCH
-    SIMSEARCH --> DUP
-    DUP -->|"да"| SKIP --> END_N
-    DUP -->|"нет"| ENRICH
-    ENRICH --> SAVE
-    SAVE --> MARK
-    MARK --> END_N
+    ISIT -->|"нет"| NONIT
+    ISIT -->|"да"| EMBED --> DUP
+    DUP -->|"да"| SKIP
+    DUP -->|"нет"| ENRICH --> SAVE --> END_N

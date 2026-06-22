@@ -1,4 +1,4 @@
-%%{init: {'theme':'default'}}%%
+%%{init: {'theme':'default','themeVariables':{'fontSize':'18px','fontFamily':'Arial'}}}%%
 flowchart TB
     classDef person fill:#1565c0,stroke:#0d47a1,color:#fff
     classDef container fill:#1976d2,stroke:#0d47a1,color:#fff
@@ -11,7 +11,7 @@ flowchart TB
 
     subgraph EVMIND["Разрабатываемая система"]
         BOT["Telegram-бот<br/>━━━━━━━━━━━<br/>aiogram 3<br/><br/>Обрабатывает команды<br/>и сообщения пользователя"]
-        API["Backend (FastAPI)<br/>━━━━━━━━━━━<br/>FastAPI + Uvicorn<br/><br/>HTTP-эндпоинты + сервисный слой:<br/>рекомендатель, поиск, ингест"]
+        API["Серверная часть<br/>━━━━━━━━━━━<br/>FastAPI + Uvicorn<br/><br/>HTTP-эндпоинты + сервисный слой:<br/>рекомендатель, поиск, ингест"]
         SCHED["Планировщик задач<br/>━━━━━━━━━━━<br/>APScheduler<br/><br/>Дайджест, ингест,<br/>уплотнение памяти"]
         DB[("База данных<br/>━━━━━━━━━━━<br/>PostgreSQL + pgvector<br/><br/>users, events, interactions,<br/>memory, bandit")]
     end
@@ -20,20 +20,20 @@ flowchart TB
     class DB db
 
     TG["Telegram<br/>Bot API"]
-    LLM["Groq Cloud<br/>(LLM provider)"]
+    LLM["Gemini / Groq<br/>(провайдеры LLM)"]
     SRC1["RSS-ленты,<br/>t.me/s/каналы"]
     SRC2["KudaGo API,<br/>Lu.ma iCal"]
 
     class TG,LLM,SRC1,SRC2 ext
 
     USER -->|"взаимодействует через"| TG
-    TG <-->|"HTTPS (long polling)"| BOT
+    TG <-->|"HTTPS (длинный опрос)"| BOT
     BOT -->|"HTTP REST"| API
     SCHED -->|"HTTP REST"| API
     API <-->|"SQL"| DB
     BOT -.->|"общая БД"| DB
     SCHED -.->|"общая БД"| DB
 
-    API -->|"OpenAI-совместимый API"| LLM
+    API -->|"REST"| LLM
     SCHED -->|"парсинг"| SRC1
     SCHED -->|"API/iCal"| SRC2
