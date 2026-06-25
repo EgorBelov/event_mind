@@ -175,21 +175,42 @@ def get_or_build_event_embedding(event) -> list[float]:
     return build_event_embedding(event)
 
 
-def _write_embedding(obj, vec_list: list[float]) -> None:
+def _write_embedding(obj, vec_list: list[float], db=None) -> None:
     """Сохранить embedding в obj.
 
     - SQLite: только JSON-колонка `embedding`.
-    - PostgreSQL+pgvector: дополнительно `embedding_vec` (если колонка
-      есть в metadata; иначе тихо пропускается).
+    - PostgreSQL+pgvector: дополнительно `embedding_vec`. Колонка НЕ
+      замаплена в ORM-модели (чтобы SQLite-тесты не тянули pgvector-тип),
+      поэтому пишем её прямым UPDATE по id — для этого нужны `db` и
+      уже сфлашенный obj.id. Без этого `<=>`-индекс кандидатного отбора
+      остаётся пустым, и /recommendations выдаёт почти ничего.
     """
     obj.embedding = json.dumps(vec_list)
-    if has_pgvector() and hasattr(obj, "embedding_vec"):
-        # Колонка может быть ещё не отражена в ORM-модели (миграция не накатана) —
-        # JSON-фолбэк уже сделан выше, на этой ветке тихо пропускаем.
+    if not (has_pgvector() and is_postgres()):
+        return
+    # Старый путь: если когда-нибудь embedding_vec замапят в ORM — пишем напрямую.
+    if hasattr(obj, "embedding_vec"):
         try:
             obj.embedding_vec = vec_list
+            return
         except Exception as e:
-            logger.debug("embedding_vec write skipped: %s", e)
+            logger.debug("embedding_vec ORM write skipped: %s", e)
+    # Основной путь на PG: raw UPDATE по id (колонка не в ORM-модели).
+    obj_id = getattr(obj, "id", None)
+    if db is None or not obj_id:
+        return
+    try:
+        from sqlalchemy import text
+        vec_str = "[" + ",".join(repr(float(x)) for x in vec_list) + "]"
+        db.execute(
+            text(
+                f"UPDATE {obj.__tablename__} SET embedding_vec = CAST(:v AS vector) "
+                "WHERE id = :id"
+            ),
+            {"v": vec_str, "id": obj_id},
+        )
+    except Exception as e:
+        logger.debug("embedding_vec write skipped: %s", e)
 
 
 def ensure_event_embeddings(db, events) -> int:
@@ -208,7 +229,7 @@ def ensure_event_embeddings(db, events) -> int:
         texts = [f"{e.title} {e.description}" for e in missing]
         vectors = model.encode(texts)  # один батч вместо N отдельных encode
         for e, vec in zip(missing, vectors, strict=True):
-            _write_embedding(e, vec.tolist())
+            _write_embedding(e, vec.tolist(), db=db)
         db.commit()
         return len(missing)
     except Exception as e:
