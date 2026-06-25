@@ -166,11 +166,22 @@ def backfill_event_embeddings_once() -> None:
             events = (
                 db.query(Event).filter(Event.embedding.is_(None)).limit(200).all()
             )
-            if not events:
-                logger.info("[backfill:embeddings] nothing to do")
-                return
-            added = ensure_event_embeddings(db, events)
-            logger.info("[backfill:embeddings] filled=%d/%d", added, len(events))
+            if events:
+                added = ensure_event_embeddings(db, events)
+                logger.info("[backfill:embeddings] filled=%d/%d", added, len(events))
+            else:
+                logger.info("[backfill:embeddings] no JSON gaps")
+
+            # Отдельно лечим рассинхрон: у события есть JSON-embedding, но
+            # pgvector-колонка embedding_vec пуста (например, событие было
+            # нормализовано до фикса записи vec). Без этого кандидатный отбор
+            # через <=>-индекс видит лишь часть каталога и лента схлопывается.
+            from app.db.backend import has_pgvector, is_postgres
+            if has_pgvector() and is_postgres():
+                from scripts.backfill_pgvector import _backfill_table
+                synced = _backfill_table(db, Event.__tablename__)
+                if synced:
+                    logger.info("[backfill:embeddings] embedding_vec synced=%d", synced)
         finally:
             db.close()
     except Exception as e:

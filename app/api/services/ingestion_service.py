@@ -373,7 +373,7 @@ def _persist_normalized(db: Session, raw: RawEvent, item: dict) -> str:
         # подхватит ensure_event_embeddings при первом запросе.
         try:
             from app.recommender.embeddings import _write_embedding, build_event_embedding
-            _write_embedding(event, build_event_embedding(event))
+            _write_embedding(event, build_event_embedding(event), db=db)
         except Exception:
             pass
 

@@ -11,6 +11,23 @@
 
 ## ✅ Сделано
 
+### Фикс «лента показывает 1 событие» (2026-06-25)
+
+- [x] **Рассинхрон `embedding_vec`.** `pgvector_top_k_events` отбирает
+  кандидатов `WHERE embedding_vec IS NOT NULL`, но колонка была заполнена
+  лишь у 3/113 событий → весь пул = 3, после `upcoming_only` оставалось 1.
+  Корень: `embedding_vec` НЕ замаплена в ORM-модели `Event` (только JSON
+  `embedding`), поэтому `_write_embedding`'s `hasattr(obj, "embedding_vec")`
+  всегда False — вектор молча не писался при ingestion. А backfill-джоб
+  и `ensure_event_embeddings` искали пробелы только по JSON-колонке.
+  - **Данные:** backfill `UPDATE events SET embedding_vec = CAST(embedding
+    AS vector)` для 110 событий (= `python -m scripts.backfill_pgvector`).
+  - **Код:** `_write_embedding(obj, vec, db=...)` теперь пишет
+    `embedding_vec` прямым raw-UPDATE по `id` на PG (колонка не в ORM);
+    `ensure_event_embeddings` и ingestion прокидывают `db`.
+  - **Код:** `backfill_event_embeddings_once` после JSON-backfill зовёт
+    `_backfill_table` — лечит рассинхрон vec даже без новых событий.
+
 ### Ревью руководителя 2026-06-04 → правки (2026-06-05)
 
 - [x] **Copilot скрыт в боте.** Роутер `app/bot/handlers/copilot.py` не
