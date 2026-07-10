@@ -1,6 +1,6 @@
 # EventMind v2 — архитектура
 
-> Живой документ. Обновляется на каждом milestone. Статус: **M5 (Мультиканальная доставка)**.
+> Живой документ. Обновляется на каждом milestone. Статус: **M6 (Веб-клиент + профиль/поиск + Google OAuth)**.
 
 EventMind собирает IT-события из внешних источников, нормализует их через LLM
 и рекомендует пользователям, доставляя выдачу по выбранным каналам. v2 —
@@ -179,11 +179,30 @@ read-only), `deploy/` (compose: pg+redis+api+web+worker+prometheus+grafana+mailh
   JWT-purpose-токен из письма → выключает email-дайджест). Миграция 0005.
 - Метрики доставки по каналу/исходу (в адаптерах каналов).
 
-Зелёные проверки: ruff, mypy(strict, 123 файла), import-linter (границы слоёв),
+**M6** — Веб-клиент + backend-обвязка под него:
+- **Backend**: NL-поиск событий (`GET /api/v1/events/nl-search`) — LLM-extract
+  `SearchFilters` → канонизация → строгий проход → relax-fallback (снимаем
+  фильтры `free_text→topics→format→event_type→city→date`, 1 ближайшее событие),
+  порт `SearchRepository` (pgvector-репо, NULL-сейф даты только в upcoming);
+  карточка события `GET /api/v1/events/{id}`. Профиль `PATCH /api/v1/users/me`
+  (город канонизируется, формат — для rule-скоринга) и настройки
+  `GET/PATCH /api/v1/users/me/preferences`. **Google OAuth**: порт
+  `GoogleTokenVerifier` (tokeninfo, сверка `aud`), `POST /api/v1/auth/google`
+  (вход/регистрация по id_token, линковка к существующему email-аккаунту).
+- **Web** (Next.js 14 App Router, standalone): типизированный API-клиент
+  (`lib/api.ts`) через **BFF-прокси** `/bff/[...path]` — держит httpOnly-cookie
+  same-site (обход `SameSite=Lax` на кросс-origin). `middleware.ts` гейтит
+  `/feed,/search,/inbox,/settings`. Страницы: вход/регистрация, лента
+  рекомендаций (like/save/hide → interactions), NL-поиск, карточка события,
+  инбокс (in-app + отметка прочитанным), настройки (профиль/уведомления/
+  Telegram-deep-link). `npm run build` + `tsc --noEmit` + `next lint` — зелёные.
+
+Зелёные проверки: ruff, mypy(strict, 132 файла), import-linter (границы слоёв),
 pytest (unit — домен/security/use-cases/LLM/embedding/ingestion/рекомендер/
-**дайджест+гейтинг каналов+тихие часы+unsubscribe** на фейках; integration —
+дайджест+гейтинг каналов/unsubscribe/**профиль+prefs+Google на фейках** ; integration —
 auth, outbox+UoW, SMTP↔Mailhog, telegram, ingestion, recommendations+feedback,
-**inbox+unsubscribe+send-digest** через testcontainers), сборка образов — CI.
+inbox+unsubscribe+send-digest, **users профиль/prefs** через testcontainers),
+web (build/typecheck/lint), сборка образов — CI.
 
 ## Поток данных: регистрация (пример транзакционного outbox)
 
@@ -200,6 +219,5 @@ worker: process_outbox → OutboxProcessor
 
 ## Дальше (roadmap)
 
-M6 веб-клиент ·
-M7 Telegram-бот · M8 прод (k8s/Helm/HPA) + offline-eval. Детали — в
-`docs/REBUILD_PROMPT.md` (контракт) и плане каждого milestone.
+M7 Telegram-бот (aiogram поверх API) · M8 прод (k8s/Helm/HPA) + offline-eval.
+Детали — в `docs/REBUILD_PROMPT.md` (контракт) и плане каждого milestone.

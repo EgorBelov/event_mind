@@ -10,6 +10,7 @@ from __future__ import annotations
 from datetime import timedelta
 
 from eventmind.application.accounts.config import AccountsConfig
+from eventmind.application.ports.oauth import GoogleTokenVerifier
 from eventmind.application.ports.queue import TaskQueue
 from eventmind.application.ports.security import (
     Clock,
@@ -31,7 +32,13 @@ from eventmind.domain.accounts.errors import (
     UserNotFound,
 )
 from eventmind.domain.accounts.events import PasswordResetRequested, UserRegistered
-from eventmind.domain.accounts.value_objects import ChannelType, Email, TokenPurpose
+from eventmind.domain.accounts.value_objects import (
+    ChannelType,
+    DigestFrequency,
+    Email,
+    TokenPurpose,
+)
+from eventmind.domain.events.taxonomy import canonicalize_city
 
 # Имя фоновой задачи, обрабатывающей outbox (реализована в worker'е).
 PROCESS_OUTBOX_TASK = "process_outbox"
@@ -336,3 +343,102 @@ class ConfirmTelegramLink:
             await uow.tokens.update(token)
             await uow.commit()
         return user_id
+
+
+class UpdateProfile:
+    """Обновить профиль (город/формат) — влияет на rule-скоринг рекомендера."""
+
+    def __init__(self, uow_factory: UnitOfWorkFactory) -> None:
+        self._uow_factory = uow_factory
+
+    async def execute(
+        self, user_id: int, *, city: str | None, preferred_format: str | None
+    ) -> User:
+        async with self._uow_factory() as uow:
+            user = await uow.users.get_by_id(user_id)
+            if user is None:
+                raise UserNotFound()
+            if city is not None:
+                user.city = canonicalize_city(city) or None
+            if preferred_format is not None:
+                user.preferred_format = preferred_format or None
+            await uow.users.update(user)
+            await uow.commit()
+        return user
+
+
+class UpdatePreferences:
+    """Обновить настройки уведомлений (частота дайджеста, каналы, тихие часы)."""
+
+    def __init__(self, uow_factory: UnitOfWorkFactory) -> None:
+        self._uow_factory = uow_factory
+
+    async def execute(
+        self,
+        user_id: int,
+        *,
+        digest_frequency: str | None = None,
+        email_enabled: bool | None = None,
+        telegram_enabled: bool | None = None,
+        quiet_hours_start: int | None = None,
+        quiet_hours_end: int | None = None,
+    ) -> NotificationPreference:
+        async with self._uow_factory() as uow:
+            pref = await uow.preferences.get_by_user(user_id)
+            if pref is None:
+                raise UserNotFound()
+            if digest_frequency is not None:
+                pref.digest_frequency = DigestFrequency(digest_frequency)
+            if email_enabled is not None:
+                pref.email_enabled = email_enabled
+            if telegram_enabled is not None:
+                pref.telegram_enabled = telegram_enabled
+            if quiet_hours_start is not None:
+                pref.quiet_hours_start = quiet_hours_start
+            if quiet_hours_end is not None:
+                pref.quiet_hours_end = quiet_hours_end
+            await uow.preferences.update(pref)
+            await uow.commit()
+        return pref
+
+
+class AuthenticateWithGoogle:
+    """Вход/регистрация через Google id_token."""
+
+    def __init__(
+        self, uow_factory: UnitOfWorkFactory, verifier: GoogleTokenVerifier
+    ) -> None:
+        self._uow_factory = uow_factory
+        self._verifier = verifier
+
+    async def execute(self, id_token: str) -> User:
+        identity = await self._verifier.verify(id_token)
+        if identity is None:
+            raise InvalidCredentials()
+        email = str(Email(identity.email))
+        async with self._uow_factory() as uow:
+            user = await uow.users.get_by_email(email)
+            if user is None:
+                user = await uow.users.add(
+                    User(
+                        email=email,
+                        password_hash=None,
+                        email_verified=True,
+                        oauth_provider="google",
+                        oauth_sub=identity.sub,
+                    )
+                )
+                assert user.id is not None
+                await uow.channels.add(
+                    UserChannel(
+                        user_id=user.id, type=ChannelType.EMAIL, address=email, verified=True
+                    )
+                )
+                await uow.preferences.add(NotificationPreference(user_id=user.id))
+            elif not user.oauth_provider:
+                user.oauth_provider = "google"
+                user.oauth_sub = identity.sub
+                await uow.users.update(user)
+            user.ensure_can_login()
+            await uow.commit()
+        return user

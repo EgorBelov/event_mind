@@ -16,11 +16,14 @@ from starlette.status import HTTP_401_UNAUTHORIZED, HTTP_403_FORBIDDEN
 
 from eventmind.application.accounts.use_cases import (
     AuthenticateUser,
+    AuthenticateWithGoogle,
     ConfirmTelegramLink,
     CreateTelegramLinkToken,
     RegisterUser,
     RequestPasswordReset,
     ResetPassword,
+    UpdatePreferences,
+    UpdateProfile,
     VerifyEmail,
 )
 from eventmind.application.ingestion.use_cases import (
@@ -38,6 +41,7 @@ from eventmind.application.recommender.use_cases import (
     GetRecommendations,
     RecordInteraction,
 )
+from eventmind.application.search.use_cases import GetEvent, NlSearch
 from eventmind.domain.accounts.entities import User
 from eventmind.domain.recommender.weights import ScoringWeights
 from eventmind.interfaces.api.container import Container
@@ -106,6 +110,18 @@ def get_confirm_telegram_link(container: ContainerDep) -> ConfirmTelegramLink:
     )
 
 
+def get_authenticate_with_google(container: ContainerDep) -> AuthenticateWithGoogle:
+    return AuthenticateWithGoogle(container.uow_factory, container.google_verifier)
+
+
+def get_update_profile(container: ContainerDep) -> UpdateProfile:
+    return UpdateProfile(container.uow_factory)
+
+
+def get_update_preferences(container: ContainerDep) -> UpdatePreferences:
+    return UpdatePreferences(container.uow_factory)
+
+
 # ── ingestion (M3) ───────────────────────────────────────────────────────────
 def get_load_source(container: ContainerDep) -> LoadSource:
     return LoadSource(container.events_uow_factory, container.task_queue)
@@ -143,6 +159,15 @@ def get_recommendations_uc(container: ContainerDep) -> GetRecommendations:
 
 def get_record_interaction_uc(container: ContainerDep) -> RecordInteraction:
     return RecordInteraction(container.recommendation_uow_factory, container.cache)
+
+
+# ── поиск событий (M6) ───────────────────────────────────────────────────────
+def get_nl_search(container: ContainerDep) -> NlSearch:
+    return NlSearch(container.llm, container.search_repository, container.clock)
+
+
+def get_event_uc(container: ContainerDep) -> GetEvent:
+    return GetEvent(container.search_repository)
 
 
 # ── уведомления (M5) ─────────────────────────────────────────────────────────

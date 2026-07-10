@@ -24,9 +24,12 @@ class User:
     id: int | None = None
     email_verified: bool = False
     is_active: bool = True
-    # Задел под соц-логин (Google) — включается в M6; в M1 не используется.
+    # Соц-логин (Google) — M6.
     oauth_provider: str | None = None
     oauth_sub: str | None = None
+    # Предпочтения для rule-скоринга (наполняются в вебе).
+    city: str | None = None
+    preferred_format: str | None = None
     created_at: datetime | None = None
 
     def mark_email_verified(self) -> None:

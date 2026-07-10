@@ -33,6 +33,8 @@ def _user_to_entity(m: UserModel) -> User:
         is_active=m.is_active,
         oauth_provider=m.oauth_provider,
         oauth_sub=m.oauth_sub,
+        city=m.city,
+        preferred_format=m.preferred_format,
         created_at=m.created_at,
     )
 
@@ -87,6 +89,8 @@ class SqlAlchemyUserRepository:
             is_active=user.is_active,
             oauth_provider=user.oauth_provider,
             oauth_sub=user.oauth_sub,
+            city=user.city,
+            preferred_format=user.preferred_format,
         )
         self._session.add(model)
         await self._session.flush()
@@ -116,6 +120,8 @@ class SqlAlchemyUserRepository:
         model.is_active = user.is_active
         model.oauth_provider = user.oauth_provider
         model.oauth_sub = user.oauth_sub
+        model.city = user.city
+        model.preferred_format = user.preferred_format
 
 
 class SqlAlchemyUserChannelRepository:

@@ -20,6 +20,7 @@ from eventmind.application.ports.notifications import (
     NotificationChannel,
     NotificationsUnitOfWork,
 )
+from eventmind.application.ports.oauth import GoogleTokenVerifier
 from eventmind.application.ports.recommender import RecommendationUnitOfWork
 from eventmind.application.ports.security import (
     Clock,
@@ -38,6 +39,7 @@ from eventmind.infrastructure.db.engine import create_engine, create_session_fac
 from eventmind.infrastructure.db.events_uow import SqlAlchemyEventsUnitOfWork
 from eventmind.infrastructure.db.notifications import SqlAlchemyNotificationsUnitOfWork
 from eventmind.infrastructure.db.recommendation import SqlAlchemyRecommendationUnitOfWork
+from eventmind.infrastructure.db.search import SqlAlchemySearchRepository
 from eventmind.infrastructure.db.uow import SqlAlchemyUnitOfWork
 from eventmind.infrastructure.embedding.minilm import SentenceTransformerEmbeddingProvider
 from eventmind.infrastructure.llm.chain import LLMChain
@@ -46,6 +48,7 @@ from eventmind.infrastructure.notifications.registry import build_notification_c
 from eventmind.infrastructure.queue.arq_queue import ArqTaskQueue
 from eventmind.infrastructure.recommender.candidate_generator import PgvectorCandidateGenerator
 from eventmind.infrastructure.redis import RedisClient, create_redis
+from eventmind.infrastructure.security.google_oauth import GoogleTokenVerifierHttp
 from eventmind.infrastructure.security.jwt import JwtTokenService
 from eventmind.infrastructure.security.password import Argon2PasswordHasher
 from eventmind.infrastructure.security.tokens import (
@@ -79,6 +82,8 @@ class Container:
     ranker: HybridRanker
     recommender_config: RecommenderConfig
     notification_channels: dict[ChannelType, NotificationChannel]
+    search_repository: SqlAlchemySearchRepository
+    google_verifier: GoogleTokenVerifier
 
     def uow_factory(self) -> UnitOfWork:
         return SqlAlchemyUnitOfWork(self.session_factory)
@@ -143,4 +148,6 @@ def build_container(settings: Settings) -> Container:
             cache_ttl_seconds=settings.reco_cache_ttl_seconds,
         ),
         notification_channels=build_notification_channels(settings),
+        search_repository=SqlAlchemySearchRepository(session_factory),
+        google_verifier=GoogleTokenVerifierHttp(settings.google_oauth_client_id),
     )

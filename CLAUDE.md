@@ -72,7 +72,16 @@ Makefile   — up/test/lint/typecheck/imports/migrate/seed/...
   по включённым+verified каналам, гейтинг prefs/тихие часы), ScheduleDigests
   (arq cron→queue), инбокс `GET/POST /api/v1/notifications`, unsubscribe по
   JWT-токену, миграция 0005. 116 unit-тестов.
-- [ ] **M6** — веб-клиент Next.js (лента/профиль/NL-поиск/карточка/каналы) + Google OAuth.
+- [x] **M6** — веб-клиент Next.js + backend-обвязка: NL-поиск событий
+  (SearchFilters, канонизация, relax-fallback; порт SearchRepository) + карточка
+  события, профиль `PATCH /api/v1/users/me` (канонизация города/формат) +
+  настройки `GET/PATCH /api/v1/users/me/preferences`, **Google OAuth** (порт
+  GoogleTokenVerifier→tokeninfo/aud, `POST /api/v1/auth/google`). Web (Next 14
+  App Router, standalone): типизированный API-клиент через **BFF-прокси**
+  `/bff/[...path]` (httpOnly-cookie same-site, обход SameSite=Lax), middleware-
+  гейт, страницы вход/регистрация/лента(like·save·hide)/NL-поиск/карточка/
+  инбокс/настройки(профиль·уведомления·Telegram-deep-link). build+typecheck+lint
+  зелёные. 132 файла mypy, 127 unit-тестов.
 - [ ] **M7** — Telegram-бот (aiogram) поверх API: привязка аккаунта, лента, feedback.
 - [ ] **M8** — прод: k8s/Helm+HPA, дашборды/алерты, load-test, offline-eval + ablations.
 

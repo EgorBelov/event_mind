@@ -9,6 +9,7 @@ from starlette.status import HTTP_201_CREATED, HTTP_401_UNAUTHORIZED
 
 from eventmind.application.accounts.use_cases import (
     AuthenticateUser,
+    AuthenticateWithGoogle,
     RegisterUser,
     RequestPasswordReset,
     ResetPassword,
@@ -22,6 +23,7 @@ from eventmind.interfaces.api.dependencies import (
     ContainerDep,
     CurrentUser,
     get_authenticate_user,
+    get_authenticate_with_google,
     get_register_user,
     get_request_password_reset,
     get_reset_password,
@@ -30,6 +32,7 @@ from eventmind.interfaces.api.dependencies import (
 from eventmind.interfaces.api.errors import ApiError
 from eventmind.interfaces.api.schemas import (
     AuthResponse,
+    GoogleAuthRequest,
     LoginRequest,
     MessageResponse,
     PasswordResetConfirm,
@@ -75,6 +78,17 @@ async def login(
     use_case: Annotated[AuthenticateUser, Depends(get_authenticate_user)],
 ) -> AuthResponse:
     user = await use_case.execute(email=str(payload.email), password=payload.password)
+    return _issue(response, container, user)
+
+
+@router.post("/google", response_model=AuthResponse)
+async def google_auth(
+    payload: GoogleAuthRequest,
+    response: Response,
+    container: ContainerDep,
+    use_case: Annotated[AuthenticateWithGoogle, Depends(get_authenticate_with_google)],
+) -> AuthResponse:
+    user = await use_case.execute(payload.id_token)
     return _issue(response, container, user)
 
 
