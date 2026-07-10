@@ -402,6 +402,26 @@ class UpdatePreferences:
         return pref
 
 
+class ResolveAccountByTelegram:
+    """Найти account по привязанному Telegram chat_id (для bot-facing API).
+
+    Возвращает `user_id` только если канал существует, verified и enabled —
+    иначе None (бот покажет «сначала привяжите аккаунт в вебе»).
+    """
+
+    def __init__(self, uow_factory: UnitOfWorkFactory) -> None:
+        self._uow_factory = uow_factory
+
+    async def execute(self, chat_id: str) -> int | None:
+        async with self._uow_factory() as uow:
+            channel = await uow.channels.get_by_type_and_address(
+                ChannelType.TELEGRAM, chat_id
+            )
+            if channel is None or not channel.verified or not channel.enabled:
+                return None
+            return channel.user_id
+
+
 class AuthenticateWithGoogle:
     """Вход/регистрация через Google id_token."""
 

@@ -22,6 +22,7 @@ from eventmind.application.accounts.use_cases import (
     RegisterUser,
     RequestPasswordReset,
     ResetPassword,
+    ResolveAccountByTelegram,
     UpdatePreferences,
     UpdateProfile,
     VerifyEmail,
@@ -120,6 +121,10 @@ def get_update_profile(container: ContainerDep) -> UpdateProfile:
 
 def get_update_preferences(container: ContainerDep) -> UpdatePreferences:
     return UpdatePreferences(container.uow_factory)
+
+
+def get_resolve_telegram(container: ContainerDep) -> ResolveAccountByTelegram:
+    return ResolveAccountByTelegram(container.uow_factory)
 
 
 # ── ingestion (M3) ───────────────────────────────────────────────────────────

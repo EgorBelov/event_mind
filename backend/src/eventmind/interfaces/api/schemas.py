@@ -150,6 +150,19 @@ class GoogleAuthRequest(BaseModel):
     id_token: str = Field(min_length=1)
 
 
+class BotStatusResponse(BaseModel):
+    """Статус привязки Telegram chat_id к аккаунту (для bot-facing API)."""
+
+    linked: bool
+    user_id: int | None = None
+
+
+class BotInteractionRequest(BaseModel):
+    chat_id: str = Field(min_length=1, max_length=64)
+    event_id: int
+    action: str = Field(pattern="^(like|dislike|save|view)$")
+
+
 class PreferencesResponse(BaseModel):
     digest_frequency: str
     email_enabled: bool

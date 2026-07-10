@@ -23,6 +23,7 @@ from eventmind.interfaces.api.middleware import RequestContextMiddleware
 from eventmind.interfaces.api.routers import (
     admin,
     auth,
+    bot,
     channels,
     events,
     health,
@@ -89,6 +90,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(notifications.router)
     app.include_router(events.router)
     app.include_router(users.router)
+    app.include_router(bot.router)
 
     setup_tracing(app, settings)
     return app

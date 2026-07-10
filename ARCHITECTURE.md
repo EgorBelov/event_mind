@@ -1,6 +1,6 @@
 # EventMind v2 — архитектура
 
-> Живой документ. Обновляется на каждом milestone. Статус: **M6 (Веб-клиент + профиль/поиск + Google OAuth)**.
+> Живой документ. Обновляется на каждом milestone. Статус: **M7 (Telegram-бот на aiogram поверх API)**.
 
 EventMind собирает IT-события из внешних источников, нормализует их через LLM
 и рекомендует пользователям, доставляя выдачу по выбранным каналам. v2 —
@@ -197,12 +197,30 @@ read-only), `deploy/` (compose: pg+redis+api+web+worker+prometheus+grafana+mailh
   инбокс (in-app + отметка прочитанным), настройки (профиль/уведомления/
   Telegram-deep-link). `npm run build` + `tsc --noEmit` + `next lint` — зелёные.
 
-Зелёные проверки: ruff, mypy(strict, 132 файла), import-linter (границы слоёв),
-pytest (unit — домен/security/use-cases/LLM/embedding/ingestion/рекомендер/
-дайджест+гейтинг каналов/unsubscribe/**профиль+prefs+Google на фейках** ; integration —
-auth, outbox+UoW, SMTP↔Mailhog, telegram, ingestion, recommendations+feedback,
-inbox+unsubscribe+send-digest, **users профиль/prefs** через testcontainers),
-web (build/typecheck/lint), сборка образов — CI.
+**M7** — Telegram-бот (aiogram 3, long-polling) поверх API:
+- Бот — **вторичный клиент**: не трогает БД и не импортирует application/
+  infrastructure — только HTTP через `BotApiClient` (httpx + внутренний
+  `X-API-Key`). Chat_id → account резолвится на бэкенде.
+- **Bot-facing API** `/api/v1/bot/*` (guard `require_internal_api_key`):
+  `GET /status`, `GET /recommendations`, `POST /interactions` — принимают
+  `chat_id`, use-case `ResolveAccountByTelegram` находит `user_id` по
+  verified+enabled telegram-каналу и запускает те же `GetRecommendations`/
+  `RecordInteraction`, что и веб (409 `not_linked`, если чат не привязан).
+  Привязка — через существующий `/channels/telegram/confirm`; NL-поиск и
+  карточка — публичные `/events/*`.
+- Хендлеры: `/start <token>` (deep-link → confirm), `/feed` (карточки +
+  inline like/save/hide), `/search` и свободный текст (NL-поиск), callback'и
+  feedback/подробнее. Порт `send` (HTML + plain-fallback) и локализация дат/
+  ссылок из v1 — чистый `formatting.py` (без aiogram, тестируемый).
+- aiogram — extra `bot` (общий образ ставит `--extra bot`; `ml`/torch — нет).
+  Профиль compose `bot` (opt-in при заданном BOT_TOKEN).
+
+Зелёные проверки: ruff, mypy(strict, 139 файлов), import-linter (границы слоёв,
+бот — чистый HTTP-клиент), pytest (unit — домен/security/use-cases/LLM/embedding/
+ingestion/рекомендер/дайджест/профиль+prefs+Google/**bot-форматтеры+api-client+
+resolve** на фейках; integration — auth, outbox+UoW, SMTP↔Mailhog, telegram,
+ingestion, recommendations+feedback, inbox/unsubscribe, users, **bot-API** через
+testcontainers), web (build/typecheck/lint), сборка образов — CI.
 
 ## Поток данных: регистрация (пример транзакционного outbox)
 
@@ -219,5 +237,6 @@ worker: process_outbox → OutboxProcessor
 
 ## Дальше (roadmap)
 
-M7 Telegram-бот (aiogram поверх API) · M8 прод (k8s/Helm/HPA) + offline-eval.
-Детали — в `docs/REBUILD_PROMPT.md` (контракт) и плане каждого milestone.
+M8 прод (k8s/Helm/HPA + дашборды/алерты + load-test) + offline-eval harness
+(Recall@k/nDCG/MAP, LLM-judge, ablations, seed=42). Детали — в
+`docs/REBUILD_PROMPT.md` (контракт) и плане каждого milestone.

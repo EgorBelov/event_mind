@@ -82,7 +82,14 @@ Makefile   — up/test/lint/typecheck/imports/migrate/seed/...
   гейт, страницы вход/регистрация/лента(like·save·hide)/NL-поиск/карточка/
   инбокс/настройки(профиль·уведомления·Telegram-deep-link). build+typecheck+lint
   зелёные. 132 файла mypy, 127 unit-тестов.
-- [ ] **M7** — Telegram-бот (aiogram) поверх API: привязка аккаунта, лента, feedback.
+- [x] **M7** — Telegram-бот (aiogram 3, long-polling) поверх API: бот —
+  вторичный клиент (только HTTP через `BotApiClient`+X-API-Key, БД/слои не
+  трогает). Bot-facing API `/api/v1/bot/{status,recommendations,interactions}`
+  (guard internal-key, `ResolveAccountByTelegram` chat_id→user_id, 409
+  not_linked). Хендлеры: `/start <token>` deep-link→confirm, `/feed`
+  (карточки+inline like·save·hide), `/search`/свободный текст (NL-поиск),
+  callbacks. Чистый `formatting.py` (send HTML+fallback, локализация дат/
+  ссылок из v1). Extra `bot` (aiogram), compose-профиль `bot`. 149 unit-тестов.
 - [ ] **M8** — прод: k8s/Helm+HPA, дашборды/алерты, load-test, offline-eval + ablations.
 
 ## Зафиксированные решения v2
