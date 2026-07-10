@@ -106,7 +106,12 @@ def settings(migrated_db: str, redis_url: str) -> Settings:
 
 @pytest.fixture
 async def clean_tables(settings: Settings) -> None:
-    """Очистить таблицы аккаунтов перед тестом (изоляция при общей БД)."""
+    """Изоляция теста: TRUNCATE таблиц + flush Redis (общие БД и кэш на сессию).
+
+    Redis чистим обязательно: рекомендации кэшируются по `user_id`, а
+    RESTART IDENTITY переиспользует id=1 между тестами — без flush соседний тест
+    читал бы устаревший кэш (пустую выдачу) и падал.
+    """
     engine = create_async_engine(settings.database_url)
     try:
         async with engine.begin() as conn:
@@ -121,6 +126,14 @@ async def clean_tables(settings: Settings) -> None:
             )
     finally:
         await engine.dispose()
+
+    from eventmind.infrastructure.redis import create_redis
+
+    redis = create_redis(settings)
+    try:
+        await redis.flushdb()
+    finally:
+        await redis.aclose()
 
 
 @pytest.fixture
