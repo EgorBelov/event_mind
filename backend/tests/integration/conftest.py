@@ -1,7 +1,10 @@
 """Фикстуры integration-тестов: реальные Postgres(pgvector) + Redis через testcontainers.
 
-Все тесты в этом пакете помечены `integration` и требуют Docker. В обычном
-`pytest tests/unit` не запускаются.
+Все тесты в этом пакете требуют Docker и должны отбираться `-m integration`.
+Маркер навешивается на ВСЕ тесты пакета автоматически (см.
+`pytest_collection_modifyitems` ниже): `pytestmark` в conftest.py на файлы
+НЕ распространяется, поэтому раньше маркер стоял лишь на одном файле, а остальные
+integration-тесты в CI молча деселектились и не запускались.
 """
 from __future__ import annotations
 
@@ -19,10 +22,24 @@ from testcontainers.redis import RedisContainer
 from eventmind.config import Settings
 from eventmind.infrastructure.db.engine import create_session_factory
 
-pytestmark = pytest.mark.integration
-
 _PG_IMAGE = "pgvector/pgvector:pg16"
+_HERE = Path(__file__).resolve().parent
 _BACKEND_ROOT = Path(__file__).resolve().parents[2]
+
+
+def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
+    """Пометить `integration` каждый тест этого пакета (по пути файла).
+
+    Фильтр по пути важен: хук из conftest вызывается для всей сессии, а мы
+    маркируем только тесты под tests/integration, не задевая unit.
+    """
+    for item in items:
+        try:
+            item_path = Path(str(item.path))
+        except AttributeError:  # pragma: no cover — очень старый pytest
+            item_path = Path(str(item.fspath))
+        if item_path.parent == _HERE or _HERE in item_path.parents:
+            item.add_marker(pytest.mark.integration)
 
 
 @pytest.fixture(scope="session")
@@ -89,7 +106,12 @@ def settings(migrated_db: str, redis_url: str) -> Settings:
 
 @pytest.fixture
 async def clean_tables(settings: Settings) -> None:
-    """Очистить таблицы аккаунтов перед тестом (изоляция при общей БД)."""
+    """Изоляция теста: TRUNCATE таблиц + flush Redis (общие БД и кэш на сессию).
+
+    Redis чистим обязательно: рекомендации кэшируются по `user_id`, а
+    RESTART IDENTITY переиспользует id=1 между тестами — без flush соседний тест
+    читал бы устаревший кэш (пустую выдачу) и падал.
+    """
     engine = create_async_engine(settings.database_url)
     try:
         async with engine.begin() as conn:
@@ -104,6 +126,14 @@ async def clean_tables(settings: Settings) -> None:
             )
     finally:
         await engine.dispose()
+
+    from eventmind.infrastructure.redis import create_redis
+
+    redis = create_redis(settings)
+    try:
+        await redis.flushdb()
+    finally:
+        await redis.aclose()
 
 
 @pytest.fixture

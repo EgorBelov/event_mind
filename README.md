@@ -1,1126 +1,229 @@
 # EventMind
 
-**EventMind** — система агрегации IT-мероприятий и персонализированных
-AI-рекомендаций. Состоит из FastAPI-бэкенда, Telegram-бота на aiogram 3,
-hybrid-рекомендера на 9 компонент, NL-поиска событий через LLM с pydantic-схемой
-и планировщика фоновых задач (AI-дайджест, ingestion, compaction памяти) на
-APScheduler. Мульти-агентный Copilot реализован на LangGraph и доступен через
-REST API — в Telegram-боте временно скрыт (UX в доработке).
+**EventMind** — production-grade, **аккаунт-центричная мультиканальная** система
+агрегации IT-мероприятий и персональных рекомендаций. Гексагональная архитектура
+(ports & adapters), async сверху донизу: FastAPI-бэкенд, Next.js-веб-клиент,
+Telegram-бот (aiogram 3), очередь arq поверх Redis, PostgreSQL + pgvector, LLM
+за gateway'ем и two-stage-рекомендер.
+
+> **v2.** Проект перестроен с нуля по контракту [`docs/REBUILD_PROMPT.md`].
+> Код v1 (Telegram-центричный, sync-FastAPI/APScheduler) перенесён в
+> [`legacy/`](legacy/) как read-only справочник, откуда портирована доменная
+> логика (математика рекомендера, LLM-промпты, парсеры источников, канонизация,
+> фильтры, eval). Архитектура v1 **не** наследуется.
+>
+> Живой архитектурный документ — [`ARCHITECTURE.md`](ARCHITECTURE.md).
+> Трекер milestone'ов и заметки для сессий — [`CLAUDE.md`](CLAUDE.md).
 
 ---
 
 ## Содержание
 
-1. [Идея и возможности](#идея-и-возможности)
+1. [Возможности](#возможности)
 2. [Архитектура](#архитектура)
-3. [Структура проекта](#структура-проекта)
+3. [Структура монорепо](#структура-монорепо)
 4. [Стек](#стек)
-5. [Модель данных](#модель-данных)
-6. [Установка и запуск](#установка-и-запуск)
-7. [PostgreSQL + pgvector](#postgresql--pgvector)
-8. [Переменные окружения](#переменные-окружения)
-9. [Запуск компонентов](#запуск-компонентов)
-10. [Docker](#docker)
-11. [Telegram-бот: команды и сценарии](#telegram-бот-команды-и-сценарии)
-12. [Логика рекомендаций](#логика-рекомендаций)
-13. [Пайплайн ingestion](#пайплайн-ingestion)
-14. [AI-агенты на LangGraph](#ai-агенты-на-langgraph)
-15. [REST API](#rest-api)
-16. [Admin-дашборд](#admin-дашборд)
-17. [Тесты](#тесты)
-18. [Миграции](#миграции)
-19. [Минимальный happy-path](#минимальный-happy-path)
+5. [Быстрый старт (docker compose)](#быстрый-старт-docker-compose)
+6. [Локальная разработка](#локальная-разработка)
+7. [Проверки и тесты](#проверки-и-тесты)
+8. [Offline-eval рекомендера](#offline-eval-рекомендера)
+9. [Деплой (k8s/Helm)](#деплой-k8shelm)
+10. [Наблюдаемость](#наблюдаемость)
+11. [Статус milestone'ов](#статус-milestoneов)
 
 ---
 
-## Идея и возможности
+## Возможности
 
-Система решает три задачи:
-- собирать анонсы IT-мероприятий из десятка разнородных источников и
-  приводить их к единой структуре;
-- строить персональную ленту с прозрачным объяснением «почему именно это»;
-- вести мульти-туровый диалог с AI-помощником по карьерным задачам
-  (план развития, объяснение события, разбор истории).
-
-Реализованный функционал:
-- **7 ingestion-источников**: Habr (HTML), RSS/Atom, KudaGo (JSON), Lu.ma
-  (ICS), Meetup (GraphQL), Telegram-каналы (web-preview), Timepad (JSON API);
-- AI-нормализация сырых событий через LLM-цепочку Gemini→Groq с
-  Pydantic-валидацией: `format / city / level / topics / tech_stack /
-  seniority / quality_score / hype_score`;
-- семантическая дедупликация — cosine ≥ 0.92 за последние 90 дней;
-- настройка профиля через Telegram inline-мастер (темы → формат → город) +
-  4-экранный onboarding-тур (`/start`, `/tour`) с возможностью пропустить;
-- deep-linking `t.me/<bot>?start=event_<id>` — открывает карточку события
-  сразу из ссылки;
-- холодный старт через `/bio` — LLM с pydantic-валидацией извлекает
-  skill-профиль и виртуально обновляет topic_weights;
-- **hybrid recommender из 9 компонент:** rule + cosine + bayesian (Thompson)
-  + quality + hype + freshness + skill_gap + bandit (LinUCB) + gnn
-  (LightGCN, выключен по умолчанию);
-- MMR-диверсификация (λ=0.7) + series anti-flood (в выдаче остаётся выпуск
-  ближайший по `start_at` к now);
-- **AI-рекомендации**: hybrid отбирает top-N, один LLM-вызов с
-  pydantic-схемой пишет объяснения батчем;
-- **NL-поиск событий** (`/events/nl-search`): пользователь пишет фразу
-  обычным языком («конференции по AI с 3 по 10 июня в Москве»), LLM
-  извлекает фильтры в Pydantic-схему `SearchFilters`. LRU-кэш на 256
-  запросов, канонизация городов/типов, relax-fallback при 0 совпадениях;
-- **единая «📖 Подробнее»** в карточке — отдельное сообщение от LLM
-  с человеческим описанием события (без скоров/метрик), кэш TTL 6 ч;
-- семантический и keyword-поиск (один запрос делает оба прохода
-  параллельно через `/events/combined-search`);
-- похожие события (по пересечению тем);
-- фильтр прошедших событий (`upcoming_only`, grace 6 ч, NULL-сейф) —
-  применяется везде в выдаче, история взаимодействий не удаляется;
-- `/undo` — откат последнего лайка/дизлайка/сохранения во **всех четырёх**
-  подсистемах (topic_weights, Bayesian α/β, LinUCB A/b, long-term memory);
-- **AI Copilot** — мульти-туровый Supervisor-Worker граф LangGraph с
-  5 специалистами (recommendation, career_coach, roadmap, explainer,
-  summary) и 6 function-calling tools; история в `copilot_sessions`,
-  активная сессия живёт 15 минут. Доступен через REST API
-  (`POST /copilot/{tid}/turn`); **в боте временно скрыт** — роутер не
-  подключается в `app/bot/main.py`, UX в доработке;
-- **long-term memory** (mem0-style): LLM пишет активные заметки от первого
-  лица в `user_memories` — Copilot ссылается на них через `recall_about_user`;
-- trending-аналитика (`/trending`) с ASCII-bar-графиком тем за 7 дней;
-- подписки и AI-дайджест (интервал настраиваемый через
-  `DIGEST_INTERVAL_MINUTES`);
-- HTML admin-дашборд (`/admin/`) и `/analytics/*`;
-- композитный `/health`: БД, embeddings warm-up, доступность LLM;
-- **API security**: `X-API-Key` shared-secret middleware (`hmac.compare_digest`),
-  per-request structured logging (rid, latency, status), 4xx → WARNING
-  без traceback, fail-fast config validation;
-- **LLM-цепочка** Gemini → Groq 70b → Groq 8b с circuit-breaker
-  (5 фейлов → cooldown 120 с) и per-provider cooldown
-  (2 фейла → skip 10 мин); `POST /admin/llm/reprobe` сбрасывает кэш
-  автопробы Gemini;
-- Alembic-миграции (14 ревизий, включая pgvector + BIGINT для
-  `users.telegram_id`).
-
----
+- **Аккаунт-центричная модель.** Идентичность — аккаунт (email), к которому
+  привязаны каналы доставки (email, Telegram, in-app). Telegram — вторичный
+  клиент, а не первичный ключ.
+- **Аутентификация.** Email+пароль (argon2, JWT в httpOnly-cookie, верификация
+  email и сброс пароля через транзакционный outbox), **Google OAuth**, привязка
+  Telegram deep-link'ом.
+- **Ingestion.** Реестр источников (habr / rss / kudago) → `raw_events` →
+  LLM-нормализация (structured output, enum-валидация, строгие ISO-даты) →
+  `events` с идемпотентностью, ретраями и DLQ.
+- **Two-stage рекомендер.** Кандидаты через pgvector kNN → взвешенный ансамбль
+  скореров (rule, cosine, bayesian-Thompson, quality, hype, freshness; заделы
+  skill_gap/bandit/gnn под флагами) → MMR-rerank + series anti-flood.
+  Online-обучение по фидбеку (Bayesian + прогрев эмбеддинга + инвалидация кэша).
+- **NL-поиск.** Фраза обычного языка → LLM извлекает `SearchFilters` →
+  канонизация → строгий проход → relax-fallback.
+- **Мультиканальная доставка.** Единый порт `NotificationChannel`
+  (email SMTP / Telegram Bot API / in-app), дайджест (scheduler cron → queue →
+  рассылка по включённым+verified каналам, гейтинг prefs/тихих часов),
+  in-app инбокс, unsubscribe по подписанному токену.
+- **Клиенты.** Next.js-веб (лента, поиск, карточка, инбокс, настройки) и
+  Telegram-бот поверх API.
 
 ## Архитектура
 
-```mermaid
-flowchart LR
-    User(["👤 Пользователь"])
+Гексагональные слои, правило зависимостей `interfaces → application → domain`;
+`infrastructure` реализует порты `application`; `domain` наружу не импортирует.
+Границы проверяет **import-linter** в CI.
 
-    subgraph Telegram["Telegram (long-polling)"]
-        Bot["🤖 aiogram 3<br/><i>app/bot</i>"]
-    end
-
-    subgraph Backend["FastAPI · uvicorn"]
-        API["REST API<br/><i>app/api</i>"]
-        MW["Middleware<br/>X-API-Key · request-log<br/>4xx WARNING · X-Request-ID"]
-        Recsys["Hybrid Recommender<br/>9 компонент + MMR + series anti-flood<br/><i>app/recommender</i>"]
-        Copilot["LangGraph Copilot<br/>Supervisor → 5 specialists<br/><i>app/agents/copilot</i>"]
-        Normalize["Event Normalizer<br/>Pydantic + ISO-date<br/><i>app/agents/event_normalization</i>"]
-    end
-
-    subgraph LLM["LLM-цепочка<br/><i>llm._LLMChain</i>"]
-        Gemini["Gemini<br/>(autopobe модели,<br/>REST transport)"]
-        Groq70["Groq llama-3.3-70b"]
-        Groq8["Groq llama-3.1-8b"]
-        Gemini -->|429 / DNS / 5xx| Groq70
-        Groq70 -->|429 / 5xx| Groq8
-    end
-
-    subgraph Embed["sentence-transformers"]
-        MiniLM["MiniLM-L12-v2<br/>384-dim, multilingual"]
-    end
-
-    subgraph DB["Supabase Postgres + pgvector"]
-        Users[("users · user_topic_stats<br/>user_bandit_states · user_skill_profiles<br/>user_memories · copilot_sessions")]
-        Events[("events · raw_events · topics<br/>interactions<br/>recommendation_cache")]
-        Vec[("embedding_vec vector(384)<br/>+ IVFFlat &lt;=&gt;-index")]
-    end
-
-    subgraph Scheduler["APScheduler · одиночный процесс"]
-        Digest["daily_digest"]
-        Ingest["ingest: habr / rss / kudago<br/>luma / meetup / telegram / timepad"]
-        Backfill["backfill_event_embeddings<br/>backfill_user_embeddings"]
-        Compact["compact_memories"]
-    end
-
-    subgraph Sources["Внешние источники"]
-        Habr["Habr HTML"]
-        RSS["RSS / Atom"]
-        Kudago["KudaGo API"]
-        Luma["Lu.ma ICS"]
-        Meetup["Meetup GraphQL"]
-        TG["Telegram-каналы"]
-        Timepad["Timepad API"]
-    end
-
-    User <-->|сообщения| Bot
-    Bot <-->|"HTTP + X-API-Key"| API
-    API --> MW
-    MW --> Recsys
-    MW --> Copilot
-    Copilot -->|invoke| LLM
-    Normalize -->|invoke| LLM
-    Recsys -->|"why-explanation"| LLM
-    Recsys -->|"vector ops"| MiniLM
-    Normalize -->|"vector ops"| MiniLM
-    Recsys <--> Vec
-    Recsys <--> Events
-    Recsys <--> Users
-    Copilot <--> Users
-    Copilot <--> Events
-    Normalize --> Events
-    Ingest --> Sources
-    Sources --> Ingest
-    Ingest -->|"raw → normalize"| Normalize
-    Digest -->|"карточка дня"| Bot
-    Digest -->|HTTP| API
-    Backfill --> Vec
-    Compact --> Users
+```
+domain          — чистые сущности/VO/доменные сервисы (математика скоринга, таксономия). Без I/O.
+application     — use-cases + порты (repos, uow, queue, cache, llm, channels, sources, oauth).
+infrastructure  — async-SQLAlchemy-репо, LLM-цепочка, embeddings, arq, Redis-cache, outbox-relay,
+                  NotificationChannel'ы, HTTP-клиенты источников, телеметрия.
+interfaces      — FastAPI-роутеры + DI, aiogram-хендлеры (bot), arq-worker (queue+cron), CLI.
 ```
 
-Три независимых процесса:
-1. **api** (`uvicorn app.api.main:app`) — REST-сервис, держит БД, LLM-цепочку
-   и embedding-модель в памяти.
-2. **bot** (`python -m app.bot.main`) — Telegram-фронт на long-polling,
-   общается с api по HTTP с заголовком `X-API-Key`.
-3. **scheduler** (`python -m app.scheduler.digest`) — APScheduler:
-   `daily_digest`, `ingest_*`, `backfill_event_embeddings`,
-   `backfill_user_embeddings`, `compact_memories`.
+**Процессы** (каждый — отдельный контейнер, stateless, реплицируемый):
+`api` (FastAPI) · `worker` (arq: очередь + cron) · `web` (Next.js) · `bot`
+(aiogram, опц.). Хранилища: **PostgreSQL 16 + pgvector** (HNSW) и **Redis**
+(очередь, кэш, локи). Надёжная публикация доменных событий — **транзакционный
+outbox**.
 
-`bot` и `scheduler` ждут healthcheck'а `api` перед стартом (в `docker-compose`).
+## Структура монорепо
 
----
-
-## Структура проекта
-
-```text
-eventmind/
-├── app/
-│   ├── api/
-│   │   ├── main.py                          # FastAPI app + /health
-│   │   ├── routers/                         # HTTP-роутеры по доменам
-│   │   │   ├── users.py                     # /users/* — регистрация, профиль, bio
-│   │   │   ├── events.py                    # /events/* — поиск, semantic-search, combined-search, nl-search, explain
-│   │   │   ├── recommendations.py           # /recommendations/* — hybrid лента + interactions + why
-│   │   │   ├── agent_recommendations.py     # /agent-recommendations/* — hybrid + LLM объяснения
-│   │   │   ├── copilot.py                   # /copilot/* — one-shot + multi-turn AI-копилот (API only)
-│   │   │   ├── ingestion.py                 # /ingestion/* — load-{habr,rss,kudago,luma,meetup,telegram,timepad} + нормализация
-│   │   │   ├── subscriptions.py             # /subscriptions/* — подписки на дайджест
-│   │   │   ├── admin.py                     # /admin/ — HTML-дашборд + /admin/llm/reprobe
-│   │   │   ├── analytics.py                 # /analytics/* — topics/interactions/trending
-│   │   │   └── vocabulary.py                # /vocabulary/* — динамические словари
-│   │   ├── middleware.py                    # ApiKeyMiddleware (X-API-Key) + RequestLogMiddleware
-│   │   ├── schemas/                         # Pydantic-схемы (включая SearchFilters для NL-поиска)
-│   │   └── services/                        # бизнес-логика (вне роутеров)
-│   │       ├── nl_search_service.py         # NL-поиск: LLM extract фильтров + LRU-кэш + relax-fallback
-│   │       ├── event_explain_service.py     # «📖 Подробнее» — LLM-описание события (TTL-кэш 6 ч)
-│   │       └── …                            # ai_recommendation, recommendation, search, event, user, ingestion, subscription
-│   │
-│   ├── bot/
-│   │   ├── main.py                          # Dispatcher, порядок router'ов (start/profile/recommendations/subscriptions/search)
-│   │   ├── handlers/                        # роутеры по сценариям
-│   │   │   ├── start.py                     # /start, /tour, мастер настройки, /edit, /bio
-│   │   │   ├── recommendations.py           # «🎯 Рекомендации», единая «📖 Подробнее», 👍/👎/⭐
-│   │   │   ├── profile.py                   # /profile, /saved, /stats, /trending
-│   │   │   ├── search.py                    # «🔍 Поиск», NL-поиск, sticky waiting-state 60 мин
-│   │   │   ├── copilot.py                   # код есть, но в main.py НЕ подключён (скрыто, UX в доработке)
-│   │   │   └── subscriptions.py             # /subscribe, /unsubscribe
-│   │   ├── keyboards/                       # inline + reply клавиатуры
-│   │   ├── utils.py                         # esc + send (HTML с авто-fallback в plain) + event_url_line + format_event_date
-│   │   └── services/api_client.py           # EventMindAPIClient — async-обёртка над API
-│   │
-│   ├── core/
-│   │   ├── config.py                        # Pydantic-settings: BOT_TOKEN, GROQ_*, DIGEST_*, …
-│   │   ├── logging.py
-│   │   └── topics.py                        # seed topics/cities/formats/levels + утилиты
-│   │
-│   ├── db/
-│   │   ├── base.py, session.py, dependencies.py
-│   │   └── models/                          # 11 моделей SQLAlchemy
-│   │
-│   ├── recommender/
-│   │   ├── scoring.py                       # rule-based score
-│   │   ├── hybrid.py                        # 9 компонент: rule+cos+bayes+quality+hype+
-│   │   │                                    # freshness+skill+bandit+gnn
-│   │   ├── embeddings.py                    # MiniLM + session_embedding + blend
-│   │   ├── retrieval.py                     # RAG retrieval + interaction context
-│   │   ├── bayesian.py                      # Beta + Thompson + temporal decay
-│   │   ├── bandit.py                        # LinUCB contextual bandit (numpy)
-│   │   ├── gnn.py                           # LightGCN (numpy, без torch)
-│   │   ├── dedup.py                         # семантическая дедупликация по cosine
-│   │   ├── diversity.py                     # MMR re-ranking
-│   │   ├── cold_start.py                    # LLM bootstrap из bio
-│   │   ├── skill_gap.py                     # target_skills vs event.tech_stack
-│   │   ├── memory.py                        # long-term memory: write/recall/extract/compact
-│   │   ├── explain.py                       # decomposed score + counterfactual
-│   │   └── user_model.py                    # topic_weights helpers
-│   │
-│   ├── ingestion/sources/                   # 7 адаптеров с единым интерфейсом
-│   │   ├── habr.py                          # BeautifulSoup + lxml
-│   │   ├── rss.py                           # feedparser
-│   │   ├── kudago.py                        # публичный JSON API
-│   │   ├── luma.py                          # ICS-фиды
-│   │   ├── meetup.py                        # GraphQL (Pro-token)
-│   │   ├── tg_channels.py                   # web-preview scraping (t.me/s/<channel>)
-│   │   └── timepad.py                       # Timepad JSON API (bearer-token, категории/города)
-│   │
-│   ├── agents/
-│   │   ├── recommendation/                  # llm.py с _GroqWithFallback + legacy graph
-│   │   ├── event_normalization/             # raw_event → нормализованный event
-│   │   └── copilot/                         # Supervisor-Worker граф
-│   │       ├── agent.py                     # retrieve → supervisor → specialist → finalize
-│   │       ├── state.py                     # CopilotState + Intent Literal
-│   │       ├── supervisor.py                # классификация intent'а (pydantic + keyword fallback)
-│   │       ├── common.py                    # invoke_with_tools, format_history
-│   │       ├── tools.py                     # 5 function-calling tools
-│   │       └── specialists/                 # recommendation/career_coach/roadmap/explainer/summary
-│   │
-│   └── scheduler/digest.py                  # APScheduler: digest + ingestion + memory compact
-│
-├── alembic/versions/                        # 14 миграций
-├── data/                                    # справочные источники
-├── docs/                                    # обзор, план показа, отчёт (HSE)
-│   ├── diagrams/                            # Mermaid-исходники + PNG/SVG + кастомная BPMN
-│   └── отчет_Курсовая.docx                  # авторитетный отчёт по проекту (HSE-шаблон)
-├── tests/                                   # 47 файлов, 315+ test-функций (~370 с parametrize)
-├── scripts/
-│   ├── eval_offline.py                      # leave-one-out Recall@k / nDCG@k (реальная БД)
-│   ├── eval_offline_synthetic.py            # тот же эвал на in-memory синтетике (seed=42)
-│   ├── llm_judge.py                         # LLM-as-judge на реальной БД
-│   ├── llm_judge_synthetic.py               # LLM-as-judge на синтетическом датасете
-│   ├── train_gnn.py                         # тренировка LightGCN
-│   ├── compact_memories.py                  # ручной запуск compaction
-│   ├── backfill_pgvector.py                 # SQLite → Postgres embedding-кэш
-│   ├── backfill_series_slug.py              # series_slug для существующих событий
-│   └── regenerate_docs.py                   # полная регенерация всех 3 .docx
-├── .env / .env.example
-├── alembic.ini
-├── Dockerfile + docker-compose.yml          # сервисы api / bot / scheduler
-├── pyproject.toml                           # ruff + pytest конфиг
-├── requirements.txt
-├── CLAUDE.md                                # bootstrap-контекст для AI-сессий
-└── README.md
 ```
-
----
+backend/    Python 3.12, uv, гексагон: src/eventmind/{domain,application,infrastructure,interfaces}
+            eval/ — offline-eval harness (вне src/, tooling)
+web/        Next.js 14 (App Router, standalone) — веб-клиент + BFF-прокси
+deploy/     docker-compose (dev), helm/ (prod), prometheus/, grafana/, loadtest/ (k6)
+legacy/     весь v1 (read-only справочник для портирования)
+docs/REBUILD_PROMPT.md   контракт перестройки
+ARCHITECTURE.md          живой документ (слои, процессы, обоснования, статус)
+CLAUDE.md                трекер milestone'ов + заметки для будущих сессий
+Makefile                 up/test/lint/typecheck/imports/migrate/seed/eval/load-test
+```
 
 ## Стек
 
-- **Python 3.12**
-- **FastAPI 0.110** + **Uvicorn**
-- **aiogram 3.13** — Telegram-бот, long-polling
-- **SQLAlchemy 2.0** + **Alembic 1.13**
-- **PostgreSQL + pgvector** на Supabase (dev и prod). SQLite остаётся
-  только для in-memory модульных тестов; CI прогоняется на
-  `pgvector/pgvector:pg16`.
-- **LangGraph 0.2** + **langchain-core** — multi-agent графы (Copilot)
-- **LLM-цепочка** (`app/agents/recommendation/llm.py::_LLMChain`):
-  Google Gemini (через `langchain-google-genai` с `transport="rest"`,
-  автопроба модели на старте) → Groq `llama-3.3-70b` → Groq
-  `llama-3.1-8b`. Circuit-breaker (5 фейлов → 120 с cooldown) +
-  per-provider cooldown (2 фейла → 10 мин skip).
-- **sentence-transformers 2.7** — multilingual MiniLM-L12-v2 (384 dim)
-- **APScheduler 3.10** — фоновые джобы (digest, ingestion, backfill
-  embeddings, compact memory)
-- **BeautifulSoup 4 + lxml**, **feedparser**, **httpx**
-- **Pydantic 2** + **pydantic-settings**
-- **pytest 8.2** (**315+ кейсов в 47 файлах**), **ruff 0.6**
+- **Backend:** Python 3.12, uv, FastAPI (async), SQLAlchemy 2.0 async + asyncpg +
+  pgvector, Alembic, Pydantic v2, arq + Redis, argon2 + PyJWT, aiosmtplib + Jinja2,
+  langchain-core/-google-genai/-groq (LLM Gateway), sentence-transformers (extra
+  `ml`, ленивый импорт), beautifulsoup4/lxml/feedparser (парсеры), aiogram 3
+  (extra `bot`), structlog + OpenTelemetry + prometheus-client.
+- **Web:** Next.js 14 (App Router, standalone), TypeScript.
+- **Качество:** ruff + mypy(strict) + import-linter + pytest (unit +
+  integration через testcontainers) — блокирующие в CI.
 
----
+## Быстрый старт (docker compose)
 
-## Модель данных
-
-11 таблиц + 2 association.
-
-**Профиль и события:**
-- `users` — `telegram_id`, `username`, `preferred_format`, `city`,
-  `topic_weights` (JSON), `is_subscribed`, `embedding` (JSON-вектор или
-  `vector(384)` на PG).
-- `events` — `title`, `description`, `format`, `city`, `level`, `date`,
-  `summary`, `embedding`, `tech_stack` (JSON), `seniority`,
-  `quality_score` (1–10), `hype_score` (1–10), `event_type`,
-  `target_audience`, `source_url`.
-- `raw_events` — `title`, `raw_description`, `source_url`,
-  `status ∈ {raw, normalized, non_it, failed}`, `error`.
-- `topics` — `code`, `title`; `user_topics`, `event_topics` — many-to-many.
-
-**Слои модели пользователя:**
-- `user_topic_stats` — `alpha`, `beta` (Beta-параметры предпочтения по
-  теме, для Thompson sampling + temporal decay).
-- `user_skill_profiles` — `current_role`, `target_role`, `seniority`,
-  `current_skills`, `target_skills`, `goals`, `learning_horizon`
-  (заполняется через `/bio`).
-- `user_bandit_states` — `dim`, `a_json` (d×d), `b_json` (d),
-  `update_count` (онлайн-обновляемое состояние LinUCB).
-- `user_memories` — `text`, `category`, `salience` (1–10), `embedding`,
-  `access_count`, `last_accessed_at`, `source` (long-term memory, mem0).
-- `copilot_sessions` — `messages_json`, `started_at`, `last_message_at`,
-  `closed` (мульти-туровая история).
-- `recommendation_cache` — `telegram_id` (PK BigInt), `items_json`,
-  `limit_used`, `computed_at`, `expires_at` (TTL-кэш выдачи
-  `/recommendations`, по умолчанию 15 мин).
-
-**Поля курсора и серий:**
-- `users.feed_cursor` — индекс ленты `/recommend` в боте; раньше жил
-  в module-dict, теперь переживает рестарт процесса.
-- `events.series_slug` — `python-meetup`, `devops-days-moscow`, ...
-  (детерминированный slug, см. `app/recommender/series.py`).
-
-**Взаимодействия:**
-- `interactions` — `user_id`, `event_id`, `action ∈ {like, dislike, save}`,
-  `created_at`.
-
-**Словари динамические** (`app/core/topics.py`): seed-значения +
-автоматическое расширение по поступающим событиям. Любой новый slug от
-парсера/LLM проходит через `slugify_code` и записывается в `topics`.
-Лейблы для UI вычисляются через `topic_title()`, `format_label()`,
-`city_label()`, `level_label()`.
-
-Актуальный снимок — `GET /vocabulary`.
-
----
-
-## Установка и запуск
-
-Требуется Python 3.12+.
+Нужен Docker. Из корня репозитория:
 
 ```bash
-# 1. Клонировать репозиторий
-git clone git@github.com:EgorBelov/event_mind.git
-cd event_mind
-
-# 2. Виртуальное окружение
-python3.12 -m venv .venv
-source .venv/bin/activate
-
-# 3. Зависимости
-pip install -r requirements.txt
-
-# 4. Переменные окружения
-cp .env.example .env
-# открыть .env и заполнить:
-#   BOT_TOKEN — токен бота
-#   DATABASE_URL — postgresql+psycopg2://... (Supabase или локальный PG с pgvector)
-#   хотя бы один из GOOGLE_API_KEY / GROQ_API_KEY
-
-# 5. Применить миграции
-alembic upgrade head
-
-# 6. (опционально) наполнить событиями
-curl -X POST "http://localhost:8000/ingestion/load-habr?limit=20"
-curl -X POST "http://localhost:8000/ingestion/load-rss?limit_per_feed=20"
-curl -X POST "http://localhost:8000/ingestion/load-all?limit=10"  # все 7 источников по очереди
+cp .env.example .env      # ключи по желанию: GOOGLE_API_KEY/GROQ_API_KEY, BOT_TOKEN, ...
+make up                   # pg + redis + api + web + worker + prometheus + grafana + mailhog
 ```
 
----
-
-## PostgreSQL + pgvector
-
-Прод-вариант — PostgreSQL с расширением `pgvector`: top-k поиск
-выполняется на стороне БД через оператор `<=>` (cosine distance) с
-IVFFlat-индексом. На датасете 10⁴–10⁵ событий это ускоряет `/copilot` и
-semantic-search на порядок.
-
-Переключение управляется только `DATABASE_URL`. Код автоматически
-определяет backend (`app/db/backend.py:has_pgvector`) и выбирает быстрый
-путь, если расширение доступно. На SQLite/без pgvector — прежняя
-in-process сортировка по cosine.
-
-```bash
-# 1. Создать БД и расширение
-psql -U postgres -c "CREATE DATABASE eventmind;"
-psql -U postgres -d eventmind -c "CREATE EXTENSION IF NOT EXISTS vector;"
-
-# 2. В .env переключиться на Postgres
-# DATABASE_URL=postgresql+psycopg2://user:pass@localhost:5432/eventmind
-
-# 3. Накатить миграции (9a1b2c3d4e5f добавит embedding_vec + IVFFlat)
-alembic upgrade head
-
-# 4. Перенести JSON-embedding'и → vector (если данные были на SQLite)
-DATABASE_URL=postgresql+psycopg2://... python -m scripts.backfill_pgvector
-```
-
-Если `pgvector` не установлен на сервере (`CREATE EXTENSION` падает):
-- Postgres.app / brew — `brew install pgvector`;
-- EnterpriseDB — собрать из исходников
-  (`make PG_CONFIG=/Library/PostgreSQL/15/bin/pg_config && sudo make install`).
-
----
-
-## Переменные окружения
-
-Читаются через `pydantic-settings` из `.env` (см. `app/core/config.py`).
-Шаблон — `.env.example`.
-
-### Базовое
-
-| Переменная | Default | Описание |
-|---|---|---|
-| `BOT_TOKEN` | — | Токен Telegram-бота. Обязателен для `app.bot.main` и scheduler. |
-| `DATABASE_URL` | `sqlite:///./eventmind.db` | SQLAlchemy URL. Прод-вариант: `postgresql+psycopg2://user:pass@host:5432/db` (включает `pool_pre_ping=True` + `pool_recycle=1500` для Supabase session-pooler'а). |
-| `API_HOST` | `http://localhost:8000` | Базовый URL FastAPI, который дёргают bot и scheduler. |
-| `API_SHARED_SECRET` | `""` | Shared-secret для `X-API-Key`. Пустой = dev open-mode (auth выключен). На проде задать ОБЯЗАТЕЛЬНО. |
-| `DEBUG` | `false` | Verbose-логи и SQL echo. |
-
-### LLM-цепочка
-
-`app/agents/recommendation/llm.py::_LLMChain` идёт по звеньям до первого
-успеха. Хотя бы один из двух ключей (`GOOGLE_API_KEY` или `GROQ_API_KEY`)
-должен быть задан, иначе LLM-агенты не работают.
-
-| Переменная | Default | Описание |
-|---|---|---|
-| `GOOGLE_API_KEY` | — | Ключ Google AI Studio (https://aistudio.google.com/app/apikey). Primary-звено цепочки. |
-| `GOOGLE_MODEL` | `""` | Конкретная Gemini-модель. Пустой = автопроба: на старте API цепочкой POST'ов выбирается первая отвечающая 200 (см. `_GEMINI_FALLBACK_MODELS` в `llm.py`). |
-| `GROQ_API_KEY` | — | Ключ Groq Cloud. Fallback после Gemini (или primary, если Gemini пустой). |
-| `GROQ_MODEL` | `llama-3.3-70b-versatile` | Groq primary-модель. |
-| `GROQ_FALLBACK_MODEL` | `llama-3.1-8b-instant` | Groq last-resort fallback. |
-| `GROQ_TEMPERATURE` | `0.4` | Temperature всех звеньев цепочки. |
-| `GROQ_MAX_RETRIES` | `2` | Retries Groq SDK при сетевых ошибках. |
-
-### Рекомендации
-
-| Переменная | Default | Описание |
-|---|---|---|
-| `RECOMMENDATION_CACHE_ENABLED` | `true` | TTL-кэш `/recommendations` в таблице `recommendation_cache`. |
-| `RECOMMENDATION_CACHE_TTL_MINUTES` | `15` | Время жизни кэша. Инвалидируется на feedback / register / edit / analyze-bio. |
-
-### Ingestion
-
-| Переменная | Default | Описание |
-|---|---|---|
-| `INGEST_ENABLED` | `true` | Включает периодический ingestion внутри scheduler-процесса. |
-| `INGEST_INTERVAL_HOURS` | `6` | Период `ingest_habr` / `ingest_rss` / `ingest_telegram`. |
-| `INGEST_HABR_LIMIT` | `20` | Лимит событий с Habr за тик. |
-| `INGEST_RSS_LIMIT_PER_FEED` | `20` | Лимит на одну RSS-ленту за тик. |
-| `RSS_FEEDS` | `""` | RSS/Atom URL'ы через запятую. |
-| `TG_INGEST_CHANNELS` | `""` | Telegram-каналы через запятую (username без `@`). |
-| `LUMA_CALENDARS` | `""` | ICS URL'ы Lu.ma через запятую. |
-| `MEETUP_TOKEN`, `MEETUP_GROUPS` | `""` | OAuth Pro-token + urlnames для Meetup. |
-| `TIMEPAD_TOKEN` | `""` | Bearer-токен Timepad (https://dev.timepad.ru/). Без него источник молча пропускается. |
-| `TIMEPAD_CATEGORY_IDS` | `"452"` | ID категорий Timepad через запятую. `452` = «IT и интернет». |
-| `TIMEPAD_CITIES` | `""` | Фильтр по городам Timepad (через запятую). |
-| `TG_API_ID`, `TG_API_HASH` | `null`/`""` | (опционально) для расширенного Telegram-доступа. |
-
-### Дайджест
-
-| Переменная | Default | Описание |
-|---|---|---|
-| `DIGEST_INTERVAL_MINUTES` | `1440` | Интервал рассылки AI-дайджеста. Для dev — `10`. |
-| `DIGEST_RUN_ON_STARTUP` | `false` | Запускать ли первую рассылку сразу при старте scheduler'а. |
-
-### Recsys-веса
-
-| Переменная | Default | Описание |
-|---|---|---|
-| `SCORE_RULE_WEIGHT` | `0.5` | Вес rule-компонента. |
-| `SCORE_COSINE_WEIGHT` | `10.0` | Вес семантической близости. |
-| `SCORE_BAYES_WEIGHT` | `5.0` | Вес Thompson sampling. |
-| `SCORE_QUALITY_WEIGHT` | `0.5` | Вес quality. |
-| `SCORE_HYPE_WEIGHT` | `0.3` | Вес hype. |
-| `SCORE_FRESHNESS_WEIGHT` | `2.0` | Вес freshness. |
-| `SCORE_SKILL_GAP_WEIGHT` | `3.0` | Вес skill-gap. |
-| `FRESHNESS_HALF_LIFE_DAYS` | `30.0` | Half-life экспоненциального decay по дате. |
-| `MMR_ENABLED` / `MMR_LAMBDA` | `true` / `0.7` | MMR-диверсификация. |
-| `BAYES_DECAY_PER_DAY` | `0.995` | γ для temporal decay Bayesian-параметров. |
-| `DEDUP_ENABLED` / `DEDUP_THRESHOLD` | `true` / `0.92` | Семантическая дедупликация. |
-| `BANDIT_ENABLED` / `BANDIT_WEIGHT` / `BANDIT_ALPHA` | `true` / `2.0` / `1.0` | LinUCB вкл/вес/exploration. |
-| `GNN_ENABLED` / `GNN_WEIGHT` / `GNN_EMBEDDING_DIM` | `false` / `3.0` / `32` | LightGCN: по умолчанию выкл. |
-| `MEMORY_ENABLED` / `MEMORY_MIN_SALIENCE` / `MEMORY_COMPACT_THRESHOLD` | `true` / `4.0` / `50` | Long-term memory. |
-
----
-
-## Запуск компонентов
-
-Три **независимых процесса**. Запускайте в отдельных терминалах или через
-docker-compose.
-
-### 1) FastAPI backend
-
-```bash
-# dev — авто-перезагрузка
-uvicorn app.api.main:app --reload
-
-# prod
-uvicorn app.api.main:app --host 0.0.0.0 --port 8000 --workers 2
-```
-
-Полезные URL:
-- `http://localhost:8000/` — корневой ответ
-- `http://localhost:8000/health` — healthcheck (db / embeddings / llm)
-- `http://localhost:8000/docs` — Swagger UI
-- `http://localhost:8000/admin/` — HTML-дашборд
-
-### 2) Telegram-бот
-
-```bash
-python -m app.bot.main
-```
-
-Без `BOT_TOKEN` упадёт с `ValueError: BOT_TOKEN не найден в .env`.
-
-### 3) Scheduler
-
-Раз в `DIGEST_INTERVAL_MINUTES` берёт подписчиков, для каждого получает
-топ AI-карточку и отправляет через Telegram Bot API. Параллельно крутит
-ingestion и compaction памяти.
-
-```bash
-python -m app.scheduler.digest
-```
-
-Зависит от запущенного API и валидного `BOT_TOKEN`.
-
----
-
-## Docker
-
-```bash
-docker compose up -d --build    # api / bot / scheduler
-docker compose logs -f api
-docker compose down
-```
-
-`bot` и `scheduler` стартуют только после healthcheck'а `api`. Внутри
-контейнеров `DATABASE_URL` указывает на `/app/eventmind.db`. Том
-пробрасывается для сохранения `data/` и SQLite-файла.
-
----
-
-## Telegram-бот: команды и сценарии
-
-| Команда / текст | Что делает |
+| Сервис | URL |
 |---|---|
-| `/start` | 4-экранный onboarding-тур + кнопка «🚀 Начать настройку» в конце. |
-| `/start event_<id>` | Deep-link на карточку события (для шеринга). |
-| `/tour` | Повторить тур в любой момент. |
-| `/edit` | Перезапуск мастера для перенастройки тем/формата/города. |
-| `/profile` | Текущий профиль и веса интересов. |
-| `/recommend` | Лента hybrid-рекомендаций; кнопки 📖 Подробнее / 👍 / 👎 / ⭐ / Похожие / Следующее. |
-| `🎯 Рекомендации` | Reply-кнопка-эквивалент `/recommend`. |
-| `🔍 Поиск` → любая фраза | NL-поиск через `/events/nl-search`: LLM извлекает фильтры (даты/город/тип/формат/темы). Sticky waiting-state 60 мин — можно писать запрос за запросом без повторного нажатия кнопки. |
-| `Найти: <q>` | Прямой comb-поиск: keyword (до 3) + semantic (до 5) в один проход через `/events/combined-search`. |
-| `/saved` | Сохранённые события. |
-| `/stats` | Личная статистика: лайки/дизлайки/сохранения, топ тем, последние действия. |
-| `/undo` | Откат последнего фидбэка во всех 4 подсистемах. |
-| `/bio <текст>` | Холодный старт: LLM с pydantic-валидацией извлекает skill-профиль. |
-| `/trending` | Горячие темы за 7 дней + ASCII-bar-график. |
-| `/subscribe`, `/unsubscribe` | Управление подпиской на AI-дайджест. |
+| API (health) | http://localhost:8000/health |
+| Web | http://localhost:3000 |
+| Grafana | http://localhost:3001 (admin/admin) |
+| Prometheus | http://localhost:9090 |
+| Mailhog (dev-письма) | http://localhost:8025 |
 
-Reply-меню: «🎯 Рекомендации», «🔍 Поиск», «👤 Профиль», «⚙️ Ещё». Под
-профилем — инлайн-сабменю: Избранное / Активность / Изменить профиль /
-переключатель AI-дайджеста. Под «⚙️ Ещё» — Тренды / Помощь.
+Telegram-бот выключен по умолчанию (профиль compose): `docker compose
+--profile bot up` при заданном `BOT_TOKEN`. `make down` — остановить.
 
-> **Copilot временно скрыт.** Команды `/copilot` и упоминания убраны из
-> меню и тура — после демонстрации руководителю UX признан кривым.
-> Код роутера сохранён в `app/bot/handlers/copilot.py`, но в
-> `app/bot/main.py` он не подключён. Сам Copilot-граф (LangGraph) и
-> REST-эндпоинты (`POST /copilot/{tid}/turn`) остаются рабочими.
+## Локальная разработка
 
-**Карточка события — одна кнопка «📖 Подробнее»**. Зовёт
-`GET /events/{id}/explain` — сервис `event_explain_service.py` пишет
-человеческое описание события без скоров и метрик. In-memory кэш TTL 6 ч,
-общий для всех пользователей. Ссылка на источник на отдельной строке —
-помогает `event_url_line(event)` в `bot/utils.py`.
-
-**Локализация даты**: `format_event_date` смотрит на raw `start_at` ДО
-конвертации зоны — если часы/минуты нулевые, показываем только дату
-(без вымышленного «03:00 Moscow» от полночи UTC).
-
-Весь исходящий текст рендерится через `bot/utils.send` — HTML с
-экранированием динамики и авто-откатом в plain-text при сбое парсинга
-Telegram'ом.
-
----
-
-## Логика рекомендаций
-
-Hybrid scoring — `app/recommender/hybrid.py`. 9 компонент, каждая в
-`try/except` — сбой одной не ломает выдачу.
-
-| # | Компонент | Парадигма | Вес (default) | Что считает |
-|---|---|---|---|---|
-| 1 | rule | rule-based | 0.5 | `+2` за пересечение тем, `+3` за `preferred_format == event.format` (`+1` для `any`), `+2` за совпадение города (`+1` для `any`). Надёжный baseline. |
-| 2 | cosine | content-based | 10.0 | `cosine(user_emb, event_emb)`. user_emb = blend(0.7·long-term, 0.3·session) на последних 5 взаимодействиях. |
-| 3 | bayesian | Bayesian preference | 5.0 | Thompson sampling: `p ~ Beta(α, β)` по каждой теме события, `max(p)`. Temporal decay `γ^days`. |
-| 4 | quality | LLM-эвристика | 0.5 | `event.quality_score / 10` (выставляется AI-нормализатором). |
-| 5 | hype | LLM-эвристика | 0.3 | `event.hype_score / 10`. |
-| 6 | freshness | эвристика времени | 2.0 | `exp(-ln(2) × |days| / half_life)`. |
-| 7 | skill_gap | goal-aware | 3.0 | `|target_skills ∩ tech_stack| / |target_skills|` + бонус за seniority. |
-| 8 | bandit | contextual bandit (LinUCB) | 2.0 | UCB: `xᵀθ̂ + α·√(xᵀA⁻¹x)` на 16-мерном векторе пары (user, event). |
-| 9 | gnn | collaborative (LightGCN) | 3.0 (выкл) | `user_emb · event_emb` из натренированной модели. По умолчанию `GNN_ENABLED=false`. |
-
-**Итоговый score** = сумма всех компонент с весами из `core/config.py`.
-Каждый компонент best-effort: при сбое вклад = 0, hybrid плавно
-деградирует до rule-based.
-
-**MMR-диверсификация** (`recommender/diversity.mmr_rerank`) поверх:
-`λ · relevance − (1−λ) · max_sim(picked)`. Гарантирует, что top-k не
-один-к-одному из одной темы.
-
-**Embedding-кэш.** Embedding'и пользователя и событий persist'ятся:
-`refresh_user_embedding` (с обязательным `db.rollback()` на сбое — иначе
-PendingRollbackError ломает запрос) и `ensure_event_embeddings`
-(пакетный досчёт недостающих). За счёт кэша `/recommendations` отдаётся
-за ~0.4 с вместо ~16 с.
-
-**Cold-start** через `POST /users/{tid}/analyze-bio`: LLM с
-pydantic-валидацией извлекает темы, приоритеты, формат, город, seniority,
-цели → `apply_cold_start` расставляет topic_weights с буст-маркером для
-priority-тем, пишет «виртуальные» Bayesian-обновления, создаёт
-`UserSkillProfile`.
-
-**Обратная связь** обновляет 4 подсистемы синхронно в одной транзакции:
-
-| action | `topic_weights` | Bayesian `α/β` | LinUCB `A, b` | long-term memory |
-|---|---|---|---|---|
-| like | +3 | α += 3 | A += xxᵀ, b += 1.0·x | LLM пишет заметку при значимости |
-| save | +1 | α += 1 | A += xxᵀ, b += 1.5·x | LLM пишет заметку при значимости |
-| dislike | −2 | β += 2 | A += xxᵀ, b −= 1.0·x | LLM пишет заметку при значимости |
-
-Повторное нажатие той же кнопки → откат (`direction=-1`) во всех четырёх.
-`/undo` делает то же для последнего фидбэка.
-
-**Объяснения** (`explain.explain_event_detailed`): `text`, `topic_match`,
-`format_match`, `city_match`, `semantic_similarity`,
-`bayesian_posterior`, `history_signals`, `score_breakdown`,
-`counterfactual`. Подписи компонент в `_COMPONENT_LABELS_RU` —
-человеческий русский без технических терминов («Bayesian Thompson»,
-«LinUCB», «LightGCN» в UI не светятся).
-
-**Offline-эвал:**
-```bash
-# Реальная БД — требует ≥3 positive-сигнала на пользователя
-python -m scripts.eval_offline --k 5
-python -m scripts.llm_judge --k 5 --variants rule hybrid bandit_on
-
-# Воспроизводимый синтетический бенчмарк (in-memory SQLite, seed=42)
-python -m scripts.eval_offline_synthetic         # Recall@k / nDCG@k
-python -m scripts.llm_judge_synthetic --max-users 6 --k 5
-
-python -m scripts.train_gnn                       # если GNN_ENABLED=true
-```
-
-Результаты синтетического бенчмарка (rule → hybrid → bayesian) сохранены
-в Главе 4 отчёта (`docs/отчет_Курсовая.docx`, таблицы 4.2 и 4.3):
-- **Recall@10**: 0,80 → 0,85 → 0,85 (+0,05 от семантической компоненты).
-- **nDCG@10**: 0,36 → 0,44 → 0,45 (Bayesian слегка улучшает позицию цели).
-- **LLM-судья (relevance, 1–5)**: 4,33 → 4,40 → 4,40.
-- **LLM-судья (diversity_contribution, 1–5)**: 2,53 → 2,10 → 2,03 —
-  ожидаемый trade-off, компенсируется MMR-rerank (λ=0,7) в конвейере.
-
----
-
-## Пайплайн ingestion
-
-1. **Источник** (`app/ingestion/sources/`, единый интерфейс `_load_and_normalize`):
-   | URL | Источник | Параметры |
-   |---|---|---|
-   | `POST /ingestion/load-habr` | Habr (HTML) | `limit` |
-   | `POST /ingestion/load-rss` | RSS/Atom | `limit_per_feed`, `.env` `RSS_FEEDS` |
-   | `POST /ingestion/load-kudago` | KudaGo (JSON) | `limit` |
-   | `POST /ingestion/load-luma` | Lu.ma (ICS) | `limit_per_calendar`, `.env` `LUMA_CALENDARS` |
-   | `POST /ingestion/load-meetup` | Meetup (GraphQL) | `MEETUP_TOKEN`, `MEETUP_GROUPS` |
-   | `POST /ingestion/load-telegram` | Telegram-каналы (web-preview) | `limit_per_channel`, `.env` `TG_INGEST_CHANNELS` |
-   | `POST /ingestion/load-timepad` | Timepad (JSON API) | `limit`, `.env` `TIMEPAD_TOKEN` / `TIMEPAD_CATEGORY_IDS` / `TIMEPAD_CITIES` |
-2. Запись попадает в `raw_events` со статусом `raw`.
-3. **`EventNormalizerAgent`** (LangGraph + Groq LLM,
-   `app/agents/event_normalization/agent.py`) возвращает JSON:
-   `title, description, format, city, level, date, topics, event_type,
-   target_audience, source_url, tech_stack, seniority, quality_score,
-   hype_score`. Pydantic валидирует. Промпт даёт seed-словари как
-   «предпочтительные», но разрешает создавать новые slug'и. Все строки
-   проходят через `slugify_code` → стабильный snake_case.
-4. Не-IT события (`topics == []`) → `status=non_it`, в `events` НЕ
-   попадают.
-5. **Дедупликация:** сначала точное совпадение `title`; затем
-   **семантическая** (`recommender/dedup.find_semantic_duplicate`) ищет
-   событие с cosine ≥ `DEDUP_THRESHOLD` (0.92) за 90 дней — ловит
-   парафразы и кросс-источниковые дубли.
-6. Если новое — создаётся `Event`, привязываются темы (`event_topics`),
-   считается `embedding` (best-effort).
-7. `raw_event.status` обновляется на `normalized` или `failed` (с
-   `error`).
+**Backend** (uv):
 
 ```bash
-curl -X POST "http://localhost:8000/ingestion/load-habr?limit=20"
-curl -X POST "http://localhost:8000/ingestion/load-rss?limit_per_feed=20"
-curl http://localhost:8000/ingestion/status
+cd backend
+uv sync --extra dev            # (+ --extra bot для бота, --extra ml для эмбеддингов)
+uv run alembic upgrade head    # применить миграции к БД из DATABASE_URL
+uv run uvicorn eventmind.interfaces.api.main:app --reload
 ```
 
-**Автоматическое пополнение.** При `INGEST_ENABLED=true` scheduler
-дёргает `ingest_habr`, `ingest_rss`, `ingest_telegram` (если указаны
-каналы) каждые `INGEST_INTERVAL_HOURS` часов. RSS и Telegram сдвинуты на
-30/60 с относительно Habr, чтобы не пересекаться.
-
----
-
-## AI-агенты на LangGraph
-
-Три графа в `app/agents/`:
-
-### 1) Event normalization (`event_normalization/agent.py`)
-
-Однонодовый граф. Один LLM-вызов на сырое событие → нормализованный
-JSON с pydantic-валидацией. Фильтрует не-IT, clamp'ает scores в 1..10.
-
-### 2) AI-рекомендации (вариант C, без LangGraph)
-
-Старая 4-нодовая цепочка `user_profile → event_analyzer → recommendation
-→ explanation` оставлена в `app/agents/recommendation/graph.py` для
-истории, но НЕ используется в endpoint'е (она делала 4 LLM-вызова и
-работала ~15 с, фиксировано 3 карточки).
-
-Сейчас в `app/api/services/ai_recommendation_service.py`:
-```
-hybrid_score (детерминированно, ~ms) → top-N кандидатов
-                ↓
-        один LLM-вызов с pydantic-схемой
-                ↓
-        {event_id: reason} → подмена `explanation` в карточках
-```
-Параметр `limit` (1..10) реально работает. При сбое LLM —
-`_GroqWithFallback` переключается на резервную модель; если и она упала
-— rule-based объяснения.
-
-### 3) Copilot (`copilot/agent.py`) — Supervisor-Worker multi-agent
-
-```
-START → retrieve → supervisor → conditional edge:
-                                  ├── recommendation_specialist  (intent=recommend)
-                                  ├── career_coach               (intent=career)
-                                  ├── roadmap_planner            (intent=roadmap)
-                                  ├── event_explainer            (intent=explain)
-                                  └── summary_specialist         (intent=summary)
-                                          ↓
-                                       finalize → END
-```
-
-**`retrieve`** — общий для всех специалистов: top-k событий по cosine
-(query⊕profile), снимок истории, skill-профиль.
-
-**`supervisor`** — structured LLM-вызов с pydantic-валидацией
-(`SupervisorDecision`): классифицирует запрос в один из 5 intent'ов +
-извлекает `target_event_id` / `horizon_months`. При сбое — keyword
-fallback.
-
-**Специалисты:**
-
-| Специалист | Intent | Tools | Особенности |
-|---|---|---|---|
-| `recommendation_specialist` | recommend | все 5 + critique-revise | основной workhorse |
-| `career_coach` | career | profile, search_events, recall_about_user | фокус на skill_gap/target_role |
-| `roadmap_planner` | roadmap | profile, search_events, recall_about_user | этапный план под `horizon_months` |
-| `event_explainer` | explain | explain_event, profile | разворачивает `explain_event_detailed` в нарратив |
-| `summary_specialist` | summary | interactions_summary, profile | анализ истории |
-
-**6 function-calling tools** в `agents/copilot/tools.py` (`TOOL_DEFINITIONS`):
-`search_events`, `get_user_profile`, `get_interactions_summary`,
-`explain_event`, `recall_about_user`, `mark_saved`. Связываются через
-`bind_tools` — модель сама решает, что вызвать. Подмножество на специалиста
-раздаётся через `filter_tools(...)`.
-
-**Multi-turn:** `POST /copilot/{tid}/turn` хранит сессии в
-`copilot_sessions`, принимает опциональный `session_id`. История
-прокидывается в supervisor (для контекстной классификации) и в
-специалиста (для преемственности). В боте состояние сессии живёт 15
-минут в RAM `user_id → {session_id, last_activity}`; любое следующее
-текстовое сообщение продолжает диалог.
-
-**State** — `CopilotState` (TypedDict): supervisor пишет `intent`,
-`routing_reason`, `target_event_id`, `horizon_months`; специалисты —
-`answer`, `recommended_event_ids`, `specialist`, `tool_calls_log`.
-
-**Прозрачность:** в ответе API возвращаются `intent`, `specialist`,
-`routing_reason`, `tool_calls`.
-
-**Логирование сбоев.** При любом Exception внутри `_invoke_graph`
-вызывается `logger.exception` — реальная причина попадает в логи API,
-пользователь видит «Copilot временно недоступен», сессия сохраняется.
-
-### Long-term memory agent (`recommender/memory.py`) — mem0-style
-
-Активно извлекает значимые факты о пользователе и хранит как заметки от
-первого лица в `user_memories`:
-> «хочет перейти в ML за 6 месяцев»
-> «активно сохраняет события про Kubernetes»
-
-**Триггеры записи:**
-
-| Триггер | Что пишется | Salience |
-|---|---|---|
-| `create_interaction` | LLM смотрит на feedback, пишет 0–2 заметки если нетривиально | 1..10 |
-| `/copilot/turn` | LLM из последней пары user/assistant вытаскивает новые цели/ограничения | 1..10 |
-| `analyze_bio` | Цели → `goal`/8, приоритеты → `interest`/7 | фикс |
-
-Категории: `interest`, `dislike`, `goal`, `constraint`, `context`,
-`event_pref`, `other`. Pydantic-валидация LLM-выхода.
-
-**Semantic recall** через tool `recall_about_user(query, k)`: top-k по
-`0.7·cosine + 0.3·salience_norm`, инкремент `access_count`.
-
-**Compaction:** при >50 заметок LLM группирует по категориям и сжимает
-до ≤5 на категорию. Scheduler-job раз в 7 дней или вручную
-`python -m scripts.compact_memories`.
-
----
-
-## REST API
-
-База: `http://localhost:8000`. Swagger: `/docs`, OpenAPI: `/openapi.json`.
-
-### System
-
-| Метод | URL | Описание |
-|---|---|---|
-| GET | `/` | Корневой ответ. |
-| GET | `/health` | `{db, embeddings, llm}` — для LLM показывает реально выбранную Gemini-модель и Groq fallback'и. |
-| POST | `/admin/llm/reprobe` | Сбросить кэш автопробы Gemini и выбрать модель заново (когда квота на текущей кончилась). |
-
-### Users
-
-| Метод | URL | Описание |
-|---|---|---|
-| POST | `/users/register` | Создать/обновить пользователя (`telegram_id`, `topics`, `preferred_format`, `city`). |
-| GET | `/users/{telegram_id}` | Профиль. |
-| GET | `/users/{telegram_id}/stats` | Личная статистика. |
-| POST | `/users/{telegram_id}/analyze-bio` | Cold-start: LLM извлекает skill-профиль из bio. |
-| POST | `/users/{telegram_id}/update-embedding` | Пересчёт персонального embedding'а. |
-
-### Events
-
-| Метод | URL | Описание |
-|---|---|---|
-| POST | `/events/load` | Загрузить события из `data/events.json`. |
-| GET | `/events/` | Список всех событий. |
-| GET | `/events/search` | Keyword-поиск (`q`, `topics`, `format`, `city`). |
-| GET | `/events/semantic-search` | Embedding top-k (`q`, `limit`). На PG — pgvector через `<=>`. |
-| GET | `/events/combined-search` | Keyword + semantic в одном запросе (`q`, `keyword_limit`, `semantic_limit`). Распознаёт goal-intent. |
-| GET | `/events/nl-search` | NL-поиск: фраза на естественном языке → LLM-extract фильтров (даты/город/тип/формат/темы) → `SearchFilters`. LRU-кэш на 256 запросов, relax-fallback при 0 совпадениях. |
-| GET | `/events/{event_id}` | Карточка события. |
-| GET | `/events/{event_id}/similar` | Похожие по темам. |
-| GET | `/events/{event_id}/explain` | LLM-описание события для «📖 Подробнее» (без скоров, кэш TTL 6 ч). |
-
-### Recommendations
-
-| Метод | URL | Описание |
-|---|---|---|
-| GET | `/recommendations/{telegram_id}` | Hybrid-рекомендации (9 компонент + MMR). |
-| POST | `/recommendations/interactions` | Сохранить like/dislike/save (обновит 4 подсистемы). |
-| POST | `/recommendations/{telegram_id}/undo` | Откатить последний фидбэк. |
-| GET | `/recommendations/{telegram_id}/event/{event_id}/interactions` | Действия пользователя по событию. |
-| GET | `/recommendations/{telegram_id}/saved` | Сохранённые события. |
-| GET | `/recommendations/{telegram_id}/why/{event_id}` | `{short, full}` для ❓ Почему / 📖 Подробнее. |
-| GET | `/recommendations/{telegram_id}/cursor` | Текущая позиция в ленте `/recommend`. |
-| POST | `/recommendations/{telegram_id}/cursor/reset` | Сбросить курсор. |
-| POST | `/recommendations/{telegram_id}/cursor/advance` | Перейти к следующему элементу ленты. |
-
-### Agent recommendations (вариант C)
-
-| Метод | URL | Описание |
-|---|---|---|
-| GET | `/agent-recommendations/{telegram_id}` | `{success, answer, cards}` — нарратив + карточки. |
-| GET | `/agent-recommendations/{telegram_id}/cards` | Только карточки с AI-`explanation`. Фолбэк на rule-based при сбое LLM. |
-
-### Copilot
-
-| Метод | URL | Описание |
-|---|---|---|
-| POST | `/copilot/{telegram_id}` | One-shot Copilot (legacy compat). |
-| POST | `/copilot/{telegram_id}/turn` | Multi-turn: продолжает сессию по `session_id` или создаёт новую. |
-| GET | `/copilot/{telegram_id}/sessions` | Список открытых сессий. |
-| POST | `/copilot/sessions/{session_id}/close` | Закрыть сессию. |
-
-### Ingestion
-
-| Метод | URL | Описание |
-|---|---|---|
-| POST | `/ingestion/load-habr` | Парсит Habr, сохраняет, нормализует. |
-| POST | `/ingestion/load-rss` | Парсит ленты из `RSS_FEEDS`, нормализует. |
-| POST | `/ingestion/load-kudago` | KudaGo JSON API. |
-| POST | `/ingestion/load-luma` | Lu.ma ICS. |
-| POST | `/ingestion/load-meetup` | Meetup GraphQL (требует `MEETUP_TOKEN`). |
-| POST | `/ingestion/load-telegram` | Telegram-каналы (web-preview). |
-| POST | `/ingestion/load-timepad` | Timepad JSON API (требует `TIMEPAD_TOKEN`). |
-| POST | `/ingestion/load-raw` | Залить `data/events_raw.json` в `raw_events`. |
-| POST | `/ingestion/load-all` | Прогнать ВСЕ 7 источников по очереди. Каждый изолирован try/except + rollback. |
-| POST | `/ingestion/normalize` | Прогнать `raw_events.status == 'raw'` через AI-нормализатор. |
-| POST | `/ingestion/retry-failed` | Переобработать события со статусом `failed` (после сброса квот LLM). |
-| GET | `/ingestion/status` | Счётчики по статусам. |
-
-### Subscriptions
-
-| Метод | URL | Описание |
-|---|---|---|
-| POST | `/subscriptions/{telegram_id}/subscribe` | Подписаться на AI-дайджест. |
-| POST | `/subscriptions/{telegram_id}/unsubscribe` | Отписаться. |
-| GET | `/subscriptions/users` | Список подписчиков (используется scheduler'ом). |
-
-### Admin / Vocabulary / Analytics
-
-| Метод | URL | Описание |
-|---|---|---|
-| GET | `/admin/` | HTML-дашборд. |
-| GET | `/vocabulary` | `{topics, cities, formats, levels}` — динамический snapshot. |
-| GET | `/vocabulary/{topics\|cities\|formats\|levels}` | Отдельный список. |
-| GET | `/analytics/topics` | Топ лайкнутых/сохранённых/дизлайкнутых тем. |
-| GET | `/analytics/interactions` | Сумма действий + топ событий по интеракциям. |
-| GET | `/analytics/trending` | Горячие события (`likes×3 + saves×2`) и trending-темы (`days`, `limit`). |
-
-#### Примеры curl
+**Web** (Node 20+):
 
 ```bash
-# Регистрация
-curl -X POST http://localhost:8000/users/register \
-  -H "Content-Type: application/json" \
-  -d '{"telegram_id":1,"username":"hisoka","preferred_format":"online","city":"moscow","topics":["ai_ml","backend"]}'
-
-# Рекомендации
-curl http://localhost:8000/recommendations/1
-
-# Лайк
-curl -X POST http://localhost:8000/recommendations/interactions \
-  -H "Content-Type: application/json" \
-  -d '{"telegram_id":1,"event_id":3,"action":"like"}'
-
-# Multi-turn Copilot — новая сессия
-curl -X POST "http://localhost:8000/copilot/1/turn" \
-  -H "Content-Type: application/json" \
-  -d '{"message":"хочу за полгода вырасти в middle backend"}'
-
-# Продолжить сессию
-curl -X POST "http://localhost:8000/copilot/1/turn" \
-  -H "Content-Type: application/json" \
-  -d '{"session_id":42,"message":"а если без конференций?"}'
-
-# Habr ingestion
-curl -X POST "http://localhost:8000/ingestion/load-habr?limit=10"
-
-# Trending за неделю
-curl "http://localhost:8000/analytics/trending?days=7&limit=5"
+cd web
+npm install
+npm run dev                    # http://localhost:3000 (BFF-прокси ходит в API_BASE_URL)
 ```
 
----
+Ключевые переменные окружения — в [`.env.example`](.env.example) с комментариями
+(БД/Redis, LLM-ключи, SMTP, JWT/`API_SHARED_SECRET`, Google OAuth, Telegram).
+Каждый процесс на старте делает **fail-fast-валидацию** конфига (выход с кодом 78).
 
-## Admin-дашборд
+## Проверки и тесты
 
-`http://localhost:8000/admin/` — HTML-страница без шаблонизатора
-(`app/api/routers/admin.py`):
-- карточки: пользователи, события, подписчики, взаимодействия;
-- статусы ingestion (`raw / normalized / failed / non_it`);
-- таблица последних 10 событий.
-
----
-
-## Тесты
+Из корня — через Makefile (`make help` — список):
 
 ```bash
-pytest -q              # 47 файлов, 315+ test-функций, ~80–95 с (первый прогон дольше — MiniLM ~120 МБ)
-pytest tests/test_scoring.py -v
-ruff check .           # 0 ошибок (line-length=100, py312)
+make lint         # ruff
+make typecheck    # mypy (strict) по src + eval
+make imports      # import-linter — границы гексагональных слоёв
+make test-unit    # unit-тесты (чистый домен/use-cases/скореры на фейках)
+make test-integration   # integration через testcontainers (нужен Docker)
 ```
 
-Состав (47 файлов):
-- **Скоринг:** `test_scoring`, `test_user_model`, `test_interactions`,
-  `test_new_features`, `test_multi_objective`, `test_bayesian` / `test_bayes_decay`,
-  `test_skill_gap`, `test_bandit`, `test_gnn`.
-- **Рекомендер:** `test_get_recommendations` (hot-path),
-  `test_recommendation_cache`, `test_feed_cursor`, `test_dedup`,
-  `test_series`, `test_retrieval`, `test_past_events_filter`.
-- **Поиск:** `test_nl_search` (NL-поиск через LLM + relax-fallback),
-  `test_events_router_routing`.
-- **Бот:** `test_event_url_line`, `test_date_localization`,
-  `test_event_explain`, `test_card_format`.
-- **Ingestion:** `test_ingestion`, `test_multi_source`,
-  `test_ingestion_idempotent`, `test_enum_validation`,
-  `test_timepad_source` (7-й источник).
-- **Память:** `test_memory`, `test_memory_integration`,
-  `test_memory_hard_cap`, `test_cold_start`.
-- **AI / LLM:** `test_supervisor`, `test_copilot_tools`, `test_specialists`,
-  `test_copilot_graph_e2e`, `test_llm_circuit_breaker`, `test_gemini_probe`.
-- **Security / ops:** `test_api_key_auth`, `test_config_validate`,
-  `test_middleware`, `test_prompt_safety`.
-- **Данные:** `test_city_canonicalization`, `test_enum_validation`.
-- **Прочее:** `test_scheduler`, `test_db_session`, `test_pgvector`.
+CI (GitHub Actions) прогоняет то же на `pgvector/pgvector:pg16`, плюс
+web `typecheck`/`lint`/`build`, offline-eval-смоук и сборку образов.
 
-**CI** (`.github/workflows/ci.yml`) — **один job**: `tests` на
-`pgvector/pgvector:pg16`. SQLite-job удалён — на проде и в деве везде
-Postgres, дублирование себя не оправдало. На Postgres-`DATABASE_URL`
-3 SQLite-PRAGMA теста пропускаются автоматически.
+## Offline-eval рекомендера
 
----
-
-## Миграции
+Воспроизводимый (seed=42) leave-one-out против **чистой математики**
+`domain/recommender` + `HybridRanker` — без БД/LLM/torch:
 
 ```bash
-alembic upgrade head                              # применить все
-alembic revision --autogenerate -m "add field"    # создать
-alembic downgrade -1                              # откат на ревизию
+make eval                        # печать таблицы метрик
+cd backend && uv run python -m eval.run --json /tmp/eval.json
 ```
 
-История (`alembic/versions/`, 14 ревизий):
-- `6af520bb31e0_initial_schema` — базовые таблицы;
-- `7b1c9d2e3a4f_add_summary_embedding_to_events` — `summary`, `embedding`;
-- `b3c4d5e6f7a8_add_enriched_fields` — `tech_stack`, `seniority`,
-  `quality_score`, `hype_score`;
-- `c5d6e7f89012_add_user_topic_stats` — Bayesian α/β;
-- `d6e7f8901234_add_user_skill_profile` — skill-профиль для cold start;
-- `e7f890123456_add_copilot_sessions` — мульти-туровая история;
-- `f8901234abcd_add_bandit_state` — LinUCB-матрицы;
-- `abcd1234ef56_add_user_memories` — long-term memory;
-- `9a1b2c3d4e5f_add_pgvector` — **только PG**: `CREATE EXTENSION vector`,
-  `events.embedding_vec` / `users.embedding_vec` типа `vector(384)`,
-  IVFFlat-индекс. На SQLite — no-op.
-- `b2c3d4e5f6a7_add_start_at_and_retry_count` — `events.start_at` (DateTime)
-  и `raw_events.retry_count`.
-- `c3d4e5f6a7b8_add_user_feed_cursor` — `users.feed_cursor` (курсор ленты в БД).
-- `d4e5f6a7b8c9_add_recommendation_cache` — TTL-кэш рекомендаций.
-- `e5f6a7b8c9d0_add_event_series_slug` — `events.series_slug` + индекс
-  (для anti-flood серий).
-- `f6a7b8c9d0e1_telegram_id_bigint` — `users.telegram_id INTEGER → BIGINT`
-  (Telegram канал/группа ID превышают 2³¹; на SQLite no-op).
+Метрики Recall@k / nDCG@k / MAP + catalog-coverage + intra-list diversity по
+абляциям весов (`rule-only` / `content-only` / `bayesian-only` / `full` /
+`full-no-MMR`) — видно вклад компонентов и trade-off MMR (точность ↔
+разнообразие).
 
----
+## Деплой (k8s/Helm)
 
-## Минимальный happy-path
+Helm-чарт — [`deploy/helm/eventmind`](deploy/helm/eventmind). Deployment'ы
+`api`/`worker`/`web` (+opt `bot`) из единого backend-образа (команда различает
+роль), ConfigMap + Secret, liveness/readiness-probes, **HPA** (api/web по CPU;
+worker по CPU + опц. external-metric длины очереди arq), **PDB** для api,
+миграции — **Helm-hook Job** (`alembic upgrade head` pre-install/pre-upgrade),
+Ingress (`/api`,`/metrics` → api; остальное → web).
 
 ```bash
-# 1. Подготовка
-cp .env.example .env                     # вписать BOT_TOKEN + GROQ_API_KEY
-alembic upgrade head
-
-# 2. Три процесса в отдельных терминалах
-uvicorn app.api.main:app --reload
-python -m app.bot.main
-python -m app.scheduler.digest
-
-# 3. Наполнить событиями
-curl -X POST "http://localhost:8000/ingestion/load-habr?limit=20"
-curl -X POST "http://localhost:8000/ingestion/load-rss?limit_per_feed=20"
-
-# 4. В Telegram: /start → тур → 🚀 Начать настройку → /recommend
-#    Поставить 👍 / 👎 / ⭐ → /recommend ещё раз → лента подстроилась
-#    /copilot хочу за полгода стать middle backend
+helm upgrade --install eventmind deploy/helm/eventmind -f values.prod.yaml
 ```
 
----
+Postgres(pgvector) и Redis — внешние (managed) через Secret; секреты в проде
+подставлять из секрет-менеджера, не из `values.yaml`. Отдельный scheduler не
+нужен — arq cron встроен в worker и дедуплицируется через Redis.
 
-## Документация
+Нагрузочный смоук хот-путей (нужен установленный [k6](https://k6.io)):
 
-- `docs/отчет_Курсовая.docx` — авторитетный технический отчёт (HSE-шаблон).
-  Прошёл научный аудит, наполнен числами через
-  `eval_offline_synthetic.py` (Recall@k / nDCG@k, Табл. 4.2) и
-  `llm_judge_synthetic.py` (LLM-as-judge, Табл. 4.3).
-- `docs/Обзор_проекта_EventMind.docx` — summary архитектуры (если есть).
-- `docs/План_показа_EventMind.docx` — план защиты на 15–20 минут.
-- `docs/diagrams/` — Mermaid-исходники + рендеры PNG/SVG:
-  `01_use_case`, `02_business_process` (кастомная BPMN в Unisender-нотации),
-  `03_c4_containers`, `04_er_diagram`.
-- `CLAUDE.md` — bootstrap-контекст для будущих AI-сессий.
-- `IMPROVEMENTS.md` — живой список доработок (сделанные `[x]` + открытые `[ ]`).
-
-Регенерация всех `.docx` под текущую реализацию:
 ```bash
-python -m scripts.regenerate_docs
+make load-test BASE_URL=http://localhost:8000   # deploy/loadtest/k6-smoke.js
 ```
+
+## Наблюдаемость
+
+- **Логи:** structlog JSON с request-id/trace-id.
+- **Трейсинг:** OpenTelemetry (HTTP → app → БД → LLM).
+- **Метрики:** `/metrics` (Prometheus) — HTTP latency/RPS, вызовы/токены/latency
+  LLM по провайдеру, доставки по каналам. Grafana-дашборды
+  ([`deploy/grafana`](deploy/grafana)) + alert-rules
+  ([`deploy/prometheus/alerts.yml`](deploy/prometheus/alerts.yml): ApiDown,
+  5xx>5%, p95>1.5s, LLM error/breaker, сбои доставки).
+
+## Статус milestone'ов
+
+Все milestone'ы контракта [`docs/REBUILD_PROMPT.md`] закрыты (M0–M8):
+
+| | Milestone | Суть |
+|---|---|---|
+| M0 | Скелет + инфра | гексагон, compose, CI, OTel, первая миграция (pgvector) |
+| M1 | Аккаунты + auth | JWT httpOnly, UoW + транзакционный outbox, SMTP |
+| M2 | LLM Gateway | цепочка Gemini→Groq (breaker/cooldown) + EmbeddingProvider |
+| M3 | Ingestion | habr/rss/kudago, LLM-нормализация, идемпотентность/DLQ |
+| M4 | Рекомендер | two-stage, чистая математика, online-обучение, кэш |
+| M5 | Мультиканальность | email/telegram/in-app за портом, дайджест cron→queue |
+| M6 | Веб-клиент | Next.js + BFF-прокси, NL-поиск, профиль, Google OAuth |
+| M7 | Telegram-бот | aiogram поверх API (чистый HTTP-клиент) |
+| M8 | Прод + eval | k8s/Helm+HPA, дашборды/алерты, load-test, offline-eval |
+
+Подробности каждого — в [`ARCHITECTURE.md`](ARCHITECTURE.md).
+
+[`docs/REBUILD_PROMPT.md`]: docs/REBUILD_PROMPT.md

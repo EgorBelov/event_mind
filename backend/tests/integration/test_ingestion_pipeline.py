@@ -116,7 +116,8 @@ async def test_load_is_idempotent_and_normalize_creates_events(
     async with session_factory() as s:
         event = (await s.execute(select(EventModel))).scalars().one()
     assert event.city == "moscow"
-    assert event.series_slug == "python-meetup"  # снят #14
+    # снят #14 (номер выпуска); город добавляется суффиксом (анти-флуд по городам)
+    assert event.series_slug == "python-meetup--moscow"
     assert event.embedding is not None
     assert event.tech_stack == ["Python"]
 

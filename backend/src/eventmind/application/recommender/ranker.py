@@ -62,7 +62,16 @@ class HybridRanker:
 
         safe("rule", lambda: rule_score(user, event) * w.rule)
         safe("cosine", lambda: cosine_similarity(user.embedding, event.embedding) * w.cosine)
-        safe("bayesian", lambda: thompson_score(stats, event.topics, rng=rng) * w.bayesian)
+        # Cold-start: у пользователя нет ни одной topic-статы → Thompson сэмплил бы
+        # Beta(1,1) (равномерный шум) на каждое событие и с весом bayesian заглушал
+        # бы сигнал quality/freshness, делая выдачу случайной. Пока статов нет —
+        # bayesian=0 (ранжируем по контенту/качеству/свежести); exploration
+        # включается, как только появляется первый фидбэк.
+        safe(
+            "bayesian",
+            lambda: (thompson_score(stats, event.topics, rng=rng) if stats else 0.0)
+            * w.bayesian,
+        )
         safe("quality", lambda: (event.quality_score or 0) * w.quality)
         safe("hype", lambda: (event.hype_score or 0) * w.hype)
         safe(
