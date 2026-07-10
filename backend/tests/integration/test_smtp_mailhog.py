@@ -1,7 +1,9 @@
 """Integration: SmtpEmailChannel реально доставляет письмо (перехват Mailhog)."""
 from __future__ import annotations
 
+import email
 from collections.abc import Iterator
+from email.policy import default
 
 import httpx
 import pytest
@@ -54,7 +56,24 @@ async def test_smtp_channel_delivers_to_mailhog(mailhog: tuple[str, int, int]) -
     data = resp.json()
     assert data["total"] >= 1
     item = data["items"][0]
-    assert item["Content"]["Headers"]["To"] == ["recipient@example.com"]
-    body = item["Content"]["Body"]
-    assert "verify-email?token=abc" in body
-    assert "отписаться" in body or "List-Unsubscribe" in str(item["Content"]["Headers"])
+    headers = item["Content"]["Headers"]
+    assert headers["To"] == ["recipient@example.com"]
+
+    # Тело — multipart/alternative с base64 CTE (внутри кириллица), поэтому
+    # искать ссылку в сыром `Body` нельзя — она внутри base64. Собираем сырое
+    # письмо из заголовков+тела и декодируем через email-парсер (снимает CTE и
+    # charset), а затем ищем ссылку/отписку в человекочитаемом тексте.
+    raw = (
+        "".join(f"{key}: {value}\n" for key, values in headers.items() for value in values)
+        + "\n"
+        + item["Content"]["Body"]
+    )
+    parsed = email.message_from_string(raw, policy=default)
+    text = "".join(
+        part.get_content()
+        for part in parsed.walk()
+        if part.get_content_maintype() == "text"
+    )
+    assert "verify-email?token=abc" in text
+    assert "отписаться" in text
+    assert "List-Unsubscribe" in headers
