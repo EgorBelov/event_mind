@@ -87,6 +87,25 @@ services:
       migrate:
         condition: service_completed_successfully
 
+  # Telegram-бот (M7): вторичный клиент, ходит в API по HTTP (X-API-Key).
+  # Профиль `bot` — поднимается только при заданном BOT_TOKEN:
+  #   docker compose --profile bot up
+  bot:
+    build:
+      context: ../backend
+    command: ["python", "-m", "eventmind.interfaces.bot.main"]
+    profiles: ["bot"]
+    env_file:
+      - path: ../.env
+        required: false
+    environment:
+      API_INTERNAL_URL: http://api:8000
+      REDIS_URL: redis://redis:6379/0
+      DATABASE_URL: postgresql+asyncpg://eventmind:eventmind@postgres:5432/eventmind
+    depends_on:
+      api:
+        condition: service_healthy
+
   web:
     build:
       context: ../web
@@ -103,6 +122,7 @@ services:
     image: prom/prometheus:v2.54.1
     volumes:
       - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./prometheus/alerts.yml:/etc/prometheus/alerts.yml:ro
     ports:
       - "9090:9090"
     depends_on:

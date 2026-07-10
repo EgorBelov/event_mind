@@ -1,0 +1,39 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "eventmind.fullname" . }}-config
+  labels: {{- include "eventmind.labels" . | nindent 4 }}
+data:
+  ENVIRONMENT: {{ .Values.config.environment | quote }}
+  LOG_LEVEL: {{ .Values.config.logLevel | quote }}
+  LOG_JSON: {{ .Values.config.logJson | quote }}
+  SERVICE_NAME: {{ .Values.config.serviceName | quote }}
+  CORS_ORIGINS: {{ .Values.config.corsOrigins | quote }}
+  PUBLIC_WEB_URL: {{ .Values.config.publicWebUrl | quote }}
+  API_INTERNAL_URL: {{ .Values.config.apiInternalUrl | quote }}
+  OTEL_ENABLED: {{ .Values.config.otelEnabled | quote }}
+  OTEL_EXPORTER_OTLP_ENDPOINT: {{ .Values.config.otelEndpoint | quote }}
+  SMTP_HOST: {{ .Values.config.smtpHost | quote }}
+  SMTP_PORT: {{ .Values.config.smtpPort | quote }}
+  SMTP_USE_TLS: {{ .Values.config.smtpUseTls | quote }}
+  SMTP_USE_SSL: {{ .Values.config.smtpUseSsl | quote }}
+  EMAIL_FROM: {{ .Values.config.emailFrom | quote }}
+  TELEGRAM_BOT_USERNAME: {{ .Values.config.telegramBotUsername | quote }}
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {{ include "eventmind.fullname" . }}-secrets
+  labels: {{- include "eventmind.labels" . | nindent 4 }}
+type: Opaque
+stringData:
+  DATABASE_URL: {{ .Values.secrets.databaseUrl | quote }}
+  REDIS_URL: {{ .Values.secrets.redisUrl | quote }}
+  JWT_SECRET: {{ .Values.secrets.jwtSecret | quote }}
+  API_SHARED_SECRET: {{ .Values.secrets.apiSharedSecret | quote }}
+  GOOGLE_API_KEY: {{ .Values.secrets.googleApiKey | quote }}
+  GROQ_API_KEY: {{ .Values.secrets.groqApiKey | quote }}
+  GOOGLE_OAUTH_CLIENT_ID: {{ .Values.secrets.googleOauthClientId | quote }}
+  SMTP_USER: {{ .Values.secrets.smtpUser | quote }}
+  SMTP_PASSWORD: {{ .Values.secrets.smtpPassword | quote }}
+  BOT_TOKEN: {{ .Values.secrets.botToken | quote }}

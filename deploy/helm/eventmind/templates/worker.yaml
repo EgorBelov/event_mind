@@ -1,0 +1,64 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "eventmind.fullname" . }}-worker
+  labels: {{- include "eventmind.labels" . | nindent 4 }}
+    app.kubernetes.io/component: worker
+spec:
+  {{- if not .Values.worker.hpa.enabled }}
+  replicas: {{ .Values.worker.replicas }}
+  {{- end }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/instance: {{ .Release.Name }}
+      app.kubernetes.io/component: worker
+  template:
+    metadata:
+      labels:
+        {{- include "eventmind.labels" . | nindent 8 }}
+        app.kubernetes.io/component: worker
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      # Дренаж очереди перед завершением — arq ловит SIGTERM и доигрывает задачи.
+      terminationGracePeriodSeconds: 60
+      containers:
+        - name: worker
+          image: "{{ .Values.image.backend.repository }}:{{ .Values.image.backend.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command: ["arq", "eventmind.interfaces.worker.main.WorkerSettings"]
+          env: {{- include "eventmind.backendEnv" . | nindent 12 }}
+          resources: {{- toYaml .Values.worker.resources | nindent 12 }}
+{{- if .Values.worker.hpa.enabled }}
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: {{ include "eventmind.fullname" . }}-worker
+  labels: {{- include "eventmind.labels" . | nindent 4 }}
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: {{ include "eventmind.fullname" . }}-worker
+  minReplicas: {{ .Values.worker.hpa.minReplicas }}
+  maxReplicas: {{ .Values.worker.hpa.maxReplicas }}
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: {{ .Values.worker.hpa.targetCPUUtilizationPercentage }}
+    {{- if .Values.worker.hpa.queueLag.enabled }}
+    # Масштаб по длине очереди arq (external metric из Prometheus-adapter).
+    - type: External
+      external:
+        metric:
+          name: {{ .Values.worker.hpa.queueLag.metricName }}
+        target:
+          type: AverageValue
+          averageValue: {{ .Values.worker.hpa.queueLag.targetAverageValue | quote }}
+    {{- end }}
+{{- end }}

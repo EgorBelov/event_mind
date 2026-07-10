@@ -59,6 +59,9 @@ class Settings(BaseSettings):
     otel_exporter_otlp_endpoint: str = ""
     service_name: str = "eventmind-api"
 
+    # ── Google OAuth (M6): вход через Google ─────────────────────────────
+    google_oauth_client_id: str = ""
+
     # ── LLM (M2): цепочка Gemini → Groq70b → Groq8b за LLMGateway ─────────
     google_api_key: str = ""
     google_model: str = ""  # пусто — берём первый кандидат/автопроба
@@ -102,6 +105,8 @@ class Settings(BaseSettings):
     # ── telegram (M7) ────────────────────────────────────────────────────
     bot_token: str = ""
     telegram_bot_username: str = ""  # для deep-link https://t.me/<username>?start=<token>
+    # Базовый URL API для процесса bot (внутренний вызов bot↔api по X-API-Key).
+    api_internal_url: str = "http://api:8000"
     # Публичный базовый URL веба/бота для deep-link'ов и unsubscribe-ссылок.
     public_web_url: str = "http://localhost:3000"
 

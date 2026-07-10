@@ -72,9 +72,33 @@ Makefile   — up/test/lint/typecheck/imports/migrate/seed/...
   по включённым+verified каналам, гейтинг prefs/тихие часы), ScheduleDigests
   (arq cron→queue), инбокс `GET/POST /api/v1/notifications`, unsubscribe по
   JWT-токену, миграция 0005. 116 unit-тестов.
-- [ ] **M6** — веб-клиент Next.js (лента/профиль/NL-поиск/карточка/каналы) + Google OAuth.
-- [ ] **M7** — Telegram-бот (aiogram) поверх API: привязка аккаунта, лента, feedback.
-- [ ] **M8** — прод: k8s/Helm+HPA, дашборды/алерты, load-test, offline-eval + ablations.
+- [x] **M6** — веб-клиент Next.js + backend-обвязка: NL-поиск событий
+  (SearchFilters, канонизация, relax-fallback; порт SearchRepository) + карточка
+  события, профиль `PATCH /api/v1/users/me` (канонизация города/формат) +
+  настройки `GET/PATCH /api/v1/users/me/preferences`, **Google OAuth** (порт
+  GoogleTokenVerifier→tokeninfo/aud, `POST /api/v1/auth/google`). Web (Next 14
+  App Router, standalone): типизированный API-клиент через **BFF-прокси**
+  `/bff/[...path]` (httpOnly-cookie same-site, обход SameSite=Lax), middleware-
+  гейт, страницы вход/регистрация/лента(like·save·hide)/NL-поиск/карточка/
+  инбокс/настройки(профиль·уведомления·Telegram-deep-link). build+typecheck+lint
+  зелёные. 132 файла mypy, 127 unit-тестов.
+- [x] **M7** — Telegram-бот (aiogram 3, long-polling) поверх API: бот —
+  вторичный клиент (только HTTP через `BotApiClient`+X-API-Key, БД/слои не
+  трогает). Bot-facing API `/api/v1/bot/{status,recommendations,interactions}`
+  (guard internal-key, `ResolveAccountByTelegram` chat_id→user_id, 409
+  not_linked). Хендлеры: `/start <token>` deep-link→confirm, `/feed`
+  (карточки+inline like·save·hide), `/search`/свободный текст (NL-поиск),
+  callbacks. Чистый `formatting.py` (send HTML+fallback, локализация дат/
+  ссылок из v1). Extra `bot` (aiogram), compose-профиль `bot`. 149 unit-тестов.
+- [x] **M8** — прод-готовность + offline-eval (финальный): harness `backend/eval/`
+  (leave-one-out seed=42 против чистой математики+HybridRanker без БД/LLM/torch;
+  Recall@k/nDCG@k/MAP/coverage/diversity; абляции rule/content/bayesian/full/
+  no-MMR; `python -m eval.run`). k8s/Helm `deploy/helm/eventmind` (api/worker/web
+  +opt bot из единого образа, ConfigMap/Secret, probes, **HPA** CPU +opt queue-lag,
+  **PDB**, миграции Helm-hook Job, Ingress; scheduler не нужен — arq cron в worker).
+  Prometheus alerts (`deploy/prometheus/alerts.yml`) + Grafana LLM/delivery-дашборд.
+  k6-смоук (`deploy/loadtest/k6-smoke.js`). Makefile eval/load-test, CI mypy src+eval
+  +eval-смоук. 155 unit-тестов, mypy 144 файла. **Все M0–M8 закрыты.**
 
 ## Зафиксированные решения v2
 

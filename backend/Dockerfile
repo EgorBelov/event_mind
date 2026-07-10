@@ -10,16 +10,18 @@ ENV UV_COMPILE_BYTECODE=1 \
 WORKDIR /app
 
 # Сначала только манифесты — кэш слоя зависимостей не инвалидируется кодом.
+# `--extra bot` кладёт aiogram в общий образ (bot-процесс лёгкий); `ml` (torch)
+# намеренно НЕ ставим — эмбеддинги грузятся в отдельном ml-образе.
 COPY pyproject.toml uv.lock README.md ./
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --frozen --no-install-project --no-dev
+    uv sync --frozen --no-install-project --no-dev --extra bot
 
 # Теперь код проекта и его установка.
 COPY src ./src
 COPY alembic ./alembic
 COPY alembic.ini ./
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --frozen --no-dev
+    uv sync --frozen --no-dev --extra bot
 
 # ── runtime: только venv + код, без uv ──────────────────────────────────────
 FROM python:3.12-slim-bookworm AS runtime

@@ -56,6 +56,11 @@ dependencies = [
 ml = [
     "sentence-transformers>=2.7,<3",
 ]
+# Telegram-бот (M7): вторичный клиент, отдельным процессом/образом. aiogram —
+# только для процесса bot; ставится через `uv sync --extra bot`.
+bot = [
+    "aiogram>=3.13,<4",
+]
 dev = [
     "pytest>=8.2,<9",
     "pytest-asyncio>=0.23,<0.25",
@@ -63,6 +68,8 @@ dev = [
     "ruff>=0.6,<0.7",
     "mypy>=1.11,<2",
     "import-linter>=2.0,<3",
+    # aiogram в dev — чтобы mypy видел bot-слой и unit-тесты бота импортировались.
+    "aiogram>=3.13,<4",
 ]
 
 [build-system]
@@ -118,6 +125,8 @@ ignore_missing_imports = true
 asyncio_mode = "auto"
 testpaths = ["tests"]
 addopts = "-q"
+# eval/ — top-level tooling-пакет (offline-eval), не в src/; кладём корень на путь.
+pythonpath = ["."]
 markers = [
     "integration: тесты, требующие внешних сервисов (Postgres/Redis) через testcontainers",
 ]

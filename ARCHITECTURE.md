@@ -1,6 +1,6 @@
 # EventMind v2 — архитектура
 
-> Живой документ. Обновляется на каждом milestone. Статус: **M5 (Мультиканальная доставка)**.
+> Живой документ. Обновляется на каждом milestone. Статус: **M8 (прод-готовность: k8s/Helm+HPA, дашборды/алерты, load-test, offline-eval)** — финальный.
 
 EventMind собирает IT-события из внешних источников, нормализует их через LLM
 и рекомендует пользователям, доставляя выдачу по выбранным каналам. v2 —
@@ -179,11 +179,71 @@ read-only), `deploy/` (compose: pg+redis+api+web+worker+prometheus+grafana+mailh
   JWT-purpose-токен из письма → выключает email-дайджест). Миграция 0005.
 - Метрики доставки по каналу/исходу (в адаптерах каналов).
 
-Зелёные проверки: ruff, mypy(strict, 123 файла), import-linter (границы слоёв),
+**M6** — Веб-клиент + backend-обвязка под него:
+- **Backend**: NL-поиск событий (`GET /api/v1/events/nl-search`) — LLM-extract
+  `SearchFilters` → канонизация → строгий проход → relax-fallback (снимаем
+  фильтры `free_text→topics→format→event_type→city→date`, 1 ближайшее событие),
+  порт `SearchRepository` (pgvector-репо, NULL-сейф даты только в upcoming);
+  карточка события `GET /api/v1/events/{id}`. Профиль `PATCH /api/v1/users/me`
+  (город канонизируется, формат — для rule-скоринга) и настройки
+  `GET/PATCH /api/v1/users/me/preferences`. **Google OAuth**: порт
+  `GoogleTokenVerifier` (tokeninfo, сверка `aud`), `POST /api/v1/auth/google`
+  (вход/регистрация по id_token, линковка к существующему email-аккаунту).
+- **Web** (Next.js 14 App Router, standalone): типизированный API-клиент
+  (`lib/api.ts`) через **BFF-прокси** `/bff/[...path]` — держит httpOnly-cookie
+  same-site (обход `SameSite=Lax` на кросс-origin). `middleware.ts` гейтит
+  `/feed,/search,/inbox,/settings`. Страницы: вход/регистрация, лента
+  рекомендаций (like/save/hide → interactions), NL-поиск, карточка события,
+  инбокс (in-app + отметка прочитанным), настройки (профиль/уведомления/
+  Telegram-deep-link). `npm run build` + `tsc --noEmit` + `next lint` — зелёные.
+
+**M7** — Telegram-бот (aiogram 3, long-polling) поверх API:
+- Бот — **вторичный клиент**: не трогает БД и не импортирует application/
+  infrastructure — только HTTP через `BotApiClient` (httpx + внутренний
+  `X-API-Key`). Chat_id → account резолвится на бэкенде.
+- **Bot-facing API** `/api/v1/bot/*` (guard `require_internal_api_key`):
+  `GET /status`, `GET /recommendations`, `POST /interactions` — принимают
+  `chat_id`, use-case `ResolveAccountByTelegram` находит `user_id` по
+  verified+enabled telegram-каналу и запускает те же `GetRecommendations`/
+  `RecordInteraction`, что и веб (409 `not_linked`, если чат не привязан).
+  Привязка — через существующий `/channels/telegram/confirm`; NL-поиск и
+  карточка — публичные `/events/*`.
+- Хендлеры: `/start <token>` (deep-link → confirm), `/feed` (карточки +
+  inline like/save/hide), `/search` и свободный текст (NL-поиск), callback'и
+  feedback/подробнее. Порт `send` (HTML + plain-fallback) и локализация дат/
+  ссылок из v1 — чистый `formatting.py` (без aiogram, тестируемый).
+- aiogram — extra `bot` (общий образ ставит `--extra bot`; `ml`/torch — нет).
+  Профиль compose `bot` (opt-in при заданном BOT_TOKEN).
+
+**M8** — прод-готовность + offline-eval (финальный):
+- **Offline-eval harness** (`backend/eval/`, вне `src/` — tooling-пакет):
+  воспроизводимый leave-one-out (seed=42) против **чистой математики**
+  `domain/recommender` + `HybridRanker` (без БД/LLM/torch). Синтетический
+  датасет (16 тем, эмбеддинги из тематических векторов + шум), метрики
+  Recall@k / nDCG@k / MAP + catalog-coverage + intra-list diversity, абляции
+  весов (rule-only / content-only / bayesian-only / full / full-no-MMR). CLI
+  `python -m eval.run [--json]`. Виден trade-off MMR (точность↔разнообразие).
+- **k8s/Helm** (`deploy/helm/eventmind/`): Deployment'ы api/worker/web (+opt bot)
+  из единого backend-образа (команда различает роль), ConfigMap+Secret,
+  liveness/readiness-probes, **HPA** (api/web по CPU; worker по CPU + опц.
+  external-metric длины очереди arq), **PDB** для api, миграции — **Helm-hook
+  pre-install/pre-upgrade Job** (`alembic upgrade head`), Ingress (`/api`,`/metrics`
+  → api; остальное → web). Планировщик отдельным подом не нужен — arq cron
+  встроен в worker и дедуплицируется через Redis.
+- **Наблюдаемость**: Prometheus alert-rules (`deploy/prometheus/alerts.yml`:
+  ApiDown, 5xx>5%, p95>1.5s, LLM error-rate/breaker-open, сбои доставки) +
+  Grafana-дашборд LLM/доставки (провайдеры, токены, p95, error-rate, каналы).
+- **Load-test** (`deploy/loadtest/k6-smoke.js`): ramping-VU смоук хот-путей
+  (register→cookie→`/recommendations`), пороги p95<1s и error-rate<1%.
+- Makefile `eval`/`load-test` подключены; CI гоняет `mypy src eval` + eval-смоук.
+
+Зелёные проверки: ruff, mypy(strict, 144 файла: `src`+`eval`), import-linter
+(границы слоёв; бот — чистый HTTP-клиент; eval — потребитель домена),
 pytest (unit — домен/security/use-cases/LLM/embedding/ingestion/рекомендер/
-**дайджест+гейтинг каналов+тихие часы+unsubscribe** на фейках; integration —
-auth, outbox+UoW, SMTP↔Mailhog, telegram, ingestion, recommendations+feedback,
-**inbox+unsubscribe+send-digest** через testcontainers), сборка образов — CI.
+дайджест/профиль+prefs+Google/bot/**eval-harness детерминизм+метрики** на фейках;
+integration — auth, outbox+UoW, SMTP↔Mailhog, telegram, ingestion,
+recommendations+feedback, inbox/unsubscribe, users, bot-API через testcontainers),
+web (build/typecheck/lint), сборка образов — CI.
 
 ## Поток данных: регистрация (пример транзакционного outbox)
 
@@ -198,8 +258,10 @@ worker: process_outbox → OutboxProcessor
   └─ handler(user.registered) → EmailRenderer → EmailChannel(SMTP) → письмо
 ```
 
-## Дальше (roadmap)
+## Статус
 
-M6 веб-клиент ·
-M7 Telegram-бот · M8 прод (k8s/Helm/HPA) + offline-eval. Детали — в
-`docs/REBUILD_PROMPT.md` (контракт) и плане каждого milestone.
+Все milestone'ы контракта (`docs/REBUILD_PROMPT.md`) закрыты: **M0–M8**.
+Дальнейшее — итеративные улучшения (реальные источники ingestion, доучивание
+скореров skill_gap/bandit/gnn под флагами, LLM-judge на живых данных,
+Prometheus-adapter для HPA по длине очереди, партиционирование
+`interactions`/`notifications` под объём).
