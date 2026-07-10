@@ -20,7 +20,7 @@ from eventmind.infrastructure.telemetry.tracing import setup_tracing
 from eventmind.interfaces.api.container import build_container
 from eventmind.interfaces.api.errors import install_error_handlers
 from eventmind.interfaces.api.middleware import RequestContextMiddleware
-from eventmind.interfaces.api.routers import admin, auth, channels, health, v1
+from eventmind.interfaces.api.routers import admin, auth, channels, health, ingestion, v1
 
 _logger = structlog.get_logger("eventmind.api")
 
@@ -73,6 +73,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(auth.router)
     app.include_router(channels.router)
     app.include_router(admin.router)
+    app.include_router(ingestion.router)
 
     setup_tracing(app, settings)
     return app

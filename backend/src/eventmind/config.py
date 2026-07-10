@@ -78,6 +78,13 @@ class Settings(BaseSettings):
     embedding_dimension: int = 384
     embedding_cache_size: int = 4096
 
+    # ── ingestion (M3) ───────────────────────────────────────────────────
+    # RSS-ленты через запятую (пусто — источник rss отключён).
+    rss_feeds: str = ""
+    ingest_default_limit: int = 20
+    normalize_batch_size: int = 20
+    max_normalize_retries: int = 3
+
     # ── email-канал (M1/M5): dev→Mailhog, prod→Yandex/Mail.ru SMTP ───────
     smtp_host: str = "mailhog"
     smtp_port: int = 1025

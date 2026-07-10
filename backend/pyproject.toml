@@ -34,6 +34,11 @@ dependencies = [
     "langchain-core>=0.3,<0.4",
     "langchain-google-genai>=2.0,<3",
     "langchain-groq>=0.2,<0.3",
+    # --- ingestion (M3): парсеры источников ---
+    "beautifulsoup4>=4.12",
+    "lxml>=5.2",
+    "feedparser>=6.0",
+    "certifi>=2024.2",
     # --- observability ---
     "structlog>=24.1",
     "prometheus-client>=0.20",
@@ -104,6 +109,7 @@ module = [
     "sentence_transformers.*",
     "langchain_groq.*",
     "langchain_google_genai.*",
+    "feedparser.*",
 ]
 ignore_missing_imports = true
 

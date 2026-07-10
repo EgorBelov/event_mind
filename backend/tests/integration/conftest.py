@@ -98,7 +98,8 @@ async def clean_tables(settings: Settings) -> None:
             await conn.execute(
                 text(
                     "TRUNCATE outbox, one_time_tokens, notification_preferences, "
-                    "user_channels, users RESTART IDENTITY CASCADE"
+                    "user_channels, users, event_topics, events, raw_events, topics "
+                    "RESTART IDENTITY CASCADE"
                 )
             )
     finally:

@@ -12,16 +12,21 @@ import structlog
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
 from eventmind.application.accounts.config import AccountsConfig
+from eventmind.application.ingestion.config import IngestionConfig
+from eventmind.application.ingestion.normalizer import EventNormalizer
 from eventmind.application.ports.embedding import EmbeddingProvider
+from eventmind.application.ports.events import EventsUnitOfWork
 from eventmind.application.ports.security import (
     Clock,
     PasswordHasher,
     SecretTokenGenerator,
     TokenService,
 )
+from eventmind.application.ports.sources import EventSource
 from eventmind.application.ports.uow import UnitOfWork
 from eventmind.config import Settings
 from eventmind.infrastructure.db.engine import create_engine, create_session_factory
+from eventmind.infrastructure.db.events_uow import SqlAlchemyEventsUnitOfWork
 from eventmind.infrastructure.db.uow import SqlAlchemyUnitOfWork
 from eventmind.infrastructure.embedding.minilm import SentenceTransformerEmbeddingProvider
 from eventmind.infrastructure.llm.chain import LLMChain
@@ -34,6 +39,7 @@ from eventmind.infrastructure.security.tokens import (
     Sha256SecretTokenGenerator,
     SystemClock,
 )
+from eventmind.infrastructure.sources.registry import build_source_registry
 
 _logger = structlog.get_logger("eventmind.api")
 
@@ -52,9 +58,15 @@ class Container:
     accounts_config: AccountsConfig
     llm: LLMChain
     embedding: EmbeddingProvider
+    sources: dict[str, EventSource]
+    normalizer: EventNormalizer
+    ingestion_config: IngestionConfig
 
     def uow_factory(self) -> UnitOfWork:
         return SqlAlchemyUnitOfWork(self.session_factory)
+
+    def events_uow_factory(self) -> EventsUnitOfWork:
+        return SqlAlchemyEventsUnitOfWork(self.session_factory)
 
     async def aclose(self) -> None:
         await self.task_queue.aclose()
@@ -73,6 +85,8 @@ def build_container(settings: Settings) -> Container:
         jwt_secret = secrets.token_urlsafe(48)
         _logger.warning("jwt_secret_empty_using_ephemeral")
 
+    llm = create_llm_chain(settings)
+
     return Container(
         settings=settings,
         engine=engine,
@@ -84,10 +98,16 @@ def build_container(settings: Settings) -> Container:
         token_generator=Sha256SecretTokenGenerator(),
         clock=SystemClock(),
         accounts_config=AccountsConfig(),
-        llm=create_llm_chain(settings),
+        llm=llm,
         embedding=SentenceTransformerEmbeddingProvider(
             model_name=settings.embedding_model_name,
             dimension=settings.embedding_dimension,
             cache_size=settings.embedding_cache_size,
+        ),
+        sources=build_source_registry(settings),
+        normalizer=EventNormalizer(llm),
+        ingestion_config=IngestionConfig(
+            normalize_batch_size=settings.normalize_batch_size,
+            max_normalize_retries=settings.max_normalize_retries,
         ),
     )

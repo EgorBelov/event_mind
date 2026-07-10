@@ -23,6 +23,12 @@ from eventmind.application.accounts.use_cases import (
     ResetPassword,
     VerifyEmail,
 )
+from eventmind.application.ingestion.use_cases import (
+    GetIngestionStatus,
+    LoadAllSources,
+    LoadSource,
+    NormalizeRawEvents,
+)
 from eventmind.domain.accounts.entities import User
 from eventmind.interfaces.api.container import Container
 from eventmind.interfaces.api.errors import ApiError
@@ -88,6 +94,28 @@ def get_confirm_telegram_link(container: ContainerDep) -> ConfirmTelegramLink:
     return ConfirmTelegramLink(
         container.uow_factory, container.token_generator, container.clock
     )
+
+
+# ── ingestion (M3) ───────────────────────────────────────────────────────────
+def get_load_source(container: ContainerDep) -> LoadSource:
+    return LoadSource(container.events_uow_factory, container.task_queue)
+
+
+def get_load_all(container: ContainerDep) -> LoadAllSources:
+    return LoadAllSources(container.sources, get_load_source(container))
+
+
+def get_normalize_raw_events(container: ContainerDep) -> NormalizeRawEvents:
+    return NormalizeRawEvents(
+        container.events_uow_factory,
+        container.normalizer,
+        container.embedding,
+        container.ingestion_config,
+    )
+
+
+def get_ingestion_status(container: ContainerDep) -> GetIngestionStatus:
+    return GetIngestionStatus(container.events_uow_factory)
 
 
 # ── аутентификация пользователя (JWT) ────────────────────────────────────────

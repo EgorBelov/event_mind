@@ -56,8 +56,11 @@ Makefile   — up/test/lint/typecheck/imports/migrate/seed/...
   circuit-breaker + per-provider cooldown, async gemini-probe, structured_output,
   токен-метрики) + EmbeddingProvider (MiniLM-384, ленивый torch/extra `ml`,
   батч+LRU-кэш). Admin `/api/v1/admin/llm/{status,reprobe}`. 63 unit-теста.
-- [ ] **M3** — ingestion: EventSource-реестр (habr+rss+kudago), arq-worker
-  LLM-нормализации, идемпотентность/ретраи/DLQ. Порт из `legacy/app/ingestion/*`.
+- [x] **M3** — ingestion: домен events (таксономия/series портированы),
+  EventSource-реестр (habr+rss+kudago), нормализатор (LLM structured_output +
+  пост-обработка/фильтры из v1), пайплайн source→raw_events→events с
+  идемпотентностью/ретраями/DLQ, arq-задачи ingest_source/normalize_raw_events,
+  API /api/v1/ingestion/*, миграция 0003 (events+vector+HNSW). 90 unit-тестов.
 - [ ] **M4** — рекомендер two-stage (CandidateGenerator+Scorers+MMR/anti-flood),
   read-only `/api/v1/recommendations`, кэш. Математика из `legacy/app/recommender/*`.
 - [ ] **M5** — мультиканальная доставка (NotificationChannel email/telegram/in-app),
