@@ -114,3 +114,19 @@ htmlcov/
 .claude/worktrees
 claude/
 claude
+
+# ======================
+# Node / Next.js (web/)
+# ======================
+node_modules/
+.next/
+web/out/
+web/build/
+*.tsbuildinfo
+
+# ======================
+# Python tooling caches (v2 backend)
+# ======================
+.mypy_cache/
+.ruff_cache/
+# uv.lock — ТРЕКАЕМ (воспроизводимые сборки), поэтому не игнорируем.

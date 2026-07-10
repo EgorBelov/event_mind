@@ -1,0 +1,121 @@
+[project]
+name = "eventmind"
+version = "2.0.0"
+description = "EventMind v2 — агрегация IT-мероприятий и персональные рекомендации (production-grade, account-центричная, мультиканальная)"
+readme = "README.md"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    # --- web / api ---
+    "fastapi>=0.115,<0.116",
+    "uvicorn[standard]>=0.30,<0.31",
+    "gunicorn>=22.0",
+    # --- db (async) ---
+    "sqlalchemy[asyncio]>=2.0.29,<2.1",
+    "asyncpg>=0.29,<0.31",
+    "alembic>=1.13,<1.15",
+    "pgvector>=0.3.2,<0.4",
+    # --- config / validation ---
+    "pydantic>=2.8,<3",
+    "pydantic-settings>=2.3,<3",
+    # --- infra: redis, queue ---
+    "redis>=5.0,<6",
+    "arq>=0.26,<0.27",
+    # --- http client (источники ingestion, внутренние вызовы) ---
+    "httpx>=0.27,<0.28",
+    # --- observability ---
+    "structlog>=24.1",
+    "prometheus-client>=0.20",
+    "opentelemetry-sdk>=1.27",
+    "opentelemetry-instrumentation-fastapi>=0.48b0",
+    "opentelemetry-instrumentation-sqlalchemy>=0.48b0",
+    "opentelemetry-instrumentation-httpx>=0.48b0",
+    "opentelemetry-exporter-otlp-proto-http>=1.27",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.2,<9",
+    "pytest-asyncio>=0.23,<0.25",
+    "testcontainers[postgres,redis]>=4.8,<5",
+    "ruff>=0.6,<0.7",
+    "mypy>=1.11,<2",
+    "import-linter>=2.0,<3",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/eventmind"]
+
+# ── ruff ──────────────────────────────────────────────────────────────────
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "C4", "SIM", "ASYNC", "RUF"]
+ignore = [
+    "B008",             # FastAPI Depends() в дефолтах аргументов — идиома фреймворка
+    "RUF001", "RUF002", "RUF003",  # кириллица в комментариях/строках — осознанное соглашение проекта
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["B008"]
+
+# ── mypy (strict) ─────────────────────────────────────────────────────────
+[tool.mypy]
+python_version = "3.12"
+strict = true
+warn_unused_ignores = true
+warn_redundant_casts = true
+disallow_untyped_defs = true
+plugins = ["pydantic.mypy"]
+mypy_path = "src"
+explicit_package_bases = true
+namespace_packages = true
+
+[[tool.mypy.overrides]]
+module = ["testcontainers.*", "pgvector.*"]
+ignore_missing_imports = true
+
+# ── pytest ────────────────────────────────────────────────────────────────
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+addopts = "-q"
+markers = [
+    "integration: тесты, требующие внешних сервисов (Postgres/Redis) через testcontainers",
+]
+
+# ── import-linter (границы гексагональных слоёв) ──────────────────────────
+[tool.importlinter]
+root_package = "eventmind"
+include_external_packages = true
+
+[[tool.importlinter.contracts]]
+name = "Гексагональные слои: interfaces → application → domain; infrastructure реализует порты"
+type = "layers"
+layers = [
+    "eventmind.interfaces",
+    "eventmind.infrastructure",
+    "eventmind.application",
+    "eventmind.domain",
+]
+
+[[tool.importlinter.contracts]]
+name = "domain не импортирует наружу (фреймворки/I-O)"
+type = "forbidden"
+source_modules = ["eventmind.domain"]
+forbidden_modules = [
+    "eventmind.application",
+    "eventmind.infrastructure",
+    "eventmind.interfaces",
+    "fastapi",
+    "sqlalchemy",
+    "httpx",
+    "redis",
+    "arq",
+]

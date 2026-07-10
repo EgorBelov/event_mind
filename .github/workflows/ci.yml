@@ -2,72 +2,92 @@ name: CI
 
 on:
   push:
-    branches: [main, dev]
+    branches: [main, "claude/**"]
   pull_request:
-    branches: [main, dev]
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
-  test:
-    name: tests (Postgres + pgvector)
+  # ── backend: lint → mypy → import-linter → tests(unit+integration) ─────────
+  backend:
     runs-on: ubuntu-latest
-    services:
-      postgres:
-        # Образ pgvector/pgvector расширяет postgres:16 нужным расширением —
-        # CREATE EXTENSION vector работает прямо «из коробки».
-        image: pgvector/pgvector:pg16
-        env:
-          POSTGRES_USER: eventmind
-          POSTGRES_PASSWORD: eventmind
-          POSTGRES_DB: eventmind
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd "pg_isready -U eventmind"
-          --health-interval 5s
-          --health-timeout 5s
-          --health-retries 10
-    env:
-      # Тесты мокают реальные LLM-вызовы; фиктивный ключ нужен лишь чтобы
-      # конструкция ChatGroq не падала на проверке «ключ задан».
-      GROQ_API_KEY: ci-dummy-key
-      DATABASE_URL: postgresql+psycopg2://eventmind:eventmind@localhost:5432/eventmind
+    defaults:
+      run:
+        working-directory: backend
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up Python 3.12
-        uses: actions/setup-python@v5
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
         with:
-          python-version: "3.12"
-          cache: pip
+          enable-cache: true
 
-      - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt
-          # psycopg2 уже в requirements; на всякий случай ставим бинарный
-          # build на случай, если в проде нужен только клиент.
-          pip install psycopg2-binary
+      - name: Set up Python 3.12
+        run: uv python install 3.12
 
-      - name: Lint (ruff)
-        run: ruff check .
+      - name: Sync dependencies
+        run: uv sync --extra dev --frozen
 
-      - name: Wait for Postgres
-        run: |
-          for i in {1..30}; do
-            pg_isready -h localhost -p 5432 -U eventmind && break
-            sleep 1
-          done
+      - name: Ruff
+        run: uv run ruff check .
 
-      - name: Enable pgvector extension
+      - name: Mypy (strict)
+        run: uv run mypy src
+
+      - name: Import boundaries (import-linter)
+        run: uv run lint-imports
+
+      - name: Unit tests
+        run: uv run pytest tests/unit
+
+      # Integration-тесты поднимают Postgres(pgvector)+Redis через testcontainers.
+      # На ubuntu-runner'е Docker доступен из коробки.
+      - name: Integration tests (testcontainers)
         env:
-          PGPASSWORD: eventmind
-        run: |
-          psql -h localhost -U eventmind -d eventmind -c "CREATE EXTENSION IF NOT EXISTS vector;"
+          TESTCONTAINERS_RYUK_DISABLED: "true"
+        run: uv run pytest tests/integration -m integration
 
-      - name: Apply Alembic migrations
-        run: alembic upgrade head
+  # ── web: typecheck + build ────────────────────────────────────────────────
+  web:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - name: Install
+        run: npm ci || npm install
+      - name: Typecheck
+        run: npx tsc --noEmit
+      - name: Build
+        run: npm run build
+        env:
+          NEXT_TELEMETRY_DISABLED: "1"
 
-      - name: Tests (pytest, full suite)
-        # SQLite-job больше нет — Supabase используется везде. На PG прогоняем
-        # полный suite; SQLite-PRAGMA-зависимые тесты пропускаются автоматически.
-        run: pytest -q
+  # ── docker: сборка образов (без push) ─────────────────────────────────────
+  docker-build:
+    runs-on: ubuntu-latest
+    needs: [backend, web]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - name: Build api image
+        uses: docker/build-push-action@v6
+        with:
+          context: ./backend
+          push: false
+          tags: eventmind-api:ci
+      - name: Build web image
+        uses: docker/build-push-action@v6
+        with:
+          context: ./web
+          push: false
+          tags: eventmind-web:ci
