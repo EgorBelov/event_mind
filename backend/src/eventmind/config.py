@@ -59,10 +59,24 @@ class Settings(BaseSettings):
     otel_exporter_otlp_endpoint: str = ""
     service_name: str = "eventmind-api"
 
-    # ── LLM (M2) ─────────────────────────────────────────────────────────
+    # ── LLM (M2): цепочка Gemini → Groq70b → Groq8b за LLMGateway ─────────
     google_api_key: str = ""
-    google_model: str = ""
+    google_model: str = ""  # пусто — берём первый кандидат/автопроба
     groq_api_key: str = ""
+    groq_model: str = "llama-3.3-70b-versatile"
+    groq_fallback_model: str = "llama-3.1-8b-instant"
+    llm_temperature: float = 0.3
+    llm_timeout_seconds: float = 45.0
+    # circuit-breaker + per-provider cooldown (см. infrastructure/llm)
+    llm_breaker_threshold: int = 5
+    llm_breaker_cooldown_seconds: float = 120.0
+    llm_provider_cooldown_seconds: float = 600.0
+    llm_provider_fail_threshold: int = 2
+
+    # ── эмбеддинги (M2): MiniLM-384, multilingual/русский ────────────────
+    embedding_model_name: str = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
+    embedding_dimension: int = 384
+    embedding_cache_size: int = 4096
 
     # ── email-канал (M1/M5): dev→Mailhog, prod→Yandex/Mail.ru SMTP ───────
     smtp_host: str = "mailhog"

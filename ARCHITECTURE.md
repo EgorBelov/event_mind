@@ -1,6 +1,6 @@
 # EventMind v2 — архитектура
 
-> Живой документ. Обновляется на каждом milestone. Статус: **M1 (аккаунты + auth + домен)**.
+> Живой документ. Обновляется на каждом milestone. Статус: **M2 (LLM Gateway + Embedding)**.
 
 EventMind собирает IT-события из внешних источников, нормализует их через LLM
 и рекомендует пользователям, доставляя выдачу по выбранным каналам. v2 —
@@ -120,9 +120,21 @@ read-only), `deploy/` (compose: pg+redis+api+web+worker+prometheus+grafana+mailh
 - Единая миграция схемы (users с `vector(384)`+HNSW, channels, preferences,
   tokens, outbox). Seed демо-аккаунта.
 
+**M2** — LLM Gateway + Embedding:
+- Порт `LLMGateway` (`complete`, `structured_output(schema)`) + `LLMChain`:
+  цепочка Gemini(REST)→Groq70b→Groq8b с fallback, **circuit-breaker** (5 подряд
+  фейлов цепочки → cooldown 120с) и **per-provider cooldown** (2 фейла звена →
+  skip 10 мин); async-автопроба Gemini-модели; учёт токенов и Prometheus-метрики.
+- Порт `EmbeddingProvider` + `SentenceTransformerEmbeddingProvider` (MiniLM-384,
+  ленивый импорт torch через extra `ml`, батчинг, LRU-кэш, версия модели,
+  encode в отдельном потоке).
+- Admin `/api/v1/admin/llm/{status,reprobe}` (внутренний API-key). Оба провайдера
+  и embedding подключены в DI-контейнер.
+
 Зелёные проверки: ruff, mypy(strict), import-linter (границы слоёв), pytest
-(unit — домен/security/use-cases на фейках; integration — auth-flow, outbox+UoW,
-SMTP↔Mailhog, telegram-link через testcontainers), сборка образов — CI GitHub Actions.
+(unit — домен/security/use-cases/LLM-breaker+chain/embedding на фейках;
+integration — auth-flow, outbox+UoW, SMTP↔Mailhog, telegram-link через
+testcontainers), сборка образов — CI GitHub Actions.
 
 ## Поток данных: регистрация (пример транзакционного outbox)
 
@@ -139,7 +151,7 @@ worker: process_outbox → OutboxProcessor
 
 ## Дальше (roadmap)
 
-M2 LLM Gateway+Embedding · M3 ingestion+worker ·
+M3 ingestion+worker ·
 M4 рекомендер (two-stage) · M5 мультиканальная доставка · M6 веб-клиент ·
 M7 Telegram-бот · M8 прод (k8s/Helm/HPA) + offline-eval. Детали — в
 `docs/REBUILD_PROMPT.md` (контракт) и плане каждого milestone.

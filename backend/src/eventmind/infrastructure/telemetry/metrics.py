@@ -25,6 +25,26 @@ HTTP_REQUEST_DURATION_SECONDS = Histogram(
     buckets=(0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0),
 )
 
+# ── LLM Gateway ──────────────────────────────────────────────────────────────
+LLM_REQUESTS_TOTAL = Counter(
+    "eventmind_llm_requests_total",
+    "Вызовы LLM по провайдеру и исходу",
+    labelnames=("provider", "status"),  # status: success|error|skipped|breaker_open
+)
+
+LLM_TOKENS_TOTAL = Counter(
+    "eventmind_llm_tokens_total",
+    "Потреблённые токены LLM",
+    labelnames=("provider", "direction"),  # direction: input|output
+)
+
+LLM_REQUEST_DURATION_SECONDS = Histogram(
+    "eventmind_llm_request_duration_seconds",
+    "Латентность вызова LLM-провайдера, сек",
+    labelnames=("provider",),
+    buckets=(0.1, 0.25, 0.5, 1.0, 2.0, 5.0, 10.0, 20.0, 45.0),
+)
+
 
 def render_metrics() -> tuple[bytes, str]:
     """Отрендерить текущий срез метрик для эндпоинта `/metrics`."""

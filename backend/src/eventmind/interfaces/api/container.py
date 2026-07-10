@@ -12,6 +12,7 @@ import structlog
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
 from eventmind.application.accounts.config import AccountsConfig
+from eventmind.application.ports.embedding import EmbeddingProvider
 from eventmind.application.ports.security import (
     Clock,
     PasswordHasher,
@@ -22,6 +23,9 @@ from eventmind.application.ports.uow import UnitOfWork
 from eventmind.config import Settings
 from eventmind.infrastructure.db.engine import create_engine, create_session_factory
 from eventmind.infrastructure.db.uow import SqlAlchemyUnitOfWork
+from eventmind.infrastructure.embedding.minilm import SentenceTransformerEmbeddingProvider
+from eventmind.infrastructure.llm.chain import LLMChain
+from eventmind.infrastructure.llm.providers import create_llm_chain
 from eventmind.infrastructure.queue.arq_queue import ArqTaskQueue
 from eventmind.infrastructure.redis import RedisClient, create_redis
 from eventmind.infrastructure.security.jwt import JwtTokenService
@@ -46,6 +50,8 @@ class Container:
     token_generator: SecretTokenGenerator
     clock: Clock
     accounts_config: AccountsConfig
+    llm: LLMChain
+    embedding: EmbeddingProvider
 
     def uow_factory(self) -> UnitOfWork:
         return SqlAlchemyUnitOfWork(self.session_factory)
@@ -78,4 +84,10 @@ def build_container(settings: Settings) -> Container:
         token_generator=Sha256SecretTokenGenerator(),
         clock=SystemClock(),
         accounts_config=AccountsConfig(),
+        llm=create_llm_chain(settings),
+        embedding=SentenceTransformerEmbeddingProvider(
+            model_name=settings.embedding_model_name,
+            dimension=settings.embedding_dimension,
+            cache_size=settings.embedding_cache_size,
+        ),
     )

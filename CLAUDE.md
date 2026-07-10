@@ -52,9 +52,10 @@ Makefile   — up/test/lint/typecheck/imports/migrate/seed/...
   (httpOnly-cookie), SMTP EmailChannel (Mailhog/Yandex/Mail.ru), arq-worker
   (process_outbox), API `/api/v1/auth/*` и `/api/v1/channels/telegram/*`,
   единая миграция схемы (users+vector(384)+HNSW), seed. 47 unit-тестов.
-- [ ] **M2** — LLM Gateway (Gemini→Groq70b→Groq8b, breaker/cooldown/
-  structured-output) + EmbeddingProvider (MiniLM-384). Порт из
-  `legacy/app/agents/recommendation/llm.py`.
+- [x] **M2** — LLM Gateway (`LLMChain`: Gemini(REST)→Groq70b→Groq8b, fallback,
+  circuit-breaker + per-provider cooldown, async gemini-probe, structured_output,
+  токен-метрики) + EmbeddingProvider (MiniLM-384, ленивый torch/extra `ml`,
+  батч+LRU-кэш). Admin `/api/v1/admin/llm/{status,reprobe}`. 63 unit-теста.
 - [ ] **M3** — ingestion: EventSource-реестр (habr+rss+kudago), arq-worker
   LLM-нормализации, идемпотентность/ретраи/DLQ. Порт из `legacy/app/ingestion/*`.
 - [ ] **M4** — рекомендер two-stage (CandidateGenerator+Scorers+MMR/anti-flood),

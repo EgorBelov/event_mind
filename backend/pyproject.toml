@@ -30,6 +30,10 @@ dependencies = [
     # --- email-канал (M1): async SMTP + шаблоны ---
     "aiosmtplib>=3.0,<4",
     "jinja2>=3.1",
+    # --- LLM Gateway (M2): цепочка Gemini→Groq70b→Groq8b за портом ---
+    "langchain-core>=0.3,<0.4",
+    "langchain-google-genai>=2.0,<3",
+    "langchain-groq>=0.2,<0.3",
     # --- observability ---
     "structlog>=24.1",
     "prometheus-client>=0.20",
@@ -41,6 +45,12 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+# Тяжёлые ML-зависимости (torch+sentence-transformers) — отдельным extra,
+# чтобы базовый образ/CI-unit не тянули их без нужды. EmbeddingProvider
+# импортирует sentence-transformers лениво; ставится через `uv sync --extra ml`.
+ml = [
+    "sentence-transformers>=2.7,<3",
+]
 dev = [
     "pytest>=8.2,<9",
     "pytest-asyncio>=0.23,<0.25",
@@ -88,7 +98,13 @@ explicit_package_bases = true
 namespace_packages = true
 
 [[tool.mypy.overrides]]
-module = ["testcontainers.*", "pgvector.*"]
+module = [
+    "testcontainers.*",
+    "pgvector.*",
+    "sentence_transformers.*",
+    "langchain_groq.*",
+    "langchain_google_genai.*",
+]
 ignore_missing_imports = true
 
 # ── pytest ────────────────────────────────────────────────────────────────
