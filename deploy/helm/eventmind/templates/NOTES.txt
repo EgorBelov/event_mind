@@ -1,0 +1,26 @@
+EventMind {{ .Chart.AppVersion }} установлен как релиз "{{ .Release.Name }}".
+
+Процессы:
+  - api        Deployment + Service (:8000){{ if .Values.api.hpa.enabled }} + HPA{{ end }}{{ if .Values.api.pdb.enabled }} + PDB{{ end }}
+  - worker     Deployment (arq: очередь + cron){{ if .Values.worker.hpa.enabled }} + HPA{{ end }}
+  - web        Deployment + Service (:3000){{ if .Values.web.hpa.enabled }} + HPA{{ end }}
+  {{- if .Values.bot.enabled }}
+  - bot        Deployment (aiogram long-polling, 1 реплика)
+  {{- end }}
+  {{- if .Values.migrations.enabled }}
+  - migrate    Job (Helm hook pre-install/pre-upgrade: alembic upgrade head)
+  {{- end }}
+
+{{ if .Values.ingress.enabled -}}
+Доступ: http{{ if .Values.ingress.tls.enabled }}s{{ end }}://{{ .Values.ingress.host }}
+  /api, /metrics → api;  остальное (вкл. /bff) → web.
+{{- else -}}
+Ingress выключен — пробросьте порт: kubectl port-forward svc/{{ include "eventmind.fullname" . }}-web 3000:3000
+{{- end }}
+
+ВАЖНО: секреты (JWT_SECRET, API_SHARED_SECRET, *_API_KEY, BOT_TOKEN, DATABASE_URL)
+в проде подставляйте из внешнего секрет-менеджера, а не из values.yaml.
+
+Проверка:
+  kubectl get pods -l app.kubernetes.io/instance={{ .Release.Name }}
+  kubectl logs deploy/{{ include "eventmind.fullname" . }}-api

@@ -1,0 +1,66 @@
+# Prometheus alert-правила EventMind. Метрики — из
+# backend/src/eventmind/infrastructure/telemetry/metrics.py.
+groups:
+  - name: eventmind-availability
+    rules:
+      - alert: ApiDown
+        expr: up{job="eventmind-api"} == 0
+        for: 1m
+        labels: { severity: critical }
+        annotations:
+          summary: "API не отвечает на scrape"
+          description: "Таргет eventmind-api недоступен > 1 мин."
+
+      - alert: HighHttp5xxRate
+        expr: |
+          sum(rate(eventmind_http_requests_total{status=~"5.."}[5m]))
+          / clamp_min(sum(rate(eventmind_http_requests_total[5m])), 1e-9) > 0.05
+        for: 5m
+        labels: { severity: critical }
+        annotations:
+          summary: "Доля 5xx > 5%"
+          description: "Более 5% ответов API — 5xx за последние 5 мин."
+
+      - alert: HighApiLatencyP95
+        expr: |
+          histogram_quantile(
+            0.95,
+            sum by (le) (rate(eventmind_http_request_duration_seconds_bucket[5m]))
+          ) > 1.5
+        for: 10m
+        labels: { severity: warning }
+        annotations:
+          summary: "p95 латентности API > 1.5s"
+          description: "p95 времени ответа держится выше 1.5s 10 мин."
+
+  - name: eventmind-llm
+    rules:
+      - alert: LlmErrorRateHigh
+        expr: |
+          sum(rate(eventmind_llm_requests_total{status="error"}[10m]))
+          / clamp_min(sum(rate(eventmind_llm_requests_total[10m])), 1e-9) > 0.5
+        for: 10m
+        labels: { severity: warning }
+        annotations:
+          summary: "LLM-цепочка часто падает"
+          description: "Более 50% вызовов LLM завершаются ошибкой — вероятен исчерпанный лимит/циркуит-брейкер."
+
+      - alert: LlmBreakerOpen
+        expr: increase(eventmind_llm_requests_total{status="breaker_open"}[15m]) > 0
+        for: 5m
+        labels: { severity: warning }
+        annotations:
+          summary: "Открыт circuit-breaker LLM"
+          description: "Цепочка LLM в cooldown — рекомендации/нормализация деградируют."
+
+  - name: eventmind-delivery
+    rules:
+      - alert: NotificationDeliveryFailures
+        expr: |
+          sum(rate(eventmind_notifications_delivered_total{status="error"}[15m]))
+          / clamp_min(sum(rate(eventmind_notifications_delivered_total[15m])), 1e-9) > 0.2
+        for: 15m
+        labels: { severity: warning }
+        annotations:
+          summary: "Сбои доставки уведомлений > 20%"
+          description: "Каждое пятое уведомление не доставлено (SMTP/Telegram) за 15 мин."

@@ -125,6 +125,8 @@ ignore_missing_imports = true
 asyncio_mode = "auto"
 testpaths = ["tests"]
 addopts = "-q"
+# eval/ — top-level tooling-пакет (offline-eval), не в src/; кладём корень на путь.
+pythonpath = ["."]
 markers = [
     "integration: тесты, требующие внешних сервисов (Postgres/Redis) через testcontainers",
 ]

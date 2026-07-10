@@ -42,8 +42,8 @@ lint: ## ruff
 fmt: ## ruff --fix (автоформат/автофикс)
 	cd $(BACKEND) && uv run ruff check --fix .
 
-typecheck: ## mypy (strict)
-	cd $(BACKEND) && uv run mypy src
+typecheck: ## mypy (strict) — src + eval-harness
+	cd $(BACKEND) && uv run mypy src eval
 
 imports: ## import-linter — границы гексагональных слоёв
 	cd $(BACKEND) && uv run lint-imports
@@ -57,11 +57,11 @@ revision: ## Создать миграцию: make revision m="описание"
 seed: ## Наполнить БД демо-аккаунтом (идемпотентно)
 	cd $(BACKEND) && uv run python -m eventmind.interfaces.cli.seed
 
-eval: ## Offline-eval рекомендера (появится в M8)
-	@echo "eval: будет реализован в M8"
+eval: ## Offline-eval рекомендера (leave-one-out, seed=42, ablations)
+	cd $(BACKEND) && uv run python -m eval.run
 
-load-test: ## Нагрузочный смоук (появится в M8)
-	@echo "load-test: будет реализован в M8"
+load-test: ## Нагрузочный смоук k6 по хот-путям (нужен установленный k6)
+	k6 run -e BASE_URL=$(or $(BASE_URL),http://localhost:8000) deploy/loadtest/k6-smoke.js
 
 web-dev: ## Next.js dev-сервер (локально, без Docker)
 	cd web && npm run dev

@@ -1,0 +1,9 @@
+apiVersion: v2
+name: eventmind
+description: >-
+  EventMind v2 — account-центричная мультиканальная система рекомендаций
+  IT-мероприятий (api/worker/scheduler/web/bot) с HPA, probes, PDB и
+  init-job миграций. Postgres(pgvector)+Redis — внешние (managed) через Secret.
+type: application
+version: 0.1.0
+appVersion: "2.0.0"

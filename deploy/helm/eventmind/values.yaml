@@ -1,0 +1,115 @@
+# EventMind Helm values. Prod-дефолты; переопределяются per-env через -f values.<env>.yaml.
+
+image:
+  # Один образ backend на все процессы (команда различает роль). Тег — обычно git SHA.
+  backend:
+    repository: ghcr.io/egorbelov/event_mind-backend
+    tag: "latest"
+  web:
+    repository: ghcr.io/egorbelov/event_mind-web
+    tag: "latest"
+  pullPolicy: IfNotPresent
+
+imagePullSecrets: []
+nameOverride: ""
+fullnameOverride: ""
+
+# ── несекретная конфигурация (→ ConfigMap) ────────────────────────────────────
+config:
+  environment: prod
+  logLevel: INFO
+  logJson: "true"
+  serviceName: eventmind-api
+  corsOrigins: "https://eventmind.example.com"
+  publicWebUrl: "https://eventmind.example.com"
+  apiInternalUrl: "http://eventmind-api:8000"
+  otelEnabled: "false"
+  otelEndpoint: ""
+  smtpHost: ""
+  smtpPort: "587"
+  smtpUseTls: "true"
+  smtpUseSsl: "false"
+  emailFrom: "EventMind <noreply@eventmind.example.com>"
+  telegramBotUsername: ""
+
+# ── секреты (→ Secret) ────────────────────────────────────────────────────────
+# В проде НЕ хранить здесь plaintext — подставлять из внешнего секрет-менеджера
+# (SealedSecrets/ExternalSecrets/CI). Пустые значения = плейсхолдеры.
+secrets:
+  databaseUrl: "postgresql+asyncpg://eventmind:eventmind@postgres:5432/eventmind"
+  redisUrl: "redis://redis:6379/0"
+  jwtSecret: ""
+  apiSharedSecret: ""
+  googleApiKey: ""
+  groqApiKey: ""
+  googleOauthClientId: ""
+  smtpUser: ""
+  smtpPassword: ""
+  botToken: ""
+
+# ── процессы ──────────────────────────────────────────────────────────────────
+api:
+  replicas: 2
+  resources:
+    requests: { cpu: "250m", memory: "512Mi" }
+    limits: { cpu: "1", memory: "1Gi" }
+  hpa:
+    enabled: true
+    minReplicas: 2
+    maxReplicas: 8
+    targetCPUUtilizationPercentage: 70
+  pdb:
+    enabled: true
+    minAvailable: 1
+
+worker:
+  replicas: 2
+  resources:
+    requests: { cpu: "250m", memory: "512Mi" }
+    limits: { cpu: "1", memory: "1Gi" }
+  hpa:
+    enabled: true
+    minReplicas: 2
+    maxReplicas: 10
+    targetCPUUtilizationPercentage: 75
+    # Масштаб по длине очереди arq требует Prometheus-adapter (external metric).
+    # Включить, когда адаптер установлен; иначе работает CPU-триггер выше.
+    queueLag:
+      enabled: false
+      metricName: eventmind_queue_pending
+      targetAverageValue: "50"
+
+# Планировщик как отдельный процесс не нужен: arq cron встроен в WorkerSettings
+# (cron_jobs) и дедуплицируется между репликами worker'а через Redis-lock.
+
+web:
+  replicas: 2
+  resources:
+    requests: { cpu: "100m", memory: "256Mi" }
+    limits: { cpu: "500m", memory: "512Mi" }
+  hpa:
+    enabled: true
+    minReplicas: 2
+    maxReplicas: 6
+    targetCPUUtilizationPercentage: 70
+
+bot:
+  # Long-polling — строго 1 реплика (иначе дубли getUpdates). Выключен по умолчанию.
+  enabled: false
+  resources:
+    requests: { cpu: "50m", memory: "128Mi" }
+    limits: { cpu: "250m", memory: "256Mi" }
+
+# ── init-job миграций (Helm hook pre-install/pre-upgrade) ──────────────────────
+migrations:
+  enabled: true
+
+# ── ingress (web + api под одним хостом) ──────────────────────────────────────
+ingress:
+  enabled: true
+  className: nginx
+  annotations: {}
+  host: eventmind.example.com
+  tls:
+    enabled: true
+    secretName: eventmind-tls

@@ -1,6 +1,6 @@
 # EventMind v2 — архитектура
 
-> Живой документ. Обновляется на каждом milestone. Статус: **M7 (Telegram-бот на aiogram поверх API)**.
+> Живой документ. Обновляется на каждом milestone. Статус: **M8 (прод-готовность: k8s/Helm+HPA, дашборды/алерты, load-test, offline-eval)** — финальный.
 
 EventMind собирает IT-события из внешних источников, нормализует их через LLM
 и рекомендует пользователям, доставляя выдачу по выбранным каналам. v2 —
@@ -215,12 +215,35 @@ read-only), `deploy/` (compose: pg+redis+api+web+worker+prometheus+grafana+mailh
 - aiogram — extra `bot` (общий образ ставит `--extra bot`; `ml`/torch — нет).
   Профиль compose `bot` (opt-in при заданном BOT_TOKEN).
 
-Зелёные проверки: ruff, mypy(strict, 139 файлов), import-linter (границы слоёв,
-бот — чистый HTTP-клиент), pytest (unit — домен/security/use-cases/LLM/embedding/
-ingestion/рекомендер/дайджест/профиль+prefs+Google/**bot-форматтеры+api-client+
-resolve** на фейках; integration — auth, outbox+UoW, SMTP↔Mailhog, telegram,
-ingestion, recommendations+feedback, inbox/unsubscribe, users, **bot-API** через
-testcontainers), web (build/typecheck/lint), сборка образов — CI.
+**M8** — прод-готовность + offline-eval (финальный):
+- **Offline-eval harness** (`backend/eval/`, вне `src/` — tooling-пакет):
+  воспроизводимый leave-one-out (seed=42) против **чистой математики**
+  `domain/recommender` + `HybridRanker` (без БД/LLM/torch). Синтетический
+  датасет (16 тем, эмбеддинги из тематических векторов + шум), метрики
+  Recall@k / nDCG@k / MAP + catalog-coverage + intra-list diversity, абляции
+  весов (rule-only / content-only / bayesian-only / full / full-no-MMR). CLI
+  `python -m eval.run [--json]`. Виден trade-off MMR (точность↔разнообразие).
+- **k8s/Helm** (`deploy/helm/eventmind/`): Deployment'ы api/worker/web (+opt bot)
+  из единого backend-образа (команда различает роль), ConfigMap+Secret,
+  liveness/readiness-probes, **HPA** (api/web по CPU; worker по CPU + опц.
+  external-metric длины очереди arq), **PDB** для api, миграции — **Helm-hook
+  pre-install/pre-upgrade Job** (`alembic upgrade head`), Ingress (`/api`,`/metrics`
+  → api; остальное → web). Планировщик отдельным подом не нужен — arq cron
+  встроен в worker и дедуплицируется через Redis.
+- **Наблюдаемость**: Prometheus alert-rules (`deploy/prometheus/alerts.yml`:
+  ApiDown, 5xx>5%, p95>1.5s, LLM error-rate/breaker-open, сбои доставки) +
+  Grafana-дашборд LLM/доставки (провайдеры, токены, p95, error-rate, каналы).
+- **Load-test** (`deploy/loadtest/k6-smoke.js`): ramping-VU смоук хот-путей
+  (register→cookie→`/recommendations`), пороги p95<1s и error-rate<1%.
+- Makefile `eval`/`load-test` подключены; CI гоняет `mypy src eval` + eval-смоук.
+
+Зелёные проверки: ruff, mypy(strict, 144 файла: `src`+`eval`), import-linter
+(границы слоёв; бот — чистый HTTP-клиент; eval — потребитель домена),
+pytest (unit — домен/security/use-cases/LLM/embedding/ingestion/рекомендер/
+дайджест/профиль+prefs+Google/bot/**eval-harness детерминизм+метрики** на фейках;
+integration — auth, outbox+UoW, SMTP↔Mailhog, telegram, ingestion,
+recommendations+feedback, inbox/unsubscribe, users, bot-API через testcontainers),
+web (build/typecheck/lint), сборка образов — CI.
 
 ## Поток данных: регистрация (пример транзакционного outbox)
 
@@ -235,8 +258,10 @@ worker: process_outbox → OutboxProcessor
   └─ handler(user.registered) → EmailRenderer → EmailChannel(SMTP) → письмо
 ```
 
-## Дальше (roadmap)
+## Статус
 
-M8 прод (k8s/Helm/HPA + дашборды/алерты + load-test) + offline-eval harness
-(Recall@k/nDCG/MAP, LLM-judge, ablations, seed=42). Детали — в
-`docs/REBUILD_PROMPT.md` (контракт) и плане каждого milestone.
+Все milestone'ы контракта (`docs/REBUILD_PROMPT.md`) закрыты: **M0–M8**.
+Дальнейшее — итеративные улучшения (реальные источники ingestion, доучивание
+скореров skill_gap/bandit/gnn под флагами, LLM-judge на живых данных,
+Prometheus-adapter для HPA по длине очереди, партиционирование
+`interactions`/`notifications` под объём).

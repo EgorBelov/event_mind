@@ -90,7 +90,15 @@ Makefile   — up/test/lint/typecheck/imports/migrate/seed/...
   (карточки+inline like·save·hide), `/search`/свободный текст (NL-поиск),
   callbacks. Чистый `formatting.py` (send HTML+fallback, локализация дат/
   ссылок из v1). Extra `bot` (aiogram), compose-профиль `bot`. 149 unit-тестов.
-- [ ] **M8** — прод: k8s/Helm+HPA, дашборды/алерты, load-test, offline-eval + ablations.
+- [x] **M8** — прод-готовность + offline-eval (финальный): harness `backend/eval/`
+  (leave-one-out seed=42 против чистой математики+HybridRanker без БД/LLM/torch;
+  Recall@k/nDCG@k/MAP/coverage/diversity; абляции rule/content/bayesian/full/
+  no-MMR; `python -m eval.run`). k8s/Helm `deploy/helm/eventmind` (api/worker/web
+  +opt bot из единого образа, ConfigMap/Secret, probes, **HPA** CPU +opt queue-lag,
+  **PDB**, миграции Helm-hook Job, Ingress; scheduler не нужен — arq cron в worker).
+  Prometheus alerts (`deploy/prometheus/alerts.yml`) + Grafana LLM/delivery-дашборд.
+  k6-смоук (`deploy/loadtest/k6-smoke.js`). Makefile eval/load-test, CI mypy src+eval
+  +eval-смоук. 155 unit-тестов, mypy 144 файла. **Все M0–M8 закрыты.**
 
 ## Зафиксированные решения v2
 

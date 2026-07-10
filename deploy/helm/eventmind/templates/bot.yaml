@@ -1,0 +1,33 @@
+{{- if .Values.bot.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "eventmind.fullname" . }}-bot
+  labels: {{- include "eventmind.labels" . | nindent 4 }}
+    app.kubernetes.io/component: bot
+spec:
+  # Long-polling → строго 1 реплика (иначе конфликт getUpdates).
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/instance: {{ .Release.Name }}
+      app.kubernetes.io/component: bot
+  template:
+    metadata:
+      labels:
+        {{- include "eventmind.labels" . | nindent 8 }}
+        app.kubernetes.io/component: bot
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: bot
+          image: "{{ .Values.image.backend.repository }}:{{ .Values.image.backend.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command: ["python", "-m", "eventmind.interfaces.bot.main"]
+          env: {{- include "eventmind.backendEnv" . | nindent 12 }}
+          resources: {{- toYaml .Values.bot.resources | nindent 12 }}
+{{- end }}

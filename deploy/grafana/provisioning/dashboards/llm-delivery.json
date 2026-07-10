@@ -1,0 +1,85 @@
+{
+  "uid": "eventmind-llm-delivery",
+  "title": "EventMind — LLM и доставка",
+  "tags": ["eventmind"],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "10s",
+  "time": { "from": "now-6h", "to": "now" },
+  "panels": [
+    {
+      "id": 1,
+      "type": "timeseries",
+      "title": "LLM-вызовы по провайдеру и исходу (RPS)",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
+      "targets": [
+        {
+          "expr": "sum(rate(eventmind_llm_requests_total[5m])) by (provider, status)",
+          "legendFormat": "{{provider}} / {{status}}"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "type": "timeseries",
+      "title": "LLM p95 латентность по провайдеру (сек)",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(eventmind_llm_request_duration_seconds_bucket[5m])) by (le, provider))",
+          "legendFormat": "{{provider}}"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "type": "timeseries",
+      "title": "Токены LLM (rate) по направлению",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
+      "targets": [
+        {
+          "expr": "sum(rate(eventmind_llm_tokens_total[5m])) by (provider, direction)",
+          "legendFormat": "{{provider}} / {{direction}}"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "type": "stat",
+      "title": "Доля ошибок LLM (15м)",
+      "gridPos": { "h": 8, "w": 6, "x": 12, "y": 8 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 0.2 },
+              { "color": "red", "value": 0.5 }
+            ]
+          }
+        }
+      },
+      "targets": [
+        {
+          "expr": "sum(rate(eventmind_llm_requests_total{status=\"error\"}[15m])) / clamp_min(sum(rate(eventmind_llm_requests_total[15m])), 1e-9)",
+          "legendFormat": "error rate"
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "type": "timeseries",
+      "title": "Доставки уведомлений по каналу/исходу (RPS)",
+      "gridPos": { "h": 8, "w": 6, "x": 18, "y": 8 },
+      "targets": [
+        {
+          "expr": "sum(rate(eventmind_notifications_delivered_total[5m])) by (channel, status)",
+          "legendFormat": "{{channel}} / {{status}}"
+        }
+      ]
+    }
+  ]
+}
