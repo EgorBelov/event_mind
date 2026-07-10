@@ -11,12 +11,11 @@ from logging.config import fileConfig
 from alembic import context
 from sqlalchemy.ext.asyncio import create_async_engine
 
+# Подхватываем все ORM-модели, чтобы их таблицы попали в Base.metadata
+# (для autogenerate/тестового create_all).
+import eventmind.infrastructure.db.models  # noqa: F401
 from eventmind.config import get_settings
 from eventmind.infrastructure.db.base import Base
-
-# Подхватываем все ORM-модели, чтобы их таблицы попали в Base.metadata
-# (для autogenerate). Пока моделей нет — импорт-пакет пустой, добавится с M1.
-# import eventmind.infrastructure.db.models
 
 config = context.config
 if config.config_file_name is not None:

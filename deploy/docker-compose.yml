@@ -70,6 +70,23 @@ services:
       timeout: 5s
       retries: 6
 
+  # arq-воркер: в M1 обрабатывает outbox (рассылка писем верификации/сброса).
+  worker:
+    build:
+      context: ../backend
+    command: ["arq", "eventmind.interfaces.worker.main.WorkerSettings"]
+    env_file:
+      - path: ../.env
+        required: false
+    environment:
+      DATABASE_URL: postgresql+asyncpg://eventmind:eventmind@postgres:5432/eventmind
+      REDIS_URL: redis://redis:6379/0
+    depends_on:
+      redis:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+
   web:
     build:
       context: ../web

@@ -1,6 +1,6 @@
 # EventMind v2 — архитектура
 
-> Живой документ. Обновляется на каждом milestone. Статус: **M0 (скелет + инфра)**.
+> Живой документ. Обновляется на каждом milestone. Статус: **M1 (аккаунты + auth + домен)**.
 
 EventMind собирает IT-события из внешних источников, нормализует их через LLM
 и рекомендует пользователям, доставляя выдачу по выбранным каналам. v2 —
@@ -98,18 +98,48 @@ Stateless: всё состояние — в Postgres/Redis, ни одного mo
 - **Отказоустойчивость рекомендера**: каждый скорер/источник/канал — за
   интерфейсом и в try/except; сбой одного не роняет выдачу (переносим из v1).
 
-## Что уже есть в M0
+## Что уже есть
 
-- Монорепо: `backend/` (uv, слои, config+validate, api-каркас, наблюдаемость,
-  Alembic async + первая миграция с `CREATE EXTENSION vector`), `web/` (Next.js
-  standalone-каркас), `legacy/` (весь v1 read-only), `deploy/` (compose:
-  pg+redis+api+web+prometheus+grafana+mailhog).
-- Зелёные проверки: ruff, mypy(strict), import-linter (границы слоёв), pytest
-  (unit + integration через testcontainers), сборка образов — в CI GitHub Actions.
+**M0** — монорепо: `backend/` (uv, слои, config+validate, api-каркас,
+наблюдаемость, Alembic async), `web/` (Next.js standalone), `legacy/` (v1
+read-only), `deploy/` (compose: pg+redis+api+web+worker+prometheus+grafana+mailhog).
+
+**M1** — account-центричное ядро:
+- Домен `accounts` (чистый): `User`/`UserChannel`/`NotificationPreference`/
+  `OneTimeToken`, VO (`Email`, `ChannelType`), доменные ошибки и события.
+- Порты: репозитории, `UnitOfWork`, `PasswordHasher`, `TokenService`,
+  `SecretTokenGenerator`, `EmailChannel`/`EmailRenderer`, `TaskQueue`, `Cache`, `OutboxStore`.
+- Use-case'ы: регистрация, верификация email, вход, сброс пароля, привязка
+  Telegram (deep-link токен + подтверждение ботом).
+- Инфра: async-SQLAlchemy-репозитории + `SqlAlchemyUnitOfWork` с **транзакционным
+  outbox**, argon2-хешер, JWT (httpOnly-cookie), SMTP-`EmailChannel`
+  (Mailhog/Yandex/Mail.ru) + Jinja2-рендер, arq-`TaskQueue`, Redis-`Cache`.
+- API `/api/v1/auth/*` (register/login/verify/reset/refresh/logout/me) и
+  `/api/v1/channels/telegram/*`; JWT-аутентификация + внутренний API-key.
+- arq-worker обрабатывает outbox → рассылка писем верификации/сброса.
+- Единая миграция схемы (users с `vector(384)`+HNSW, channels, preferences,
+  tokens, outbox). Seed демо-аккаунта.
+
+Зелёные проверки: ruff, mypy(strict), import-linter (границы слоёв), pytest
+(unit — домен/security/use-cases на фейках; integration — auth-flow, outbox+UoW,
+SMTP↔Mailhog, telegram-link через testcontainers), сборка образов — CI GitHub Actions.
+
+## Поток данных: регистрация (пример транзакционного outbox)
+
+```
+POST /register → RegisterUser use-case
+  └─ UnitOfWork (одна транзакция):
+       users.add + channels.add + preferences.add + tokens.add
+       add_event(UserRegistered{raw_token})  ──► строка в outbox
+       commit                                   (агрегаты + событие атомарно)
+  └─ TaskQueue.enqueue("process_outbox")  ──► Redis/arq
+worker: process_outbox → OutboxProcessor
+  └─ handler(user.registered) → EmailRenderer → EmailChannel(SMTP) → письмо
+```
 
 ## Дальше (roadmap)
 
-M1 аккаунты+auth+домен · M2 LLM Gateway+Embedding · M3 ingestion+worker ·
+M2 LLM Gateway+Embedding · M3 ingestion+worker ·
 M4 рекомендер (two-stage) · M5 мультиканальная доставка · M6 веб-клиент ·
 M7 Telegram-бот · M8 прод (k8s/Helm/HPA) + offline-eval. Детали — в
 `docs/REBUILD_PROMPT.md` (контракт) и плане каждого milestone.

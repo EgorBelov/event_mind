@@ -1,0 +1,46 @@
+"""Порты репозиториев (абстракции над персистентностью).
+
+Реализации — async-SQLAlchemy в `infrastructure`. Домен про ORM не знает.
+Репозитории привязаны к сессии/транзакции текущего `UnitOfWork`.
+"""
+from __future__ import annotations
+
+from typing import Protocol
+
+from eventmind.domain.accounts.entities import (
+    NotificationPreference,
+    OneTimeToken,
+    User,
+    UserChannel,
+)
+from eventmind.domain.accounts.value_objects import ChannelType
+
+
+class UserRepository(Protocol):
+    async def add(self, user: User) -> User: ...
+    async def get_by_id(self, user_id: int) -> User | None: ...
+    async def get_by_email(self, email: str) -> User | None: ...
+    async def update(self, user: User) -> None: ...
+
+
+class UserChannelRepository(Protocol):
+    async def add(self, channel: UserChannel) -> UserChannel: ...
+    async def get_by_user_and_type(
+        self, user_id: int, channel_type: ChannelType
+    ) -> UserChannel | None: ...
+    async def get_by_type_and_address(
+        self, channel_type: ChannelType, address: str
+    ) -> UserChannel | None: ...
+    async def update(self, channel: UserChannel) -> None: ...
+
+
+class NotificationPreferenceRepository(Protocol):
+    async def add(self, pref: NotificationPreference) -> NotificationPreference: ...
+    async def get_by_user(self, user_id: int) -> NotificationPreference | None: ...
+    async def update(self, pref: NotificationPreference) -> None: ...
+
+
+class TokenRepository(Protocol):
+    async def add(self, token: OneTimeToken) -> OneTimeToken: ...
+    async def get_by_hash(self, purpose: str, token_hash: str) -> OneTimeToken | None: ...
+    async def update(self, token: OneTimeToken) -> None: ...

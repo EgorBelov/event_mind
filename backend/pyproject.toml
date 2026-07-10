@@ -22,6 +22,14 @@ dependencies = [
     "arq>=0.26,<0.27",
     # --- http client (источники ingestion, внутренние вызовы) ---
     "httpx>=0.27,<0.28",
+    # --- auth / безопасность (M1) ---
+    "argon2-cffi>=23.1",          # хеширование паролей
+    "pyjwt>=2.9,<3",              # пользовательские JWT (access/refresh)
+    "email-validator>=2.2",       # pydantic EmailStr
+    "python-multipart>=0.0.9",    # OAuth2 password form
+    # --- email-канал (M1): async SMTP + шаблоны ---
+    "aiosmtplib>=3.0,<4",
+    "jinja2>=3.1",
     # --- observability ---
     "structlog>=24.1",
     "prometheus-client>=0.20",
@@ -64,6 +72,8 @@ ignore = [
 
 [tool.ruff.lint.per-file-ignores]
 "tests/*" = ["B008"]
+# Alembic-миграции: длинные строки описания колонок — идиоматично.
+"alembic/versions/*" = ["E501"]
 
 # ── mypy (strict) ─────────────────────────────────────────────────────────
 [tool.mypy]

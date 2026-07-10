@@ -15,12 +15,12 @@ from starlette.middleware.cors import CORSMiddleware
 
 from eventmind import __version__
 from eventmind.config import Settings, get_settings
-from eventmind.infrastructure.db.engine import create_engine, create_session_factory
 from eventmind.infrastructure.logging import configure_logging
-from eventmind.infrastructure.redis import create_redis
 from eventmind.infrastructure.telemetry.tracing import setup_tracing
+from eventmind.interfaces.api.container import build_container
+from eventmind.interfaces.api.errors import install_error_handlers
 from eventmind.interfaces.api.middleware import RequestContextMiddleware
-from eventmind.interfaces.api.routers import health, v1
+from eventmind.interfaces.api.routers import auth, channels, health, v1
 
 _logger = structlog.get_logger("eventmind.api")
 
@@ -31,17 +31,16 @@ Lifespan = Callable[[FastAPI], AbstractAsyncContextManager[None]]
 def _build_lifespan(settings: Settings) -> Lifespan:
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-        engine = create_engine(settings)
-        redis = create_redis(settings)
-        app.state.engine = engine
-        app.state.session_factory = create_session_factory(engine)
-        app.state.redis = redis
+        container = build_container(settings)
+        app.state.container = container
+        # engine/redis наружу для health-роутера (readiness-пинги).
+        app.state.engine = container.engine
+        app.state.redis = container.redis
         _logger.info("api_startup", environment=settings.environment, version=__version__)
         try:
             yield
         finally:
-            await redis.aclose()
-            await engine.dispose()
+            await container.aclose()
             _logger.info("api_shutdown")
 
     return lifespan
@@ -68,8 +67,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         allow_headers=["*"],
     )
 
+    install_error_handlers(app)
     app.include_router(health.router)
     app.include_router(v1.router)
+    app.include_router(auth.router)
+    app.include_router(channels.router)
 
     setup_tracing(app, settings)
     return app

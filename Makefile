@@ -54,8 +54,8 @@ migrate: ## Применить миграции к БД (alembic upgrade head)
 revision: ## Создать миграцию: make revision m="описание"
 	cd $(BACKEND) && uv run alembic revision -m "$(m)"
 
-seed: ## Наполнить БД демо-данными (появится в M1)
-	@echo "seed: будет реализован в M1"
+seed: ## Наполнить БД демо-аккаунтом (идемпотентно)
+	cd $(BACKEND) && uv run python -m eventmind.interfaces.cli.seed
 
 eval: ## Offline-eval рекомендера (появится в M8)
 	@echo "eval: будет реализован в M8"
