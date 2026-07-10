@@ -16,6 +16,10 @@ from eventmind.application.ingestion.config import IngestionConfig
 from eventmind.application.ingestion.normalizer import EventNormalizer
 from eventmind.application.ports.embedding import EmbeddingProvider
 from eventmind.application.ports.events import EventsUnitOfWork
+from eventmind.application.ports.notifications import (
+    NotificationChannel,
+    NotificationsUnitOfWork,
+)
 from eventmind.application.ports.recommender import RecommendationUnitOfWork
 from eventmind.application.ports.security import (
     Clock,
@@ -28,14 +32,17 @@ from eventmind.application.ports.uow import UnitOfWork
 from eventmind.application.recommender.config import RecommenderConfig
 from eventmind.application.recommender.ranker import HybridRanker
 from eventmind.config import Settings
+from eventmind.domain.accounts.value_objects import ChannelType
 from eventmind.infrastructure.cache.redis_cache import RedisCache
 from eventmind.infrastructure.db.engine import create_engine, create_session_factory
 from eventmind.infrastructure.db.events_uow import SqlAlchemyEventsUnitOfWork
+from eventmind.infrastructure.db.notifications import SqlAlchemyNotificationsUnitOfWork
 from eventmind.infrastructure.db.recommendation import SqlAlchemyRecommendationUnitOfWork
 from eventmind.infrastructure.db.uow import SqlAlchemyUnitOfWork
 from eventmind.infrastructure.embedding.minilm import SentenceTransformerEmbeddingProvider
 from eventmind.infrastructure.llm.chain import LLMChain
 from eventmind.infrastructure.llm.providers import create_llm_chain
+from eventmind.infrastructure.notifications.registry import build_notification_channels
 from eventmind.infrastructure.queue.arq_queue import ArqTaskQueue
 from eventmind.infrastructure.recommender.candidate_generator import PgvectorCandidateGenerator
 from eventmind.infrastructure.redis import RedisClient, create_redis
@@ -71,6 +78,7 @@ class Container:
     candidate_generator: PgvectorCandidateGenerator
     ranker: HybridRanker
     recommender_config: RecommenderConfig
+    notification_channels: dict[ChannelType, NotificationChannel]
 
     def uow_factory(self) -> UnitOfWork:
         return SqlAlchemyUnitOfWork(self.session_factory)
@@ -80,6 +88,9 @@ class Container:
 
     def recommendation_uow_factory(self) -> RecommendationUnitOfWork:
         return SqlAlchemyRecommendationUnitOfWork(self.session_factory)
+
+    def notifications_uow_factory(self) -> NotificationsUnitOfWork:
+        return SqlAlchemyNotificationsUnitOfWork(self.session_factory)
 
     async def aclose(self) -> None:
         await self.task_queue.aclose()
@@ -131,4 +142,5 @@ def build_container(settings: Settings) -> Container:
             result_limit=settings.reco_result_limit,
             cache_ttl_seconds=settings.reco_cache_ttl_seconds,
         ),
+        notification_channels=build_notification_channels(settings),
     )

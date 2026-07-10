@@ -85,3 +85,17 @@ class RecommendationResponse(BaseModel):
 class InteractionRequest(BaseModel):
     event_id: int
     action: str = Field(pattern="^(like|dislike|save|view)$")
+
+
+class NotificationResponse(BaseModel):
+    id: int
+    type: str
+    title: str
+    body: str
+    payload: dict[str, object]
+    read: bool
+
+
+class InboxResponse(BaseModel):
+    unread: int
+    items: list[NotificationResponse]

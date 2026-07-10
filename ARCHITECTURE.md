@@ -1,6 +1,6 @@
 # EventMind v2 — архитектура
 
-> Живой документ. Обновляется на каждом milestone. Статус: **M4 (Рекомендер)**.
+> Живой документ. Обновляется на каждом milestone. Статус: **M5 (Мультиканальная доставка)**.
 
 EventMind собирает IT-события из внешних источников, нормализует их через LLM
 и рекомендует пользователям, доставляя выдачу по выбранным каналам. v2 —
@@ -164,11 +164,26 @@ read-only), `deploy/` (compose: pg+redis+api+web+worker+prometheus+grafana+mailh
   skill_gap/bandit(LinUCB)/gnn(LightGCN) — веса определены, включаются флагами
   позже (gnn выключен и в v1 на малом датасете).
 
-Зелёные проверки: ruff, mypy(strict, 111 файлов), import-linter (границы слоёв),
-pytest (unit — домен/security/use-cases/LLM/embedding/ingestion/**вся математика
-рекомендера + HybridRanker** на фейках; integration — auth, outbox+UoW,
-SMTP↔Mailhog, telegram, ingestion, **recommendations+feedback** через
-testcontainers), сборка образов — CI.
+**M5** — Мультиканальная доставка:
+- Порт `NotificationChannel` (одна абстракция, рендер под канал) + реализации
+  **email** (SMTP+HTML), **telegram** (Bot API sendMessage, порт из v1), **in-app**
+  (пишется в инбокс напрямую). Реестр каналов; выбор — по `NotificationPreference`
+  + верификации (анти-абьюз).
+- `SendUserDigest`: тот же ранкинг M4 → `NotificationMessage` → доставка по
+  включённым+verified каналам (гейтинг prefs, тихие часы, сбой канала изолирован),
+  запись in-app инбокса в транзакции, внешние каналы — вне транзакции.
+- `ScheduleDigests`: **scheduler→queue** через arq **cron** (09:00 UTC; daily +
+  weekly по понедельникам). arq дедуплицирует cron между воркерами.
+- In-app инбокс: `GET /api/v1/notifications` + `POST /{id}/read` (JWT);
+  **unsubscribe** — `GET /api/v1/notifications/unsubscribe?token=` (подписанный
+  JWT-purpose-токен из письма → выключает email-дайджест). Миграция 0005.
+- Метрики доставки по каналу/исходу (в адаптерах каналов).
+
+Зелёные проверки: ruff, mypy(strict, 123 файла), import-linter (границы слоёв),
+pytest (unit — домен/security/use-cases/LLM/embedding/ingestion/рекомендер/
+**дайджест+гейтинг каналов+тихие часы+unsubscribe** на фейках; integration —
+auth, outbox+UoW, SMTP↔Mailhog, telegram, ingestion, recommendations+feedback,
+**inbox+unsubscribe+send-digest** через testcontainers), сборка образов — CI.
 
 ## Поток данных: регистрация (пример транзакционного outbox)
 
@@ -185,6 +200,6 @@ worker: process_outbox → OutboxProcessor
 
 ## Дальше (roadmap)
 
-M5 мультиканальная доставка · M6 веб-клиент ·
+M6 веб-клиент ·
 M7 Telegram-бот · M8 прод (k8s/Helm/HPA) + offline-eval. Детали — в
 `docs/REBUILD_PROMPT.md` (контракт) и плане каждого milestone.

@@ -26,6 +26,7 @@ from eventmind.interfaces.api.routers import (
     channels,
     health,
     ingestion,
+    notifications,
     recommendations,
     v1,
 )
@@ -83,6 +84,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(admin.router)
     app.include_router(ingestion.router)
     app.include_router(recommendations.router)
+    app.include_router(notifications.router)
 
     setup_tracing(app, settings)
     return app

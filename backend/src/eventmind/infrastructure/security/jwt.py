@@ -43,6 +43,9 @@ class JwtTokenService:
     def create_refresh_token(self, subject: str) -> str:
         return self._encode(subject, "refresh", self._refresh_ttl, {})
 
+    def create_purpose_token(self, subject: str, purpose: str, *, ttl_seconds: int) -> str:
+        return self._encode(subject, purpose, ttl_seconds, {})
+
     def decode(self, token: str) -> dict[str, object]:
         # Бросает jwt.ExpiredSignatureError / jwt.InvalidTokenError — ловит интерфейс.
         return jwt.decode(token, self._secret, algorithms=[self._alg])

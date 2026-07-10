@@ -29,6 +29,11 @@ from eventmind.application.ingestion.use_cases import (
     LoadSource,
     NormalizeRawEvents,
 )
+from eventmind.application.notifications.use_cases import (
+    ListInbox,
+    MarkNotificationRead,
+    Unsubscribe,
+)
 from eventmind.application.recommender.use_cases import (
     GetRecommendations,
     RecordInteraction,
@@ -138,6 +143,19 @@ def get_recommendations_uc(container: ContainerDep) -> GetRecommendations:
 
 def get_record_interaction_uc(container: ContainerDep) -> RecordInteraction:
     return RecordInteraction(container.recommendation_uow_factory, container.cache)
+
+
+# ── уведомления (M5) ─────────────────────────────────────────────────────────
+def get_list_inbox(container: ContainerDep) -> ListInbox:
+    return ListInbox(container.notifications_uow_factory)
+
+
+def get_mark_read(container: ContainerDep) -> MarkNotificationRead:
+    return MarkNotificationRead(container.notifications_uow_factory)
+
+
+def get_unsubscribe(container: ContainerDep) -> Unsubscribe:
+    return Unsubscribe(container.notifications_uow_factory, container.token_service)
 
 
 # ── аутентификация пользователя (JWT) ────────────────────────────────────────

@@ -45,6 +45,13 @@ LLM_REQUEST_DURATION_SECONDS = Histogram(
     buckets=(0.1, 0.25, 0.5, 1.0, 2.0, 5.0, 10.0, 20.0, 45.0),
 )
 
+# ── доставка уведомлений (M5) ─────────────────────────────────────────────────
+NOTIFICATIONS_DELIVERED_TOTAL = Counter(
+    "eventmind_notifications_delivered_total",
+    "Доставки уведомлений по каналу и исходу",
+    labelnames=("channel", "status"),  # status: success|error
+)
+
 
 def render_metrics() -> tuple[bytes, str]:
     """Отрендерить текущий срез метрик для эндпоинта `/metrics`."""

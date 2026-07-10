@@ -67,8 +67,11 @@ Makefile   — up/test/lint/typecheck/imports/migrate/seed/...
   online-обучение (RecordInteraction → Bayesian+прогрев эмбеддинга+инвалидация),
   read-only `GET /api/v1/recommendations` (кэш) + `POST /api/v1/interactions`,
   миграция 0004. Скореры skill_gap/bandit/gnn — заделы под флагами. 103 unit-теста.
-- [ ] **M5** — мультиканальная доставка (NotificationChannel email/telegram/in-app),
-  дайджест scheduler→queue→рассылка, инбокс, unsubscribe.
+- [x] **M5** — мультиканальная доставка: порт NotificationChannel + email(SMTP)/
+  telegram(Bot API)/in-app, реестр; SendUserDigest (ранкинг M4→message→доставка
+  по включённым+verified каналам, гейтинг prefs/тихие часы), ScheduleDigests
+  (arq cron→queue), инбокс `GET/POST /api/v1/notifications`, unsubscribe по
+  JWT-токену, миграция 0005. 116 unit-тестов.
 - [ ] **M6** — веб-клиент Next.js (лента/профиль/NL-поиск/карточка/каналы) + Google OAuth.
 - [ ] **M7** — Telegram-бот (aiogram) поверх API: привязка аккаунта, лента, feedback.
 - [ ] **M8** — прод: k8s/Helm+HPA, дашборды/алерты, load-test, offline-eval + ablations.
