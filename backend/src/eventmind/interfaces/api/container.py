@@ -16,6 +16,7 @@ from eventmind.application.ingestion.config import IngestionConfig
 from eventmind.application.ingestion.normalizer import EventNormalizer
 from eventmind.application.ports.embedding import EmbeddingProvider
 from eventmind.application.ports.events import EventsUnitOfWork
+from eventmind.application.ports.recommender import RecommendationUnitOfWork
 from eventmind.application.ports.security import (
     Clock,
     PasswordHasher,
@@ -24,14 +25,19 @@ from eventmind.application.ports.security import (
 )
 from eventmind.application.ports.sources import EventSource
 from eventmind.application.ports.uow import UnitOfWork
+from eventmind.application.recommender.config import RecommenderConfig
+from eventmind.application.recommender.ranker import HybridRanker
 from eventmind.config import Settings
+from eventmind.infrastructure.cache.redis_cache import RedisCache
 from eventmind.infrastructure.db.engine import create_engine, create_session_factory
 from eventmind.infrastructure.db.events_uow import SqlAlchemyEventsUnitOfWork
+from eventmind.infrastructure.db.recommendation import SqlAlchemyRecommendationUnitOfWork
 from eventmind.infrastructure.db.uow import SqlAlchemyUnitOfWork
 from eventmind.infrastructure.embedding.minilm import SentenceTransformerEmbeddingProvider
 from eventmind.infrastructure.llm.chain import LLMChain
 from eventmind.infrastructure.llm.providers import create_llm_chain
 from eventmind.infrastructure.queue.arq_queue import ArqTaskQueue
+from eventmind.infrastructure.recommender.candidate_generator import PgvectorCandidateGenerator
 from eventmind.infrastructure.redis import RedisClient, create_redis
 from eventmind.infrastructure.security.jwt import JwtTokenService
 from eventmind.infrastructure.security.password import Argon2PasswordHasher
@@ -61,12 +67,19 @@ class Container:
     sources: dict[str, EventSource]
     normalizer: EventNormalizer
     ingestion_config: IngestionConfig
+    cache: RedisCache
+    candidate_generator: PgvectorCandidateGenerator
+    ranker: HybridRanker
+    recommender_config: RecommenderConfig
 
     def uow_factory(self) -> UnitOfWork:
         return SqlAlchemyUnitOfWork(self.session_factory)
 
     def events_uow_factory(self) -> EventsUnitOfWork:
         return SqlAlchemyEventsUnitOfWork(self.session_factory)
+
+    def recommendation_uow_factory(self) -> RecommendationUnitOfWork:
+        return SqlAlchemyRecommendationUnitOfWork(self.session_factory)
 
     async def aclose(self) -> None:
         await self.task_queue.aclose()
@@ -109,5 +122,13 @@ def build_container(settings: Settings) -> Container:
         ingestion_config=IngestionConfig(
             normalize_batch_size=settings.normalize_batch_size,
             max_normalize_retries=settings.max_normalize_retries,
+        ),
+        cache=RedisCache(redis),
+        candidate_generator=PgvectorCandidateGenerator(session_factory),
+        ranker=HybridRanker(),
+        recommender_config=RecommenderConfig(
+            candidate_limit=settings.reco_candidate_limit,
+            result_limit=settings.reco_result_limit,
+            cache_ttl_seconds=settings.reco_cache_ttl_seconds,
         ),
     )

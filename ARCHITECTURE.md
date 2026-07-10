@@ -1,6 +1,6 @@
 # EventMind v2 — архитектура
 
-> Живой документ. Обновляется на каждом milestone. Статус: **M3 (Ingestion pipeline)**.
+> Живой документ. Обновляется на каждом milestone. Статус: **M4 (Рекомендер)**.
 
 EventMind собирает IT-события из внешних источников, нормализует их через LLM
 и рекомендует пользователям, доставляя выдачу по выбранным каналам. v2 —
@@ -146,10 +146,29 @@ read-only), `deploy/` (compose: pg+redis+api+web+worker+prometheus+grafana+mailh
   (внутренний API-key) + arq-задачи `ingest_source`/`normalize_raw_events`.
 - Миграция 0003 (events+vector(384)+HNSW, raw_events, topics, event_topics).
 
-Зелёные проверки: ruff, mypy(strict), import-linter (границы слоёв), pytest
-(unit — домен/security/use-cases/LLM/embedding/таксономия/series/нормализатор/
-парсеры на фейках; integration — auth-flow, outbox+UoW, SMTP↔Mailhog,
-telegram-link, ingestion-пайплайн через testcontainers), сборка образов — CI.
+**M4** — Рекомендер (two-stage, научное ядро):
+- Чистая математика в `domain/recommender` (портирована из v1, детерминизм
+  через инъекцию rng/now): cosine, freshness (half-life decay), rule-score,
+  bayesian (Beta + Thompson + temporal-decay), MMR-rerank, series anti-flood,
+  веса `ScoringWeights`.
+- **Two-stage**: `PgvectorCandidateGenerator` (kNN `embedding <=> user_emb` на
+  HNSW + upcoming-фильтр, cold-start по quality) → `HybridRanker` (взвешенная
+  сумма rule/cosine/bayesian/quality/hype/freshness, каждый компонент в
+  try/except) → MMR + анти-флуд серий.
+- **Online-обучение**: `RecordInteraction` (like/dislike/save) обновляет
+  Bayesian-статы, прогревает `user.embedding` (среднее понравившихся) и
+  инвалидирует кэш.
+- **Read-only hot-path**: `GET /api/v1/recommendations` (JWT) отдаёт из
+  Redis-кэша (TTL 15 мин); `POST /api/v1/interactions` учит и сбрасывает кэш.
+- Миграция 0004 (interactions, user_topic_stats, user prefs). Скореры-заделы
+  skill_gap/bandit(LinUCB)/gnn(LightGCN) — веса определены, включаются флагами
+  позже (gnn выключен и в v1 на малом датасете).
+
+Зелёные проверки: ruff, mypy(strict, 111 файлов), import-linter (границы слоёв),
+pytest (unit — домен/security/use-cases/LLM/embedding/ingestion/**вся математика
+рекомендера + HybridRanker** на фейках; integration — auth, outbox+UoW,
+SMTP↔Mailhog, telegram, ingestion, **recommendations+feedback** через
+testcontainers), сборка образов — CI.
 
 ## Поток данных: регистрация (пример транзакционного outbox)
 
@@ -166,6 +185,6 @@ worker: process_outbox → OutboxProcessor
 
 ## Дальше (roadmap)
 
-M4 рекомендер (two-stage) · M5 мультиканальная доставка · M6 веб-клиент ·
+M5 мультиканальная доставка · M6 веб-клиент ·
 M7 Telegram-бот · M8 прод (k8s/Helm/HPA) + offline-eval. Детали — в
 `docs/REBUILD_PROMPT.md` (контракт) и плане каждого milestone.

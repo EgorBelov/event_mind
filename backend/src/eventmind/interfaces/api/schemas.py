@@ -67,3 +67,21 @@ class TelegramLinkTokenResponse(BaseModel):
 class TelegramConfirmRequest(BaseModel):
     token: str = Field(min_length=1)
     chat_id: str = Field(min_length=1, max_length=64)
+
+
+class RecommendationResponse(BaseModel):
+    event_id: int
+    title: str
+    description: str
+    date: str
+    city: str
+    format: str
+    event_type: str | None
+    source_url: str | None
+    score: float
+    topics: list[str]
+
+
+class InteractionRequest(BaseModel):
+    event_id: int
+    action: str = Field(pattern="^(like|dislike|save|view)$")

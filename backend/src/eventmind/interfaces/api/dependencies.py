@@ -29,7 +29,12 @@ from eventmind.application.ingestion.use_cases import (
     LoadSource,
     NormalizeRawEvents,
 )
+from eventmind.application.recommender.use_cases import (
+    GetRecommendations,
+    RecordInteraction,
+)
 from eventmind.domain.accounts.entities import User
+from eventmind.domain.recommender.weights import ScoringWeights
 from eventmind.interfaces.api.container import Container
 from eventmind.interfaces.api.errors import ApiError
 
@@ -116,6 +121,23 @@ def get_normalize_raw_events(container: ContainerDep) -> NormalizeRawEvents:
 
 def get_ingestion_status(container: ContainerDep) -> GetIngestionStatus:
     return GetIngestionStatus(container.events_uow_factory)
+
+
+# ── рекомендер (M4) ──────────────────────────────────────────────────────────
+def get_recommendations_uc(container: ContainerDep) -> GetRecommendations:
+    return GetRecommendations(
+        container.recommendation_uow_factory,
+        container.candidate_generator,
+        container.ranker,
+        container.cache,
+        container.clock,
+        container.recommender_config,
+        ScoringWeights(),
+    )
+
+
+def get_record_interaction_uc(container: ContainerDep) -> RecordInteraction:
+    return RecordInteraction(container.recommendation_uow_factory, container.cache)
 
 
 # ── аутентификация пользователя (JWT) ────────────────────────────────────────

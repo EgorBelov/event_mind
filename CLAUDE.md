@@ -61,8 +61,12 @@ Makefile   — up/test/lint/typecheck/imports/migrate/seed/...
   пост-обработка/фильтры из v1), пайплайн source→raw_events→events с
   идемпотентностью/ретраями/DLQ, arq-задачи ingest_source/normalize_raw_events,
   API /api/v1/ingestion/*, миграция 0003 (events+vector+HNSW). 90 unit-тестов.
-- [ ] **M4** — рекомендер two-stage (CandidateGenerator+Scorers+MMR/anti-flood),
-  read-only `/api/v1/recommendations`, кэш. Математика из `legacy/app/recommender/*`.
+- [x] **M4** — рекомендер two-stage: чистая математика в domain/recommender
+  (cosine/freshness/rule/bayesian-Thompson+decay/MMR/series anti-flood, порт из
+  v1), PgvectorCandidateGenerator (kNN+upcoming, cold-start), HybridRanker,
+  online-обучение (RecordInteraction → Bayesian+прогрев эмбеддинга+инвалидация),
+  read-only `GET /api/v1/recommendations` (кэш) + `POST /api/v1/interactions`,
+  миграция 0004. Скореры skill_gap/bandit/gnn — заделы под флагами. 103 unit-теста.
 - [ ] **M5** — мультиканальная доставка (NotificationChannel email/telegram/in-app),
   дайджест scheduler→queue→рассылка, инбокс, unsubscribe.
 - [ ] **M6** — веб-клиент Next.js (лента/профиль/NL-поиск/карточка/каналы) + Google OAuth.

@@ -85,6 +85,11 @@ class Settings(BaseSettings):
     normalize_batch_size: int = 20
     max_normalize_retries: int = 3
 
+    # ── рекомендер (M4) ──────────────────────────────────────────────────
+    reco_candidate_limit: int = 100
+    reco_result_limit: int = 20
+    reco_cache_ttl_seconds: int = 900
+
     # ── email-канал (M1/M5): dev→Mailhog, prod→Yandex/Mail.ru SMTP ───────
     smtp_host: str = "mailhog"
     smtp_port: int = 1025

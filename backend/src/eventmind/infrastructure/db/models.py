@@ -13,6 +13,7 @@ from sqlalchemy import (
     BigInteger,
     Boolean,
     DateTime,
+    Float,
     ForeignKey,
     Integer,
     String,
@@ -39,6 +40,9 @@ class UserModel(Base):
     # Задел под соц-логин (Google) — включается в M6.
     oauth_provider: Mapped[str | None] = mapped_column(String(32), nullable=True)
     oauth_sub: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    # Предпочтения для rule-скоринга (наполняются в вебе, M6). nullable.
+    city: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    preferred_format: Mapped[str | None] = mapped_column(String(16), nullable=True)
     # pgvector: эмбеддинг интересов пользователя (HNSW-индекс — в миграции).
     embedding: Mapped[list[float] | None] = mapped_column(Vector(EMBEDDING_DIM), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
@@ -196,6 +200,43 @@ class RawEventModel(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
+    )
+
+
+# ── рекомендер (M4) ──────────────────────────────────────────────────────────
+class InteractionModel(Base):
+    __tablename__ = "interactions"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    event_id: Mapped[int] = mapped_column(
+        ForeignKey("events.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    action: Mapped[str] = mapped_column(String(16), nullable=False)  # like/dislike/save/view
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+
+class UserTopicStatModel(Base):
+    __tablename__ = "user_topic_stats"
+    __table_args__ = (
+        UniqueConstraint("user_id", "topic_id", name="uq_user_topic_stat"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    topic_id: Mapped[int] = mapped_column(
+        ForeignKey("topics.id", ondelete="CASCADE"), nullable=False
+    )
+    alpha: Mapped[float] = mapped_column(Float, nullable=False, default=1.0)
+    beta: Mapped[float] = mapped_column(Float, nullable=False, default=1.0)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
     )
