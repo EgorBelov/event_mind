@@ -3,6 +3,80 @@
 Этот файл автоматически загружается в контекст каждой новой сессии. Цель —
 дать AI-ассистенту быстро войти в курс дела без переспрашивания базовых вещей.
 
+---
+
+# ⚠️ ИДЁТ ПЕРЕСТРОЙКА В v2 — читать первым
+
+Проект **перестраивается с нуля в v2** по контракту `docs/REBUILD_PROMPT.md`
+(production-grade, account-центричная, мультиканальная система; гексагональная
+архитектура; async сверху донизу). **Вся эта заметка ниже описывает v1**, код
+которого теперь лежит в **`legacy/`** как read-only справочник — оттуда
+портируется доменная логика (математика рекомендера, LLM-промпты, парсеры
+источников, канонизация, фильтры, eval). Архитектура v1 НЕ наследуется.
+
+## Как продолжить работу (в т.ч. в новой холодной сессии)
+
+Просто скажи **«продолжай»** — ассистент должен:
+1. Прочитать `docs/REBUILD_PROMPT.md` (контракт) и этот трекер.
+2. Посмотреть статус milestone'ов ниже + `ARCHITECTURE.md` (актуальный статус).
+3. Взять следующий незакрытый milestone, детализировать план и выполнять его
+   по образцу предыдущих: рабочий `docker compose up`, зелёные тесты
+   (unit+integration), обновлённые доки, **отдельный коммит на milestone**.
+
+Рабочая ветка разработки: та, что указана в системных инструкциях сессии
+(исторически `claude/rebuild-prompt-docs-2bqhvw`; после переноса — `main`).
+
+## Монорепо v2 (структура)
+
+```
+backend/   — Python 3.12, uv, гексагон: src/eventmind/{domain,application,infrastructure,interfaces}
+web/       — Next.js (App Router, standalone) — каркас, наполнение в M6
+deploy/    — docker-compose (pg+redis+api+web+worker+prometheus+grafana+mailhog), prometheus/grafana
+legacy/    — весь v1 (read-only справочник для портирования)
+docs/REBUILD_PROMPT.md — контракт перестройки
+ARCHITECTURE.md — живой документ (слои, процессы, обоснования, статус)
+Makefile   — up/test/lint/typecheck/imports/migrate/seed/...
+```
+
+Проверки backend: `cd backend && uv sync --extra dev`, затем
+`uv run ruff check .`, `uv run mypy src`, `uv run lint-imports`,
+`uv run pytest tests/unit` (integration требуют Docker → идут в CI).
+
+## Статус milestone'ов
+
+- [x] **M0** — скелет + инфра: слои, config+validate(78), api-каркас
+  (/health,/ready,/api/v1,/metrics), structlog+OTel, Alembic async +
+  миграция pgvector, web-каркас, compose, CI, ARCHITECTURE.md.
+- [x] **M1** — аккаунты+auth+домен: домен `accounts`, порты+use-cases,
+  async-репозитории + UnitOfWork с **транзакционным outbox**, argon2, JWT
+  (httpOnly-cookie), SMTP EmailChannel (Mailhog/Yandex/Mail.ru), arq-worker
+  (process_outbox), API `/api/v1/auth/*` и `/api/v1/channels/telegram/*`,
+  единая миграция схемы (users+vector(384)+HNSW), seed. 47 unit-тестов.
+- [ ] **M2** — LLM Gateway (Gemini→Groq70b→Groq8b, breaker/cooldown/
+  structured-output) + EmbeddingProvider (MiniLM-384). Порт из
+  `legacy/app/agents/recommendation/llm.py`.
+- [ ] **M3** — ingestion: EventSource-реестр (habr+rss+kudago), arq-worker
+  LLM-нормализации, идемпотентность/ретраи/DLQ. Порт из `legacy/app/ingestion/*`.
+- [ ] **M4** — рекомендер two-stage (CandidateGenerator+Scorers+MMR/anti-flood),
+  read-only `/api/v1/recommendations`, кэш. Математика из `legacy/app/recommender/*`.
+- [ ] **M5** — мультиканальная доставка (NotificationChannel email/telegram/in-app),
+  дайджест scheduler→queue→рассылка, инбокс, unsubscribe.
+- [ ] **M6** — веб-клиент Next.js (лента/профиль/NL-поиск/карточка/каналы) + Google OAuth.
+- [ ] **M7** — Telegram-бот (aiogram) поверх API: привязка аккаунта, лента, feedback.
+- [ ] **M8** — прод: k8s/Helm+HPA, дашборды/алерты, load-test, offline-eval + ablations.
+
+## Зафиксированные решения v2
+
+Монорепо · очередь **arq** · зависимости **uv** · auth email+пароль (Google
+OAuth в M6) · email через **SMTP** (Mailhog dev / Yandex+Mail.ru prod,
+API-адаптер Resend позже) · первые источники ingestion **habr+rss+kudago**.
+
+---
+
+> Ниже — оригинальная заметка про **v1** (теперь в `legacy/`). Актуальна как
+> справочник по доменной логике, которую портируем в v2, но не как описание
+> текущей архитектуры.
+
 ## Что это за проект
 
 EventMind — система агрегации IT-мероприятий и персонализированных
