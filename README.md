@@ -275,6 +275,9 @@ cp .env.example .env      # опц.: GOOGLE_API_KEY/GROQ_API_KEY, BOT_TOKEN, SMT
 make up                   # pg + redis + api + web + worker + prometheus + grafana + mailhog
 ```
 
+> 📖 **Пошаговый гайд** (что вписать в `.env`, откуда взять ключи, порядок
+> запуска, режим hot-reload, траблшутинг) — [`docs/LOCAL_SETUP.md`](docs/LOCAL_SETUP.md).
+
 | Сервис | URL |
 |---|---|
 | API (health) | http://localhost:8000/health |
