@@ -101,8 +101,9 @@ Stateless: всё состояние — в Postgres/Redis, ни одного mo
 ## Что уже есть
 
 **M0** — монорепо: `backend/` (uv, слои, config+validate, api-каркас,
-наблюдаемость, Alembic async), `web/` (Next.js standalone), `legacy/` (v1
-read-only), `deploy/` (compose: pg+redis+api+web+worker+prometheus+grafana+mailhog).
+наблюдаемость, Alembic async), `web/` (Next.js standalone), `deploy/` (compose:
+pg+redis+api+web+worker+prometheus+grafana+mailhog). Код v1 — в ветке `v1-main`
+(read-only справочник, из которого портирована доменная логика).
 
 **M1** — account-центричное ядро:
 - Домен `accounts` (чистый): `User`/`UserChannel`/`NotificationPreference`/
