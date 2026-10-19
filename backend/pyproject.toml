@@ -56,6 +56,8 @@ dependencies = [
 # импортирует sentence-transformers лениво; ставится через `uv sync --extra ml`.
 ml = [
     "sentence-transformers>=2.7,<3",
+    # Явно — чтобы на Linux сработал CPU-индекс из [tool.uv.sources] (ниже).
+    "torch>=2.2",
 ]
 # Telegram-бот (M7): вторичный клиент, отдельным процессом/образом. aiogram —
 # только для процесса bot; ставится через `uv sync --extra bot`.
@@ -72,6 +74,17 @@ dev = [
     # aiogram в dev — чтобы mypy видел bot-слой и unit-тесты бота импортировались.
     "aiogram>=3.13,<4",
 ]
+
+# torch для Linux (Docker-образ, CI) — CPU-сборка из индекса PyTorch: колесо из
+# PyPI для Linux x86_64 собрано с CUDA и тянет гигабайты nvidia-библиотек.
+# Windows/macOS берут torch из PyPI (там он и так CPU/MPS).
+[tool.uv.sources]
+torch = [{ index = "pytorch-cpu", marker = "sys_platform == 'linux'" }]
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
 
 [build-system]
 requires = ["hatchling"]

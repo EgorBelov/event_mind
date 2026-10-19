@@ -15,8 +15,8 @@ Claude Code**, который проходит те же шаги сам.
 
 | Режим | Что где работает | Когда нужен |
 |---|---|---|
-| **A. Всё в Docker** (основной) | Postgres, Redis, Mailhog, миграции, api, worker, web, Prometheus, Grafana, бот — в контейнерах | Обычный запуск и демонстрация. На хосте нужны только Git и Docker Desktop |
-| **B. Backend на хосте** | Инфраструктура (Postgres, Redis, Mailhog) — в Docker; api и worker — на хосте через `uv`; web — `npm run dev` | Тесты, offline-eval, отладка. **И пока не сделан P0 №1** — для эмбеддингов: в Docker-образ ML-зависимости ещё не ставятся, поэтому в режиме A у событий нет векторов и cosine-компонента рекомендера равна 0 |
+| **A. Всё в Docker** (основной) | Postgres, Redis, Mailhog, миграции, api, worker, web, Prometheus, Grafana, бот — в контейнерах; эмбеддинги (torch CPU + MiniLM) — внутри образа | Обычный запуск и демонстрация. На хосте нужны только Git и Docker Desktop |
+| **B. Backend на хосте** | Инфраструктура (Postgres, Redis, Mailhog) — в Docker; api и worker — на хосте через `uv`; web — `npm run dev` | Тесты, offline-eval, отладка с `--reload` |
 
 ---
 
@@ -124,7 +124,7 @@ uv run --no-project python -c "import secrets; print(secrets.token_hex(32))"
 function dc { docker compose -f deploy/docker-compose.yml @args }
 ```
 
-Запуск (первый раз — сборка образов, 5–15 минут):
+Запуск (первый раз — сборка образов, 10–25 минут: в образ ставится torch CPU):
 
 ```powershell
 dc up --build -d
@@ -193,7 +193,9 @@ Invoke-RestMethod -Uri "$api/status" -Headers $h
 dc exec postgres psql -U eventmind -c "SELECT count(*) AS events, count(embedding) AS with_embedding FROM events;"
 ```
 
-В режиме A сейчас `with_embedding = 0` — это ожидаемо, см. «Два режима».
+`with_embedding` должен совпадать с `events`. Первая нормализация после
+чистого запуска дольше: скачивается модель эмбеддингов (~470 МБ) в том
+`hf-cache`, дальше она берётся из кэша.
 
 **Состояние LLM-цепочки** (какие звенья включены, cooldown):
 
@@ -261,8 +263,8 @@ $env:API_BASE_URL = "http://localhost:8000"
 npm run dev            # http://localhost:3000
 ```
 
-Дальше — п. 5 (загрузка и нормализация теми же запросами): теперь
-нормализация идёт в API на хосте, и `with_embedding` растёт вместе с `events`.
+Дальше — п. 5 (загрузка и нормализация теми же запросами), нормализация идёт в
+API на хосте.
 
 ---
 
@@ -334,9 +336,10 @@ dc up --build -d # пересобрать после изменений кода
 | `docker: error during connect` / нет Server в `docker version` | Docker Desktop не запущен или ещё стартует — дождаться **Engine running** |
 | Docker требует виртуализацию / WSL | Включить VT-x / AMD-V в BIOS; обновить WSL: `wsl --update` |
 | Порт занят (`8000`, `3000`, `5432`, `6379`, `8025`, `3001`, `9090`) | Найти процесс: `netstat -ano \| findstr :8000`; закрыть его или поменять порт в `deploy/docker-compose.yml` |
+| Сборка висит на `FROM ghcr.io/astral-sh/uv…` (слой `0B / 28MB`), а Docker Hub качается | Docker не может скачать слой с CDN GitHub Container Registry (сеть, VPN, прокси, DNS внутри Docker). Проверить VPN/прокси, в Docker Desktop → Settings → Resources → Network / Proxies; перезапустить Docker Desktop; повторить `dc build` |
 | Сервис падает с кодом 78 | Не заполнены обязательные переменные — сообщение в логах называет какие (`dc logs <сервис>`) |
 | Странные значения переменных / ошибки парсинга `.env` | `.env` сохранён с `CRLF` или в кодировке не UTF-8 — пересохранить в `LF` / UTF-8 |
-| `with_embedding = 0` | Режим A без ML-зависимостей (ожидаемо до P0 №1) — нормализовать через режим B |
+| `with_embedding` меньше `events` | Смотреть `dc logs api` на `event_embedding_failed`: нет сети для скачивания модели, нехватка памяти Docker (дать ≥ 4 ГБ в Settings → Resources) или образ собран без ML (`EXTRAS` без `--extra ml`) |
 | Нормализация падает / `failed` в статусе | LLM недоступна: проверить ключ, баланс DeepSeek и `/api/v1/admin/llm/status`; повторить `retry-failed` |
 | `403 forbidden` на ingestion | Не передан или не совпадает `X-API-Key` с `API_SHARED_SECRET` |
 | Бот молчит | Нет `BOT_TOKEN` / `API_SHARED_SECRET`, не запущен профиль `bot`, или аккаунт не привязан (`/start <токен>`) |
@@ -380,10 +383,8 @@ dc up --build -d # пересобрать после изменений кода
 5. События (п. 5): load-all?limit=50, затем normalize?limit=100 (повторяй, пока
    в статусе есть raw), с заголовком X-API-Key из API_SHARED_SECRET; покажи
    итоговый ingestion/status и количество events / with_embedding из psql.
-6. Если with_embedding = 0 — перейди в режим B (п. 6): инфраструктура в Docker,
-   api и worker на хосте с `uv sync --extra dev --extra ml --extra bot`,
-   адреса localhost через переменные оболочки, запуск с `--env-file ../.env`;
-   повтори normalize для новых событий и убедись, что эмбеддинги появились.
+6. Убедись, что with_embedding = events. Если нет — найди причину в
+   `docker compose logs api` (event_embedding_failed) и покажи её мне.
 7. Бот (п. 7): если задан BOT_TOKEN — подними его и подскажи, как привязать
    аккаунт через веб.
 8. Прогони проверки (п. 9): ruff, mypy, lint-imports, pytest tests/unit.

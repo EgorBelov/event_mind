@@ -8,6 +8,7 @@ torch ставится через extra `ml`), а сам энкодер инъе
 from __future__ import annotations
 
 import asyncio
+import threading
 from collections import OrderedDict
 from collections.abc import Callable, Sequence
 from typing import Any, Protocol
@@ -42,6 +43,9 @@ class SentenceTransformerEmbeddingProvider:
         self._cache_size = cache_size
         self._encoder_factory = encoder_factory or _default_encoder_factory(model_name)
         self._encoder: Encoder | None = None
+        # encode идёт в потоках (to_thread): без лока одновременные первые вызовы
+        # грузили бы модель (сотни МБ) несколько раз.
+        self._encoder_lock = threading.Lock()
         self._cache: OrderedDict[str, list[float]] = OrderedDict()
 
     @property
@@ -54,7 +58,9 @@ class SentenceTransformerEmbeddingProvider:
 
     def _ensure_encoder(self) -> Encoder:
         if self._encoder is None:
-            self._encoder = self._encoder_factory()
+            with self._encoder_lock:
+                if self._encoder is None:
+                    self._encoder = self._encoder_factory()
         return self._encoder
 
     def _cache_get(self, text: str) -> list[float] | None:

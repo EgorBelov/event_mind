@@ -1,6 +1,9 @@
 """Unit: EmbeddingProvider — кэш, батчинг, порядок (фейковый энкодер, без torch)."""
 from __future__ import annotations
 
+import asyncio
+import time
+
 from eventmind.infrastructure.embedding.minilm import SentenceTransformerEmbeddingProvider
 
 
@@ -63,3 +66,19 @@ async def test_lru_eviction() -> None:
     enc.calls.clear()
     await p.embed_text("x")  # снова считается (был вытеснен)
     assert enc.calls == [["x"]]
+
+
+async def test_encoder_loaded_once_under_concurrent_first_calls() -> None:
+    created: list[FakeEncoder] = []
+
+    def slow_factory() -> FakeEncoder:
+        time.sleep(0.05)  # «загрузка модели» — даём потокам пересечься
+        enc = FakeEncoder()
+        created.append(enc)
+        return enc
+
+    p = SentenceTransformerEmbeddingProvider(
+        model_name="fake-model", dimension=3, encoder_factory=slow_factory
+    )
+    await asyncio.gather(*(p.embed_text(f"t{i}") for i in range(5)))
+    assert len(created) == 1

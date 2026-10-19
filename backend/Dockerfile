@@ -9,28 +9,36 @@ ENV UV_COMPILE_BYTECODE=1 \
     UV_PYTHON_DOWNLOADS=never
 WORKDIR /app
 
+# Extras образа: `bot` — aiogram; `ml` — sentence-transformers + torch (CPU-сборка
+# из индекса PyTorch, см. [tool.uv.sources] в pyproject) для эмбеддингов событий.
+# Лёгкий образ без эмбеддингов: `--build-arg EXTRAS="--extra bot"`.
+ARG EXTRAS="--extra bot --extra ml"
+
 # Сначала только манифесты — кэш слоя зависимостей не инвалидируется кодом.
-# `--extra bot` кладёт aiogram в общий образ (bot-процесс лёгкий); `ml` (torch)
-# намеренно НЕ ставим — эмбеддинги грузятся в отдельном ml-образе.
 COPY pyproject.toml uv.lock README.md ./
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --frozen --no-install-project --no-dev --extra bot
+    uv sync --frozen --no-install-project --no-dev ${EXTRAS}
 
 # Теперь код проекта и его установка.
 COPY src ./src
 COPY alembic ./alembic
 COPY alembic.ini ./
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --frozen --no-dev --extra bot
+    uv sync --frozen --no-dev ${EXTRAS}
 
 # ── runtime: только venv + код, без uv ──────────────────────────────────────
 FROM python:3.12-slim-bookworm AS runtime
 ENV PATH="/app/.venv/bin:$PATH" \
     PYTHONUNBUFFERED=1 \
-    PYTHONDONTWRITEBYTECODE=1
+    PYTHONDONTWRITEBYTECODE=1 \
+    HF_HOME=/app/.cache/huggingface
 WORKDIR /app
 
-RUN groupadd --system app && useradd --system --gid app --home /app app
+# HF_HOME — кэш модели эмбеддингов (скачивается при первом вызове); каталог
+# должен быть доступен на запись пользователю app. В compose сюда монтируется
+# volume, чтобы модель не скачивалась заново при пересоздании контейнера.
+RUN groupadd --system app && useradd --system --gid app --home /app app \
+    && mkdir -p "$HF_HOME" && chown -R app:app /app/.cache
 
 COPY --from=builder --chown=app:app /app/.venv /app/.venv
 COPY --from=builder --chown=app:app /app/src /app/src

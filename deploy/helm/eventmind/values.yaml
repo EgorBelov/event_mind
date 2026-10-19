@@ -52,9 +52,11 @@ secrets:
 # ── процессы ──────────────────────────────────────────────────────────────────
 api:
   replicas: 2
+  # torch + модель эмбеддингов ≈ 0.8 ГБ на процесс (грузится лениво, при первой
+  # нормализации); у api 2 воркера gunicorn.
   resources:
-    requests: { cpu: "250m", memory: "512Mi" }
-    limits: { cpu: "1", memory: "1Gi" }
+    requests: { cpu: "250m", memory: "1Gi" }
+    limits: { cpu: "1", memory: "2Gi" }
   hpa:
     enabled: true
     minReplicas: 2
@@ -66,9 +68,11 @@ api:
 
 worker:
   replicas: 2
+  # torch + модель эмбеддингов ≈ 0.8 ГБ на процесс (грузится лениво, при первой
+  # нормализации); у api 2 воркера gunicorn.
   resources:
-    requests: { cpu: "250m", memory: "512Mi" }
-    limits: { cpu: "1", memory: "1Gi" }
+    requests: { cpu: "250m", memory: "1Gi" }
+    limits: { cpu: "1", memory: "2Gi" }
   hpa:
     enabled: true
     minReplicas: 2

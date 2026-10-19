@@ -281,10 +281,9 @@ make up                   # pg + redis + api + web + worker + prometheus + grafa
 > 📖 **Запуск с нуля** (что скачать, ключи, переменные `.env`, порядок, Windows 11,
 > траблшутинг, готовый промпт для Claude Code) — [`docs/LAUNCH.md`](docs/LAUNCH.md).
 >
-> ⚠️ Базовый образ backend собирается **без** extra `ml` (torch + MiniLM): в режиме
-> `make up` эмбеддинги событий не считаются и cosine-компонента рекомендера равна 0
-> (дефект D1 в [`docs/PROJECT_REVIEW.md`](docs/PROJECT_REVIEW.md)). Для семантики
-> запускай backend на хосте с `uv sync --extra ml` (см. «Локальная разработка»).
+> Образ backend включает эмбеддинги: torch (CPU-сборка) + MiniLM-384. Модель
+> (~470 МБ) скачивается при первой нормализации в volume `hf-cache`. Лёгкий
+> образ без ML: `docker build --build-arg EXTRAS="--extra bot" backend`.
 
 | Сервис | URL |
 |---|---|

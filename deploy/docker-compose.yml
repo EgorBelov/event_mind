@@ -55,6 +55,8 @@ services:
       DATABASE_URL: postgresql+asyncpg://eventmind:eventmind@postgres:5432/eventmind
       REDIS_URL: redis://redis:6379/0
       CORS_ORIGINS: http://localhost:3000
+    volumes:
+      - hf-cache:/app/.cache/huggingface  # модель эмбеддингов (скачивается 1 раз)
     ports:
       - "8000:8000"
     depends_on:
@@ -81,6 +83,8 @@ services:
     environment:
       DATABASE_URL: postgresql+asyncpg://eventmind:eventmind@postgres:5432/eventmind
       REDIS_URL: redis://redis:6379/0
+    volumes:
+      - hf-cache:/app/.cache/huggingface
     depends_on:
       redis:
         condition: service_healthy
@@ -151,3 +155,4 @@ services:
 volumes:
   pgdata:
   grafana-data:
+  hf-cache:
