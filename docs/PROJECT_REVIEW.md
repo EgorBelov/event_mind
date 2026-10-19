@@ -313,7 +313,7 @@ leave-one-out на реальных взаимодействиях; фиксир
 - **LLM-цепочка начинается с DeepSeek**: `DeepSeek(модели из DEEPSEEK_MODELS) →
   Gemini → Groq 70b → Groq 8b`. `DEEPSEEK_MODELS` — список через запятую,
   порядок перебора; каждая модель — отдельное звено со своим cooldown; пусто —
-  `deepseek-chat`. Без `DEEPSEEK_API_KEY` звенья DeepSeek пропускаются.
+  `deepseek-flash`. Без `DEEPSEEK_API_KEY` звенья DeepSeek пропускаются.
   Структурированный вывод — через function calling (`langchain-deepseek`).
   Обновлены `config.py`, `infrastructure/llm/providers.py`, `.env.example`,
   Helm (`DEEPSEEK_API_KEY` в Secret, `DEEPSEEK_MODELS` в ConfigMap), README,

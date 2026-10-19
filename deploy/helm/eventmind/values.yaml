@@ -30,7 +30,7 @@ config:
   smtpUseTls: "true"
   smtpUseSsl: "false"
   emailFrom: "EventMind <noreply@eventmind.example.com>"
-  deepseekModels: ""  # через запятую; пусто — deepseek-chat
+  deepseekModels: ""  # через запятую; пусто — deepseek-flash
   telegramBotUsername: ""
 
 # ── секреты (→ Secret) ────────────────────────────────────────────────────────

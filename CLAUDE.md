@@ -105,7 +105,7 @@ Makefile   — up/test/lint/typecheck/imports/migrate/seed/...
   +eval-смоук. 155 unit-тестов, mypy 144 файла. **Все M0–M8 закрыты.**
 - [x] **Пост-M8** — LLM-цепочка начинается с **DeepSeek**: модели из
   `DEEPSEEK_MODELS` (через запятую, порядок перебора, по звену на модель; пусто —
-  `deepseek-chat`) → Gemini → Groq 70b → Groq 8b (`langchain-deepseek`,
+  `deepseek-flash`) → Gemini → Groq 70b → Groq 8b (`langchain-deepseek`,
   structured output через function calling). Аудит проекта и план доработок —
   `docs/PROJECT_REVIEW.md`. 160 unit-тестов.
 - [ ] **Дальше** — пункты P0 из `docs/PROJECT_REVIEW.md` §8 (эмбеддинги в образе,

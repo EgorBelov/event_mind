@@ -21,22 +21,22 @@ def _settings(**overrides: Any) -> Settings:
 
 
 def test_deepseek_model_list_parses_comma_separated_in_order() -> None:
-    s = _settings(deepseek_models=" deepseek-reasoner, deepseek-chat ,,")
-    assert s.deepseek_model_list == ["deepseek-reasoner", "deepseek-chat"]
+    s = _settings(deepseek_models=" deepseek-v4-pro, deepseek-flash ,,")
+    assert s.deepseek_model_list == ["deepseek-v4-pro", "deepseek-flash"]
 
 
 def test_deepseek_model_list_defaults_when_empty() -> None:
-    assert _settings(deepseek_models="").deepseek_model_list == ["deepseek-chat"]
+    assert _settings(deepseek_models="").deepseek_model_list == ["deepseek-flash"]
 
 
 def test_chain_starts_with_deepseek_models_then_gemini_then_groq() -> None:
     links = build_links(
-        _settings(deepseek_models="deepseek-reasoner,deepseek-chat"),
+        _settings(deepseek_models="deepseek-v4-pro,deepseek-flash"),
         gemini_model="gemini-2.0-flash",
     )
     assert [link.name for link in links] == [
-        "deepseek:deepseek-reasoner",
-        "deepseek:deepseek-chat",
+        "deepseek:deepseek-v4-pro",
+        "deepseek:deepseek-flash",
         "gemini:gemini-2.0-flash",
         "groq:llama-3.3-70b-versatile",
         "groq:llama-3.1-8b-instant",
@@ -53,7 +53,7 @@ def test_deepseek_links_disabled_without_key() -> None:
 
 
 def test_deepseek_link_builds_chat_model_lazily() -> None:
-    links = build_links(_settings(deepseek_models="deepseek-chat"), gemini_model=None)
+    links = build_links(_settings(deepseek_models="deepseek-flash"), gemini_model=None)
     model = links[0].model()
     assert type(model).__name__ == "ChatDeepSeek"
-    assert getattr(model, "model_name", None) == "deepseek-chat"
+    assert getattr(model, "model_name", None) == "deepseek-flash"

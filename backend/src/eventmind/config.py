@@ -65,7 +65,7 @@ class Settings(BaseSettings):
     # ── LLM (M2): цепочка DeepSeek → Gemini → Groq70b → Groq8b за LLMGateway ─
     deepseek_api_key: str = ""
     # Модели DeepSeek через запятую — порядок перебора в цепочке (каждая — своё
-    # звено). Пусто — deepseek-chat.
+    # звено). Пусто — deepseek-flash.
     deepseek_models: str = ""
     google_api_key: str = ""
     google_model: str = ""  # пусто — берём первый кандидат/автопроба
@@ -121,7 +121,7 @@ class Settings(BaseSettings):
     @property
     def deepseek_model_list(self) -> list[str]:
         models = [m.strip() for m in self.deepseek_models.split(",") if m.strip()]
-        return models or ["deepseek-chat"]
+        return models or ["deepseek-flash"]
 
 
 # Обязательные поля под каждый контекст (имена атрибутов Settings).
