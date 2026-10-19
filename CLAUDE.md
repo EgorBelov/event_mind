@@ -108,8 +108,10 @@ Makefile   — up/test/lint/typecheck/imports/migrate/seed/...
   `deepseek-flash`) → Gemini → Groq 70b → Groq 8b (`langchain-deepseek`,
   structured output через function calling). Аудит проекта и план доработок —
   `docs/PROJECT_REVIEW.md`. 160 unit-тестов.
-- [ ] **Дальше** — пункты P0 из `docs/PROJECT_REVIEW.md` §8 (эмбеддинги в образе,
-  фиксы D2/D3, текстовая модель пользователя, честный eval, бот B1–B5), затем
+- [ ] **Дальше** — S1 (`docs/LAUNCH.md`: инструкция + промпт запуска; основная
+  машина — Windows 11 + WSL2, §15), затем пункты P0 из `docs/PROJECT_REVIEW.md`
+  §8 (эмбеддинги в образе, фиксы D2/D3, текстовая модель пользователя, честный
+  eval, бот B1–B5), затем
   ИИ-агент A1–A6 (§14: один агент с инструментами поверх ядра; веб и бот остаются).
 
 ## Зафиксированные решения v2
