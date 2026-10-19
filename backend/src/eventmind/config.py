@@ -62,7 +62,11 @@ class Settings(BaseSettings):
     # ── Google OAuth (M6): вход через Google ─────────────────────────────
     google_oauth_client_id: str = ""
 
-    # ── LLM (M2): цепочка Gemini → Groq70b → Groq8b за LLMGateway ─────────
+    # ── LLM (M2): цепочка DeepSeek → Gemini → Groq70b → Groq8b за LLMGateway ─
+    deepseek_api_key: str = ""
+    # Модели DeepSeek через запятую — порядок перебора в цепочке (каждая — своё
+    # звено). Пусто — deepseek-chat.
+    deepseek_models: str = ""
     google_api_key: str = ""
     google_model: str = ""  # пусто — берём первый кандидат/автопроба
     groq_api_key: str = ""
@@ -113,6 +117,11 @@ class Settings(BaseSettings):
     @property
     def cors_origin_list(self) -> list[str]:
         return [o.strip() for o in self.cors_origins.split(",") if o.strip()]
+
+    @property
+    def deepseek_model_list(self) -> list[str]:
+        models = [m.strip() for m in self.deepseek_models.split(",") if m.strip()]
+        return models or ["deepseek-chat"]
 
 
 # Обязательные поля под каждый контекст (имена атрибутов Settings).

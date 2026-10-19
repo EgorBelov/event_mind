@@ -42,6 +42,8 @@ helm.sh/chart: {{ .Chart.Name }}-{{ .Chart.Version }}
   valueFrom: { configMapKeyRef: { name: {{ include "eventmind.fullname" . }}-config, key: SMTP_USE_SSL } }
 - name: EMAIL_FROM
   valueFrom: { configMapKeyRef: { name: {{ include "eventmind.fullname" . }}-config, key: EMAIL_FROM } }
+- name: DEEPSEEK_MODELS
+  valueFrom: { configMapKeyRef: { name: {{ include "eventmind.fullname" . }}-config, key: DEEPSEEK_MODELS } }
 - name: TELEGRAM_BOT_USERNAME
   valueFrom: { configMapKeyRef: { name: {{ include "eventmind.fullname" . }}-config, key: TELEGRAM_BOT_USERNAME } }
 - name: DATABASE_URL
@@ -52,6 +54,8 @@ helm.sh/chart: {{ .Chart.Name }}-{{ .Chart.Version }}
   valueFrom: { secretKeyRef: { name: {{ include "eventmind.fullname" . }}-secrets, key: JWT_SECRET } }
 - name: API_SHARED_SECRET
   valueFrom: { secretKeyRef: { name: {{ include "eventmind.fullname" . }}-secrets, key: API_SHARED_SECRET } }
+- name: DEEPSEEK_API_KEY
+  valueFrom: { secretKeyRef: { name: {{ include "eventmind.fullname" . }}-secrets, key: DEEPSEEK_API_KEY } }
 - name: GOOGLE_API_KEY
   valueFrom: { secretKeyRef: { name: {{ include "eventmind.fullname" . }}-secrets, key: GOOGLE_API_KEY } }
 - name: GROQ_API_KEY

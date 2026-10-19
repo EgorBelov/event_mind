@@ -47,6 +47,7 @@ dependencies = [
     "opentelemetry-instrumentation-sqlalchemy>=0.48b0",
     "opentelemetry-instrumentation-httpx>=0.48b0",
     "opentelemetry-exporter-otlp-proto-http>=1.27",
+    "langchain-deepseek>=0.1,<0.2",
 ]
 
 [project.optional-dependencies]

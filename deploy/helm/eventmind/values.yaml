@@ -30,6 +30,7 @@ config:
   smtpUseTls: "true"
   smtpUseSsl: "false"
   emailFrom: "EventMind <noreply@eventmind.example.com>"
+  deepseekModels: ""  # через запятую; пусто — deepseek-chat
   telegramBotUsername: ""
 
 # ── секреты (→ Secret) ────────────────────────────────────────────────────────
@@ -40,6 +41,7 @@ secrets:
   redisUrl: "redis://redis:6379/0"
   jwtSecret: ""
   apiSharedSecret: ""
+  deepseekApiKey: ""
   googleApiKey: ""
   groqApiKey: ""
   googleOauthClientId: ""

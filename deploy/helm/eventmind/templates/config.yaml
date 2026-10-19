@@ -18,6 +18,7 @@ data:
   SMTP_USE_TLS: {{ .Values.config.smtpUseTls | quote }}
   SMTP_USE_SSL: {{ .Values.config.smtpUseSsl | quote }}
   EMAIL_FROM: {{ .Values.config.emailFrom | quote }}
+  DEEPSEEK_MODELS: {{ .Values.config.deepseekModels | quote }}
   TELEGRAM_BOT_USERNAME: {{ .Values.config.telegramBotUsername | quote }}
 ---
 apiVersion: v1
@@ -31,6 +32,7 @@ stringData:
   REDIS_URL: {{ .Values.secrets.redisUrl | quote }}
   JWT_SECRET: {{ .Values.secrets.jwtSecret | quote }}
   API_SHARED_SECRET: {{ .Values.secrets.apiSharedSecret | quote }}
+  DEEPSEEK_API_KEY: {{ .Values.secrets.deepseekApiKey | quote }}
   GOOGLE_API_KEY: {{ .Values.secrets.googleApiKey | quote }}
   GROQ_API_KEY: {{ .Values.secrets.groqApiKey | quote }}
   GOOGLE_OAUTH_CLIENT_ID: {{ .Values.secrets.googleOauthClientId | quote }}

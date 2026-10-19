@@ -1,4 +1,7 @@
-"""Билдеры провайдеров (Gemini/Groq), async-автопроба Gemini и сборка цепочки.
+"""Билдеры провайдеров (DeepSeek/Gemini/Groq), async-автопроба Gemini и сборка цепочки.
+
+Порядок звеньев: DeepSeek (модели из DEEPSEEK_MODELS, каждая — отдельное звено со
+своим cooldown) → Gemini → Groq 70b → Groq 8b.
 
 Портировано из `legacy/app/agents/recommendation/llm.py`:
 - Gemini через REST-транспорт + таймаут (gRPC режется по DNS на части сетапов).
@@ -8,8 +11,11 @@
 """
 from __future__ import annotations
 
+from collections.abc import Callable
+
 import httpx
 import structlog
+from pydantic import SecretStr
 
 from eventmind.config import Settings
 from eventmind.infrastructure.llm.breaker import CircuitBreaker, ProviderCooldown
@@ -26,6 +32,20 @@ _GEMINI_FALLBACK_MODELS: tuple[str, ...] = (
 )
 
 _PROBE_TIMEOUT_S = 8.0
+
+
+def _build_deepseek(settings: Settings, model_name: str) -> ChatModel:
+    from langchain_deepseek import ChatDeepSeek
+
+    # structured_output у ChatDeepSeek по умолчанию — function_calling
+    # (json_schema DeepSeek API не поддерживает).
+    model: ChatModel = ChatDeepSeek(
+        model_name=model_name,
+        api_key=SecretStr(settings.deepseek_api_key),
+        temperature=settings.llm_temperature,
+        timeout=settings.llm_timeout_seconds,
+    )
+    return model
 
 
 def _build_groq(settings: Settings, model_name: str) -> ChatModel:
@@ -98,6 +118,9 @@ async def probe_gemini_model(settings: Settings) -> str | None:
 def build_links(settings: Settings, *, gemini_model: str | None) -> list[ProviderLink]:
     """Сформировать звенья цепочки под текущие настройки/пробу."""
 
+    def make_deepseek(model_name: str) -> Callable[[], ChatModel]:
+        return lambda: _build_deepseek(settings, model_name)
+
     def make_gemini() -> ChatModel:
         return _build_gemini(settings, gemini_model or "")
 
@@ -107,7 +130,16 @@ def build_links(settings: Settings, *, gemini_model: str | None) -> list[Provide
     def make_groq_fallback() -> ChatModel:
         return _build_groq(settings, settings.groq_fallback_model)
 
+    deepseek_links = [
+        ProviderLink(
+            name=f"deepseek:{model_name}",
+            factory=make_deepseek(model_name),
+            enabled=bool(settings.deepseek_api_key),
+        )
+        for model_name in settings.deepseek_model_list
+    ]
     return [
+        *deepseek_links,
         ProviderLink(
             name=f"gemini:{gemini_model}" if gemini_model else "gemini",
             factory=make_gemini,
