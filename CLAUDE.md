@@ -38,6 +38,7 @@ backend/   — Python 3.12, uv, гексагон: src/eventmind/{domain,applicat
 web/       — Next.js (App Router, standalone) — каркас, наполнение в M6
 deploy/    — docker-compose (dev) + helm/ (prod) + prometheus/grafana + loadtest (k6)
 docs/PROJECT_REVIEW.md — аудит проекта + план доработок под тему ВКР
+docs/LAUNCH.md — запуск с нуля (Windows 11 / macOS) + промпт для Claude Code
 ARCHITECTURE.md — живой документ (слои, процессы, обоснования, статус)
 Makefile   — up/test/lint/typecheck/imports/migrate/seed/...
 ```
@@ -108,8 +109,9 @@ Makefile   — up/test/lint/typecheck/imports/migrate/seed/...
   `deepseek-flash`) → Gemini → Groq 70b → Groq 8b (`langchain-deepseek`,
   structured output через function calling). Аудит проекта и план доработок —
   `docs/PROJECT_REVIEW.md`. 160 unit-тестов.
-- [ ] **Дальше** — S1 (`docs/LAUNCH.md`: инструкция + промпт запуска; основная
-  машина — Windows 11 + WSL2, §15), затем пункты P0 из `docs/PROJECT_REVIEW.md`
+- [ ] **Дальше** — S1: `docs/LAUNCH.md` написан (запуск + промпт; основная
+  машина — Windows 11, обычный PowerShell + Docker Desktop, без WSL), осталось
+  проверить «с нуля» на Windows; затем пункты P0 из `docs/PROJECT_REVIEW.md`
   §8 (эмбеддинги в образе, фиксы D2/D3, текстовая модель пользователя, честный
   eval, бот B1–B5), затем
   ИИ-агент A1–A6 (§14: один агент с инструментами поверх ядра; веб и бот остаются).

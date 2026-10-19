@@ -183,6 +183,7 @@ deploy/
   helm/eventmind/              prod: Deployments + HPA + PDB + Ingress + hooks
   prometheus/ (alerts)  grafana/ (дашборды)  loadtest/ (k6)
 docs/PROJECT_REVIEW.md         аудит проекта и план доработок под тему ВКР
+docs/LAUNCH.md                 запуск с нуля (Windows 11 / macOS) + промпт для Claude Code
 ARCHITECTURE.md   CLAUDE.md   Makefile   .env.example
 ```
 
@@ -277,6 +278,9 @@ cp .env.example .env      # опц.: DEEPSEEK_API_KEY/GOOGLE_API_KEY/GROQ_API_KE
 make up                   # pg + redis + api + web + worker + prometheus + grafana + mailhog
 ```
 
+> 📖 **Запуск с нуля** (что скачать, ключи, переменные `.env`, порядок, Windows 11,
+> траблшутинг, готовый промпт для Claude Code) — [`docs/LAUNCH.md`](docs/LAUNCH.md).
+>
 > ⚠️ Базовый образ backend собирается **без** extra `ml` (torch + MiniLM): в режиме
 > `make up` эмбеддинги событий не считаются и cosine-компонента рекомендера равна 0
 > (дефект D1 в [`docs/PROJECT_REVIEW.md`](docs/PROJECT_REVIEW.md)). Для семантики

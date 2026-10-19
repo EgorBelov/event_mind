@@ -1,0 +1,11 @@
+# Единые окончания строк LF во всех ОС (Windows-клон не превращает файлы в CRLF).
+* text=auto eol=lf
+
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.webp binary
+*.woff binary
+*.woff2 binary
