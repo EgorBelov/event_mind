@@ -6,6 +6,7 @@ from datetime import UTC, datetime, timedelta
 
 from eventmind.domain.recommender.bayesian import (
     apply_decay,
+    apply_feedback,
     feedback_delta,
     posterior_mean,
     thompson_score,
@@ -55,6 +56,24 @@ def test_feedback_delta() -> None:
     assert feedback_delta("dislike") == (0.0, 2.0)
     assert feedback_delta("save") == (1.0, 0.0)
     assert feedback_delta("like", -1) == (-3.0, 0.0)  # откат
+
+
+def test_feedback_after_long_pause_does_not_resurrect_decayed_interest() -> None:
+    # Регрессия D2: 10 лайков год назад, сегодня один дизлайк.
+    year_ago = NOW - timedelta(days=365)
+    decayed_alpha, _ = apply_decay(31.0, 1.0, year_ago, now=NOW, gamma=0.995)
+    alpha, beta = apply_feedback(31.0, 1.0, year_ago, "dislike", now=NOW, gamma=0.995)
+    assert alpha == decayed_alpha  # интерес не «воскрес» до 31
+    assert alpha < 6.0
+    assert beta == 3.0  # prior 1 + дизлайк 2
+
+
+def test_feedback_on_new_stat_applies_delta_without_decay() -> None:
+    assert apply_feedback(1.0, 1.0, None, "like", now=NOW) == (4.0, 1.0)
+
+
+def test_feedback_never_drops_below_prior() -> None:
+    assert apply_feedback(1.5, 1.0, NOW, "like", -1, now=NOW) == (1.0, 1.0)
 
 
 def test_apply_decay_pulls_to_prior() -> None:

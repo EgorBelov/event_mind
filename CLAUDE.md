@@ -114,7 +114,7 @@ Makefile   — up/test/lint/typecheck/imports/migrate/seed/...
   проверить «с нуля» на Windows; P0 №1 (эмбеддинги в образе: torch CPU через
   `[tool.uv.sources]`, volume `hf-cache`) сделан, но сборка образа ещё не проверена
   (на macOS 12 не скачался слой ghcr) — проверить на Windows; затем остальные пункты P0 из
-  `docs/PROJECT_REVIEW.md` §8 (backfill + cron, фиксы D2/D3, текстовая модель пользователя, честный
+  `docs/PROJECT_REVIEW.md` §8 (backfill + cron; фиксы D2/D3 — сделаны; текстовая модель пользователя, честный
   eval, бот B1–B5), затем
   ИИ-агент A1–A6 (§14: один агент с инструментами поверх ядра; веб и бот остаются).
 

@@ -43,6 +43,28 @@ def apply_decay(
     )
 
 
+def apply_feedback(
+    alpha: float,
+    beta: float,
+    updated_at: datetime | None,
+    action: str,
+    direction: int = 1,
+    *,
+    now: datetime,
+    gamma: float = 0.995,
+) -> tuple[float, float]:
+    """Новые (α, β) после действия: сначала материализовать decay на момент now.
+
+    Decay применяется лениво при чтении, поэтому в БД лежат «сырые» α/β на
+    момент `updated_at`. Прибавлять дельту к сырым значениям нельзя: запись
+    сдвигает `updated_at` на now и «воскрешает» весь затухший интерес — один
+    дизлайк через год поднимал α с ~5.8 обратно до 31.
+    """
+    a, b = apply_decay(alpha, beta, updated_at, now=now, gamma=gamma)
+    d_alpha, d_beta = feedback_delta(action, direction)
+    return max(PRIOR_ALPHA, a + d_alpha), max(PRIOR_BETA, b + d_beta)
+
+
 def thompson_score(
     stats: dict[str, tuple[float, float]],
     event_topic_codes: Iterable[str],

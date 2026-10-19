@@ -12,9 +12,16 @@ from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from eventmind.domain.events.entities import Event
-from eventmind.infrastructure.db.models import EventModel, EventTopicModel, TopicModel
+from eventmind.infrastructure.db.models import (
+    EventModel,
+    EventTopicModel,
+    InteractionModel,
+    TopicModel,
+)
 
 _GRACE_HOURS = 6  # показываем события, начавшиеся до 6 ч назад (весь день конференции)
+# Уже оценённое не показываем снова (view — только лог, не исключает).
+_EXCLUDING_ACTIONS = ("like", "dislike", "save")
 
 
 def _to_entity(m: EventModel, topics: list[str]) -> Event:
@@ -54,15 +61,25 @@ class PgvectorCandidateGenerator:
         city: str | None,
         limit: int,
         now: datetime,
+        exclude_interacted_by: int | None = None,
     ) -> list[Event]:
         cutoff = now - timedelta(hours=_GRACE_HOURS)
         # upcoming-only, NULL-сейф: события без даты остаются в выборке.
-        upcoming = or_(EventModel.start_at.is_(None), EventModel.start_at >= cutoff)
+        filters = [or_(EventModel.start_at.is_(None), EventModel.start_at >= cutoff)]
+        if exclude_interacted_by is not None:
+            filters.append(
+                EventModel.id.not_in(
+                    select(InteractionModel.event_id).where(
+                        InteractionModel.user_id == exclude_interacted_by,
+                        InteractionModel.action.in_(_EXCLUDING_ACTIONS),
+                    )
+                )
+            )
 
         if user_embedding is not None:
             query = (
                 select(EventModel)
-                .where(upcoming, EventModel.embedding.isnot(None))
+                .where(*filters, EventModel.embedding.isnot(None))
                 .order_by(EventModel.embedding.cosine_distance(user_embedding))
                 .limit(limit)
             )
@@ -70,7 +87,7 @@ class PgvectorCandidateGenerator:
             # cold-start: свежие качественные события.
             query = (
                 select(EventModel)
-                .where(upcoming)
+                .where(*filters)
                 .order_by(
                     EventModel.quality_score.desc().nullslast(),
                     EventModel.start_at.asc().nullslast(),

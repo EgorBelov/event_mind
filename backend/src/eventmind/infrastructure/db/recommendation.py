@@ -16,6 +16,7 @@ from eventmind.domain.recommender.bayesian import (
     PRIOR_ALPHA,
     PRIOR_BETA,
     apply_decay,
+    apply_feedback,
     feedback_delta,
 )
 from eventmind.infrastructure.db.models import (
@@ -101,12 +102,18 @@ class SqlAlchemyRecommendationUnitOfWork:
         self._s.add(InteractionModel(user_id=user_id, event_id=event_id, action=action))
 
     async def apply_feedback_to_stats(
-        self, user_id: int, topic_codes: list[str], action: str, direction: int
+        self,
+        user_id: int,
+        topic_codes: list[str],
+        action: str,
+        direction: int,
+        *,
+        now: datetime,
+        gamma: float,
     ) -> None:
         if not topic_codes:
             return
-        d_alpha, d_beta = feedback_delta(action, direction)
-        if d_alpha == 0.0 and d_beta == 0.0:
+        if feedback_delta(action, direction) == (0.0, 0.0):
             return
         topic_rows = await self._s.execute(
             select(TopicModel.id, TopicModel.code).where(TopicModel.code.in_(topic_codes))
@@ -125,8 +132,11 @@ class SqlAlchemyRecommendationUnitOfWork:
                     user_id=user_id, topic_id=topic_id, alpha=PRIOR_ALPHA, beta=PRIOR_BETA
                 )
                 self._s.add(stat)
-            stat.alpha = max(PRIOR_ALPHA, stat.alpha + d_alpha)
-            stat.beta = max(PRIOR_BETA, stat.beta + d_beta)
+            # Новая запись — updated_at ещё не выставлен (decay не нужен).
+            stat.alpha, stat.beta = apply_feedback(
+                stat.alpha, stat.beta, stat.updated_at, action, direction, now=now, gamma=gamma
+            )
+            stat.updated_at = now
 
     async def recompute_user_embedding(self, user_id: int) -> None:
         """user.embedding = среднее эмбеддингов понравившихся/сохранённых событий."""

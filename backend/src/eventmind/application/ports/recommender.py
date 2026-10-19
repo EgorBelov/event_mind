@@ -29,6 +29,7 @@ class CandidateGenerator(Protocol):
         city: str | None,
         limit: int,
         now: datetime,
+        exclude_interacted_by: int | None = None,
     ) -> list[Event]: ...
 
 
@@ -49,7 +50,14 @@ class RecommendationUnitOfWork(Protocol):
     async def get_event_topic_codes(self, event_id: int) -> list[str]: ...
     async def record_interaction(self, user_id: int, event_id: int, action: str) -> None: ...
     async def apply_feedback_to_stats(
-        self, user_id: int, topic_codes: list[str], action: str, direction: int
+        self,
+        user_id: int,
+        topic_codes: list[str],
+        action: str,
+        direction: int,
+        *,
+        now: datetime,
+        gamma: float,
     ) -> None: ...
     async def recompute_user_embedding(self, user_id: int) -> None: ...
 

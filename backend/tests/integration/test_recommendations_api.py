@@ -104,7 +104,27 @@ def test_feedback_learns_and_invalidates_cache(settings: Settings) -> None:
         assert asyncio.run(_count(settings.database_url, InteractionModel)) == 1
         assert asyncio.run(_count(settings.database_url, UserTopicStatModel)) == 1
 
-        # кэш инвалидирован → выдача пересчитана (не падает, непустая)
+        # кэш инвалидирован → выдача пересчитана; оценённое событие в ленту не
+        # возвращается (D3)
         again = client.get("/api/v1/recommendations")
         assert again.status_code == 200
-        assert len(again.json()) == 3
+        assert len(again.json()) == 2
+        assert ids[1] not in {it["event_id"] for it in again.json()}
+
+
+def test_hidden_and_saved_events_leave_the_feed(settings: Settings) -> None:
+    ids = _seed_events(settings.database_url)
+    with TestClient(create_app(settings)) as client:
+        _register(client, "hide@example.com")
+        for event_id, action in ((ids[0], "dislike"), (ids[2], "save")):
+            resp = client.post(
+                "/api/v1/interactions", json={"event_id": event_id, "action": action}
+            )
+            assert resp.status_code == 200
+        # view — только лог, событие остаётся в ленте
+        assert client.post(
+            "/api/v1/interactions", json={"event_id": ids[1], "action": "view"}
+        ).status_code == 200
+
+        items = client.get("/api/v1/recommendations").json()
+        assert [it["event_id"] for it in items] == [ids[1]]

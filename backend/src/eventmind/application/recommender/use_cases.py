@@ -122,6 +122,7 @@ class GetRecommendations:
             city=prefs.city,
             limit=self._config.candidate_limit,
             now=now,
+            exclude_interacted_by=user_id,
         )
         by_id = {ev.id: ev for ev in candidates if ev.id is not None}
         ranked = self._ranker.rank(
@@ -145,10 +146,16 @@ class RecordInteraction:
     """Записать feedback + онлайн-обновить Bayesian-статы + прогреть эмбеддинг + сброс кэша."""
 
     def __init__(
-        self, uow_factory: RecommendationUnitOfWorkFactory, cache: Cache
+        self,
+        uow_factory: RecommendationUnitOfWorkFactory,
+        cache: Cache,
+        clock: Clock,
+        weights: ScoringWeights,
     ) -> None:
         self._uow_factory = uow_factory
         self._cache = cache
+        self._clock = clock
+        self._weights = weights
 
     async def execute(self, user_id: int, event_id: int, action: str) -> None:
         if action not in VALID_ACTIONS:
@@ -157,7 +164,14 @@ class RecordInteraction:
             await uow.record_interaction(user_id, event_id, action)
             if action in ("like", "dislike", "save"):
                 codes = await uow.get_event_topic_codes(event_id)
-                await uow.apply_feedback_to_stats(user_id, codes, action, 1)
+                await uow.apply_feedback_to_stats(
+                    user_id,
+                    codes,
+                    action,
+                    1,
+                    now=self._clock.now(),
+                    gamma=self._weights.bayes_decay_per_day,
+                )
                 await uow.recompute_user_embedding(user_id)
             await uow.commit()
         await self._cache.delete(_cache_key(user_id))

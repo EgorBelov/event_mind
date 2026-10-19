@@ -163,7 +163,9 @@ def get_recommendations_uc(container: ContainerDep) -> GetRecommendations:
 
 
 def get_record_interaction_uc(container: ContainerDep) -> RecordInteraction:
-    return RecordInteraction(container.recommendation_uow_factory, container.cache)
+    return RecordInteraction(
+        container.recommendation_uow_factory, container.cache, container.clock, ScoringWeights()
+    )
 
 
 # ── поиск событий (M6) ───────────────────────────────────────────────────────
