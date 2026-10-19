@@ -41,7 +41,7 @@ production-grade, **account-центричная** (не Telegram-bound) и
 
 Почему гексагон: тезис-ядро (рекомендер, LLM-нормализация) должно тестироваться
 детерминированно и переживать смену транспортов (веб/бот/worker) и провайдеров
-(Gemini/Groq, SMTP/Resend, arq/Celery) без переписывания бизнес-логики.
+(DeepSeek/Gemini/Groq, SMTP/Resend, arq/Celery) без переписывания бизнес-логики.
 
 ## Процессы (каждый — отдельный контейнер, stateless, реплицируемый)
 
@@ -102,8 +102,8 @@ Stateless: всё состояние — в Postgres/Redis, ни одного mo
 
 **M0** — монорепо: `backend/` (uv, слои, config+validate, api-каркас,
 наблюдаемость, Alembic async), `web/` (Next.js standalone), `deploy/` (compose:
-pg+redis+api+web+worker+prometheus+grafana+mailhog). Код v1 — в ветке `v1-main`
-(read-only справочник, из которого портирована доменная логика).
+pg+redis+api+web+worker+prometheus+grafana+mailhog). Из v1 портирована только
+доменная логика.
 
 **M1** — account-центричное ядро:
 - Домен `accounts` (чистый): `User`/`UserChannel`/`NotificationPreference`/
@@ -123,8 +123,8 @@ pg+redis+api+web+worker+prometheus+grafana+mailhog). Код v1 — в ветке
 
 **M2** — LLM Gateway + Embedding:
 - Порт `LLMGateway` (`complete`, `structured_output(schema)`) + `LLMChain`:
-  цепочка Gemini(REST)→Groq70b→Groq8b с fallback, **circuit-breaker** (5 подряд
-  фейлов цепочки → cooldown 120с) и **per-provider cooldown** (2 фейла звена →
+  цепочка DeepSeek (модели из `DEEPSEEK_MODELS`, по звену на модель)→
+  Gemini(REST)→Groq70b→Groq8b с fallback, **circuit-breaker** (5 подряд фейлов цепочки → cooldown 120с) и **per-provider cooldown** (2 фейла звена →
   skip 10 мин); async-автопроба Gemini-модели; учёт токенов и Prometheus-метрики.
 - Порт `EmbeddingProvider` + `SentenceTransformerEmbeddingProvider` (MiniLM-384,
   ленивый импорт torch через extra `ml`, батчинг, LRU-кэш, версия модели,
@@ -261,8 +261,11 @@ worker: process_outbox → OutboxProcessor
 
 ## Статус
 
-Все milestone'ы контракта (`docs/REBUILD_PROMPT.md`) закрыты: **M0–M8**.
-Дальнейшее — итеративные улучшения (реальные источники ingestion, доучивание
-скореров skill_gap/bandit/gnn под флагами, LLM-judge на живых данных,
-Prometheus-adapter для HPA по длине очереди, партиционирование
-`interactions`/`notifications` под объём).
+Все milestone'ы перестройки закрыты: **M0–M8**. После M8 LLM-цепочка
+начинается с DeepSeek (`DEEPSEEK_MODELS`).
+
+Дальнейшая работа ведётся по плану из [`docs/PROJECT_REVIEW.md`](docs/PROJECT_REVIEW.md)
+(аудит от 19.10.2026): P0 — эмбеддинги в образе + backfill, фиксы decay и
+исключения оценённых событий, текстовая модель пользователя, честная офлайн-оценка,
+Telegram-бот как самостоятельный интерфейс (B1–B5); P1 — гибридный поиск,
+семантическая дедупликация, сравнение моделей эмбеддингов, калибровка весов.

@@ -11,11 +11,13 @@
 Архитектура — **гексагональная** (ports & adapters), async сверху донизу,
 границы слоёв проверяются `import-linter` в CI.
 
-> **v2.** Проект перестроен с нуля по контракту [`docs/REBUILD_PROMPT.md`](docs/REBUILD_PROMPT.md).
-> Код **v1** (Telegram-центричный, sync-FastAPI + APScheduler) сохранён в отдельной
-> ветке [`v1-main`](https://github.com/EgorBelov/event_mind/tree/v1-main) — из него
-> портирована доменная логика (математика рекомендера, LLM-промпты, парсеры
-> источников, канонизация, фильтры, eval). Архитектура v1 **не** наследуется.
+> **v2.** Проект перестроен с нуля. Из v1 (Telegram-центричный, sync-FastAPI +
+> APScheduler) портирована только доменная логика (математика рекомендера,
+> LLM-промпты, парсеры источников, канонизация, фильтры, eval). Архитектура v1
+> **не** наследуется.
+>
+> 📋 Аудит текущего состояния и план доработок под тему ВКР —
+> [`docs/PROJECT_REVIEW.md`](docs/PROJECT_REVIEW.md).
 >
 > Живой архитектурный документ — [`ARCHITECTURE.md`](ARCHITECTURE.md).
 
@@ -97,7 +99,7 @@
      │           infrastructure             │  ║        domain         ║
      │  async-SQLAlchemy-репозитории + UoW  │  ║  чистые сущности/VO   ║
      │  + transactional outbox              │  ║  доменные сервисы:    ║
-     │  LLM-цепочка (Gemini→Groq, breaker)  │  ║  • математика         ║
+     │  LLM (DeepSeek→Gemini→Groq, breaker) │  ║  • математика         ║
      │  EmbeddingProvider (MiniLM-384)      │  ║    рекомендера        ║
      │  arq TaskQueue · Redis Cache         │  ║  • таксономия/города  ║
      │  NotificationChannel: SMTP/TG/in-app │  ║  • series_slug        ║
@@ -174,13 +176,13 @@ backend/                       Python 3.12 · uv · гексагон
     config.py                  pydantic-settings + fail-fast validate (exit 78)
   eval/                        offline-eval harness (вне src/ — tooling)
   alembic/                     async-миграции 0001–0005 (pgvector + HNSW)
-  tests/  unit/ (155)  integration/ (31, testcontainers)
+  tests/  unit/ (160)  integration/ (31, testcontainers)
 web/                           Next.js 14 (App Router, standalone) + BFF-прокси
 deploy/
   docker-compose.yml           dev-стек
   helm/eventmind/              prod: Deployments + HPA + PDB + Ingress + hooks
   prometheus/ (alerts)  grafana/ (дашборды)  loadtest/ (k6)
-docs/REBUILD_PROMPT.md         контракт перестройки
+docs/PROJECT_REVIEW.md         аудит проекта и план доработок под тему ВКР
 ARCHITECTURE.md   CLAUDE.md   Makefile   .env.example
 ```
 
@@ -192,7 +194,7 @@ ARCHITECTURE.md   CLAUDE.md   Makefile   .env.example
 | БД | PostgreSQL 16 + **pgvector** (HNSW), SQLAlchemy 2.0 async + asyncpg, Alembic |
 | Очередь/кэш | **arq** + Redis (очередь, кэш, локи, rate-limit) |
 | Auth | argon2-cffi, PyJWT (httpOnly-cookie), Google OAuth (tokeninfo) |
-| LLM | LLM Gateway: langchain-core/-google-genai/-groq (Gemini→Groq70b→Groq8b) |
+| LLM | LLM Gateway: langchain-core/-deepseek/-google-genai/-groq (DeepSeek→Gemini→Groq70b→Groq8b) |
 | Эмбеддинги | sentence-transformers MiniLM-384 (extra `ml`, ленивый импорт) |
 | Email | aiosmtplib + Jinja2 (Mailhog dev / Yandex·Mail.ru prod) |
 | Источники | beautifulsoup4 / lxml / feedparser |
@@ -271,12 +273,14 @@ Bayesian-стат + прогрев user-эмбеддинга + инвалида�
 Нужен Docker. Из корня:
 
 ```bash
-cp .env.example .env      # опц.: GOOGLE_API_KEY/GROQ_API_KEY, BOT_TOKEN, SMTP, ...
+cp .env.example .env      # опц.: DEEPSEEK_API_KEY/GOOGLE_API_KEY/GROQ_API_KEY, BOT_TOKEN, SMTP, ...
 make up                   # pg + redis + api + web + worker + prometheus + grafana + mailhog
 ```
 
-> 📖 **Пошаговый гайд** (что вписать в `.env`, откуда взять ключи, порядок
-> запуска, режим hot-reload, траблшутинг) — [`docs/LOCAL_SETUP.md`](docs/LOCAL_SETUP.md).
+> ⚠️ Базовый образ backend собирается **без** extra `ml` (torch + MiniLM): в режиме
+> `make up` эмбеддинги событий не считаются и cosine-компонента рекомендера равна 0
+> (дефект D1 в [`docs/PROJECT_REVIEW.md`](docs/PROJECT_REVIEW.md)). Для семантики
+> запускай backend на хосте с `uv sync --extra ml` (см. «Локальная разработка»).
 
 | Сервис | URL |
 |---|---|

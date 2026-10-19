@@ -7,28 +7,29 @@
 
 # ✅ ПЕРЕСТРОЙКА В v2 ЗАВЕРШЕНА (M0–M8) — читать первым
 
-Проект **перестроен с нуля в v2** по контракту `docs/REBUILD_PROMPT.md`
-(production-grade, account-центричная, мультиканальная система; гексагональная
-архитектура; async сверху донизу). Все milestone'ы M0–M8 закрыты и в `main`.
+Проект **перестроен с нуля в v2** (production-grade, account-центричная,
+мультиканальная система; гексагональная архитектура; async сверху донизу).
+Все milestone'ы M0–M8 закрыты и в `main`.
 
-**Код v1** (Telegram-центричный, sync-FastAPI/APScheduler) **сохранён в отдельной
-ветке `v1-main`** (весь v1 в корне: `app/`, `scripts/`, `alembic/`…) и в `main`
-больше не лежит. Оттуда исторически портировалась доменная логика (математика
-рекомендера, LLM-промпты, парсеры источников, канонизация, фильтры, eval);
-в докстрингах v2 остались провенанс-ссылки вида «портировано из `legacy/app/...`»
-— это пути внутри ветки `v1-main`. Архитектура v1 НЕ наследуется.
+**Код v1** (Telegram-центричный, sync-FastAPI/APScheduler) в репозитории больше
+не хранится; в репозитории одна ветка — `main`. Из v1 исторически портировалась
+доменная логика (математика рекомендера, LLM-промпты, парсеры источников,
+канонизация, фильтры, eval); в докстрингах v2 остались провенанс-пометки вида
+«портировано из `legacy/app/...`» — это пути кода v1, справочные. Архитектура v1
+НЕ наследуется.
 
 ## Как продолжить работу (в т.ч. в новой холодной сессии)
 
 Просто скажи **«продолжай»** — ассистент должен:
-1. Прочитать `docs/REBUILD_PROMPT.md` (контракт) и этот трекер.
-2. Посмотреть статус milestone'ов ниже + `ARCHITECTURE.md` (актуальный статус).
-3. Взять следующий незакрытый milestone, детализировать план и выполнять его
-   по образцу предыдущих: рабочий `docker compose up`, зелёные тесты
-   (unit+integration), обновлённые доки, **отдельный коммит на milestone**.
+1. Прочитать `docs/PROJECT_REVIEW.md` (аудит 19.10.2026 + план доработок
+   P0/P1/P2 под тему ВКР) и этот трекер.
+2. Посмотреть статус ниже + `ARCHITECTURE.md` (актуальный статус).
+3. Взять следующий незакрытый пункт плана из `docs/PROJECT_REVIEW.md` §8,
+   детализировать и выполнять по образцу milestone'ов: рабочий
+   `docker compose up`, зелёные тесты (unit+integration), обновлённые доки
+   (в т.ч. отметка в `docs/PROJECT_REVIEW.md`), **отдельный коммит на пункт**.
 
-Рабочая ветка разработки: та, что указана в системных инструкциях сессии
-(исторически `claude/rebuild-prompt-docs-2bqhvw`; после переноса — `main`).
+Рабочая ветка разработки — `main` (единственная ветка репозитория).
 
 ## Монорепо v2 (структура)
 
@@ -36,8 +37,7 @@
 backend/   — Python 3.12, uv, гексагон: src/eventmind/{domain,application,infrastructure,interfaces}
 web/       — Next.js (App Router, standalone) — каркас, наполнение в M6
 deploy/    — docker-compose (dev) + helm/ (prod) + prometheus/grafana + loadtest (k6)
-(v1        — в отдельной ветке `v1-main`, не в main)
-docs/REBUILD_PROMPT.md — контракт перестройки
+docs/PROJECT_REVIEW.md — аудит проекта + план доработок под тему ВКР
 ARCHITECTURE.md — живой документ (слои, процессы, обоснования, статус)
 Makefile   — up/test/lint/typecheck/imports/migrate/seed/...
 ```
@@ -103,16 +103,24 @@ Makefile   — up/test/lint/typecheck/imports/migrate/seed/...
   Prometheus alerts (`deploy/prometheus/alerts.yml`) + Grafana LLM/delivery-дашборд.
   k6-смоук (`deploy/loadtest/k6-smoke.js`). Makefile eval/load-test, CI mypy src+eval
   +eval-смоук. 155 unit-тестов, mypy 144 файла. **Все M0–M8 закрыты.**
+- [x] **Пост-M8** — LLM-цепочка начинается с **DeepSeek**: модели из
+  `DEEPSEEK_MODELS` (через запятую, порядок перебора, по звену на модель; пусто —
+  `deepseek-chat`) → Gemini → Groq 70b → Groq 8b (`langchain-deepseek`,
+  structured output через function calling). Аудит проекта и план доработок —
+  `docs/PROJECT_REVIEW.md`. 160 unit-тестов.
+- [ ] **Дальше** — пункты P0 из `docs/PROJECT_REVIEW.md` §8 (эмбеддинги в образе,
+  фиксы D2/D3, текстовая модель пользователя, честный eval, бот B1–B5).
 
 ## Зафиксированные решения v2
 
-Монорепо · очередь **arq** · зависимости **uv** · auth email+пароль (Google
-OAuth в M6) · email через **SMTP** (Mailhog dev / Yandex+Mail.ru prod,
-API-адаптер Resend позже) · первые источники ingestion **habr+rss+kudago**.
+Монорепо · очередь **arq** · зависимости **uv** · LLM **DeepSeek → Gemini → Groq** ·
+auth email+пароль (Google OAuth в M6) · email через **SMTP** (Mailhog dev /
+Yandex+Mail.ru prod, API-адаптер Resend позже) · первые источники ingestion
+**habr+rss+kudago**.
 
 ---
 
-> Ниже — оригинальная заметка про **v1** (код — в ветке `v1-main`). Оставлена как
+> Ниже — оригинальная заметка про **v1** (код v1 в репозитории не хранится). Оставлена как
 > справочник по доменной логике, портированной в v2, но НЕ описывает текущую
 > архитектуру (актуальная — в `ARCHITECTURE.md` и `README.md`).
 
@@ -367,13 +375,10 @@ Postgres-`DATABASE_URL` 3 SQLite-PRAGMA теста пропускаются.
 
 ## Документация
 
-- `docs/Обзор_проекта_EventMind.docx` — авторитетный summary архитектуры.
-- `docs/План_показа_EventMind.docx` — план защиты на 15–20 минут.
-- `docs/отчет_Курсовая.docx` — HSE-стилизованный отчёт (Глава 4 содержит
-  Таблицу 4.2 — Recall@k / nDCG@k и Таблицу 4.3 — оценки LLM-судьи;
-  обе сгенерированы воспроизводимыми скриптами с фиксированным `seed=42`).
-- Бэкап последней «чистой» версии отчёта — `docs/отчет_Курсовая_backup_*.docx`.
-- Все три перегенерируются `python -m scripts.regenerate_docs`.
+Документы курсовой v1 (отчёт, обзор, план показа, презентация, диаграммы)
+из репозитория удалены. Отчёт описывал компоненты v1 (LinUCB, LightGCN,
+mem0), которых в v2 нет — см. `docs/PROJECT_REVIEW.md` §6. В `main` из
+документации — только `docs/PROJECT_REVIEW.md`.
 
 ## Оценочные скрипты (offline eval)
 
