@@ -5,7 +5,7 @@
 """
 from __future__ import annotations
 
-from sqlalchemy import select
+from sqlalchemy import delete, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from eventmind.domain.accounts.entities import (
@@ -15,11 +15,16 @@ from eventmind.domain.accounts.entities import (
     UserChannel,
 )
 from eventmind.domain.accounts.value_objects import ChannelType, DigestFrequency
+from eventmind.domain.recommender.bayesian import PRIOR_ALPHA, PRIOR_BETA
 from eventmind.infrastructure.db.models import (
+    InteractionModel,
+    NotificationModel,
     NotificationPreferenceModel,
     OneTimeTokenModel,
     UserChannelModel,
     UserModel,
+    UserProfileModel,
+    UserTopicStatModel,
 )
 
 
@@ -122,6 +127,61 @@ class SqlAlchemyUserRepository:
         model.oauth_sub = user.oauth_sub
         model.city = user.city
         model.preferred_format = user.preferred_format
+
+    async def absorb(self, source_id: int, target_id: int) -> None:
+        s = self._session
+        # оценки и уведомления — просто переносим
+        await s.execute(
+            update(InteractionModel)
+            .where(InteractionModel.user_id == source_id)
+            .values(user_id=target_id)
+        )
+        await s.execute(
+            update(NotificationModel)
+            .where(NotificationModel.user_id == source_id)
+            .values(user_id=target_id)
+        )
+        # Bayesian-статы тем: совпавшие темы — суммируем свидетельства сверх prior
+        target_stats = {
+            m.topic_id: m
+            for m in (
+                await s.execute(
+                    select(UserTopicStatModel).where(UserTopicStatModel.user_id == target_id)
+                )
+            ).scalars()
+        }
+        source_stats = (
+            await s.execute(
+                select(UserTopicStatModel).where(UserTopicStatModel.user_id == source_id)
+            )
+        ).scalars().all()
+        for stat in source_stats:
+            existing = target_stats.get(stat.topic_id)
+            if existing is None:
+                stat.user_id = target_id
+            else:
+                existing.alpha += max(0.0, stat.alpha - PRIOR_ALPHA)
+                existing.beta += max(0.0, stat.beta - PRIOR_BETA)
+                await s.delete(stat)
+        # текстовый профиль — переносим, только если у target его нет
+        if await s.get(UserProfileModel, target_id) is None:
+            await s.execute(
+                update(UserProfileModel)
+                .where(UserProfileModel.user_id == source_id)
+                .values(user_id=target_id)
+            )
+        target = await s.get(UserModel, target_id)
+        source = await s.get(UserModel, source_id)
+        if target is not None and source is not None:
+            target.city = target.city or source.city
+            target.preferred_format = target.preferred_format or source.preferred_format
+            if target.embedding is None:
+                target.embedding = source.embedding
+        await s.flush()
+        # каналы, токены, prefs и остатки source — каскадом
+        await s.execute(delete(UserChannelModel).where(UserChannelModel.user_id == source_id))
+        await s.execute(delete(UserModel).where(UserModel.id == source_id))
+        await s.flush()
 
 
 class SqlAlchemyUserChannelRepository:

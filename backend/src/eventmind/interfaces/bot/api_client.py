@@ -2,8 +2,11 @@
 
 Бот не лезет в БД и не импортирует application/infrastructure — только HTTP.
 Персональные вызовы идут в `/api/v1/bot/*` (резолв аккаунта по chat_id на
-бэкенде), привязка — в `/api/v1/channels/telegram/confirm`, публичный поиск/
-карточка — в `/api/v1/events/*`.
+бэкенде), привязка веб-аккаунта — в `/api/v1/channels/telegram/confirm`,
+публичный поиск/карточка — в `/api/v1/events/*`.
+
+Ошибки сети/API не роняют бота: методы возвращают None / False / пустое, а
+хендлер показывает человеческое сообщение.
 """
 from __future__ import annotations
 
@@ -12,6 +15,8 @@ from typing import Any
 import httpx
 
 _TIMEOUT = httpx.Timeout(30.0)
+# Разбор профиля «о себе» и пересказ события идут через LLM — дольше обычного.
+_LLM_TIMEOUT = httpx.Timeout(90.0)
 
 
 class BotApiClient:
@@ -23,9 +28,121 @@ class BotApiClient:
         async with httpx.AsyncClient(timeout=_TIMEOUT, headers=self._headers) as c:
             return await c.get(f"{self._base_url}{path}", params=params)
 
+    async def _get_slow(self, path: str, params: dict[str, Any]) -> httpx.Response:
+        async with httpx.AsyncClient(timeout=_LLM_TIMEOUT, headers=self._headers) as c:
+            return await c.get(f"{self._base_url}{path}", params=params)
+
     async def _post(self, path: str, json: dict[str, Any]) -> httpx.Response:
         async with httpx.AsyncClient(timeout=_TIMEOUT, headers=self._headers) as c:
             return await c.post(f"{self._base_url}{path}", json=json)
+
+    async def _send(
+        self,
+        method: str,
+        path: str,
+        *,
+        json: dict[str, Any] | None = None,
+        params: dict[str, Any] | None = None,
+        slow: bool = False,
+    ) -> httpx.Response:
+        timeout = _LLM_TIMEOUT if slow else _TIMEOUT
+        async with httpx.AsyncClient(timeout=timeout, headers=self._headers) as c:
+            return await c.request(method, f"{self._base_url}{path}", json=json, params=params)
+
+    # ── B1: регистрация прямо в боте ──────────────────────────────────────────
+    async def register(self, chat_id: str) -> bool | None:
+        """Создать аккаунт по chat_id (идемпотентно). True — создан, False — уже
+        был, None — сервис недоступен."""
+        try:
+            r = await self._post("/api/v1/bot/register", {"chat_id": chat_id})
+            data = _json_or_none(r)
+        except httpx.HTTPError:
+            return None
+        return bool(data.get("created")) if data is not None else None
+
+    # ── B2: профиль «о себе», настройки, сохранённое ──────────────────────────
+    async def get_profile(self, chat_id: str) -> dict[str, Any] | None:
+        try:
+            return _json_or_none(
+                await self._get("/api/v1/bot/profile", {"chat_id": chat_id})
+            )
+        except httpx.HTTPError:
+            return None
+
+    async def save_profile(
+        self,
+        chat_id: str,
+        about: str,
+        *,
+        interests: list[str] | None = None,
+        anti_interests: list[str] | None = None,
+    ) -> dict[str, Any] | None:
+        try:
+            r = await self._send(
+                "PUT",
+                "/api/v1/bot/profile",
+                json={
+                    "chat_id": chat_id,
+                    "about": about,
+                    "interests": interests,
+                    "anti_interests": anti_interests,
+                },
+                slow=True,
+            )
+            return _json_or_none(r)
+        except httpx.HTTPError:
+            return None
+
+    async def get_settings(self, chat_id: str) -> dict[str, Any] | None:
+        try:
+            return _json_or_none(
+                await self._get("/api/v1/bot/settings", {"chat_id": chat_id})
+            )
+        except httpx.HTTPError:
+            return None
+
+    async def update_settings(self, chat_id: str, **fields: Any) -> dict[str, Any] | None:
+        """PATCH настроек: city / preferred_format ("" — не важно), digest_frequency,
+        quiet_hours_start / quiet_hours_end, clear_quiet_hours."""
+        try:
+            r = await self._send(
+                "PATCH", "/api/v1/bot/settings", json={"chat_id": chat_id, **fields}
+            )
+            return _json_or_none(r)
+        except httpx.HTTPError:
+            return None
+
+    async def saved(self, chat_id: str, *, offset: int = 0, limit: int = 5) -> dict[str, Any]:
+        """{"items": [...], "total": N, "offset": K}; при ошибке — пустая страница."""
+        empty: dict[str, Any] = {"items": [], "total": 0, "offset": offset}
+        try:
+            r = await self._get(
+                "/api/v1/bot/saved", {"chat_id": chat_id, "offset": offset, "limit": limit}
+            )
+            return _json_or_none(r) or empty
+        except httpx.HTTPError:
+            return empty
+
+    async def remove_saved(self, chat_id: str, event_id: int) -> bool:
+        try:
+            r = await self._send(
+                "DELETE", f"/api/v1/bot/saved/{event_id}", params={"chat_id": chat_id}
+            )
+            return r.status_code == 200
+        except httpx.HTTPError:
+            return False
+
+    # ── B3: «📖 Подробнее» ────────────────────────────────────────────────────
+    async def explain(self, chat_id: str, event_id: int) -> dict[str, Any] | None:
+        """{"event": {...}, "summary": str, "summary_source": str, "reasons": [...]}."""
+        try:
+            return _json_or_none(
+                await self._get_slow(
+                    f"/api/v1/bot/events/{event_id}/explain", {"chat_id": chat_id}
+                )
+            )
+        except httpx.HTTPError:
+            return None
 
     # ── привязка аккаунта ─────────────────────────────────────────────────────
     async def confirm_link(self, token: str, chat_id: str) -> tuple[bool, str]:
@@ -104,3 +221,10 @@ def _error_message(response: httpx.Response, default: str) -> str:
     except (ValueError, AttributeError):
         pass
     return default
+
+
+def _json_or_none(response: httpx.Response) -> dict[str, Any] | None:
+    if response.status_code != 200:
+        return None
+    data = response.json()
+    return dict(data) if isinstance(data, dict) else None

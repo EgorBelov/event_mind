@@ -9,6 +9,7 @@ from eventmind.application.accounts.use_cases import (
     ConfirmTelegramLink,
     CreateTelegramLinkToken,
     RegisterUser,
+    RegisterViaTelegram,
     RequestPasswordReset,
     ResetPassword,
     VerifyEmail,
@@ -189,3 +190,41 @@ async def test_telegram_confirm_expired_token_rejected(ctx: dict[str, object]) -
     confirm = ConfirmTelegramLink(ctx["uow"], ctx["tokens"], ctx["clock"])  # type: ignore[arg-type]
     with pytest.raises(TokenInvalidOrExpired):
         await confirm.execute(raw_token=raw, chat_id="55")
+
+
+# ── B1: аккаунт прямо из Telegram-бота ────────────────────────────────────────
+async def test_register_via_telegram_is_idempotent(ctx: dict[str, object]) -> None:
+    store: FakeStore = ctx["store"]  # type: ignore[assignment]
+    register = RegisterViaTelegram(ctx["uow"])  # type: ignore[arg-type]
+
+    first = await register.execute("4242")
+    assert first.created is True
+    user = store.users[first.user_id]
+    assert user.email is None and user.password_hash is None and user.is_telegram_only
+    channel = next(c for c in store.channels.values() if c.type is ChannelType.TELEGRAM)
+    assert channel.address == "4242" and channel.verified is True
+    assert store.prefs[first.user_id].telegram_enabled is True
+
+    again = await register.execute("4242")
+    assert again.created is False and again.user_id == first.user_id
+    assert len(store.users) == 1
+
+
+async def test_linking_web_account_absorbs_telegram_only_account(
+    ctx: dict[str, object],
+) -> None:
+    store: FakeStore = ctx["store"]  # type: ignore[assignment]
+    bot_account = await RegisterViaTelegram(ctx["uow"]).execute("777")  # type: ignore[arg-type]
+    web_user = await _register_uc(ctx).execute(email="a@b.com", password="password123")
+
+    create = CreateTelegramLinkToken(ctx["uow"], ctx["tokens"], ctx["clock"], CONFIG)  # type: ignore[arg-type]
+    confirm = ConfirmTelegramLink(ctx["uow"], ctx["tokens"], ctx["clock"])  # type: ignore[arg-type]
+    raw = await create.execute(user_id=web_user.id)  # type: ignore[arg-type]
+
+    linked = await confirm.execute(raw_token=raw, chat_id="777")
+
+    assert linked == web_user.id
+    assert store.absorbed == [(bot_account.user_id, web_user.id)]
+    assert bot_account.user_id not in store.users
+    channel = next(c for c in store.channels.values() if c.type is ChannelType.TELEGRAM)
+    assert channel.user_id == web_user.id and channel.address == "777"

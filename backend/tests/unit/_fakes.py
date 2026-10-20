@@ -24,6 +24,7 @@ class FakeStore:
     prefs: dict[int, NotificationPreference] = field(default_factory=dict)
     tokens: dict[int, OneTimeToken] = field(default_factory=dict)
     outbox: list[tuple[str, dict[str, object]]] = field(default_factory=list)
+    absorbed: list[tuple[int, int]] = field(default_factory=list)  # (source, target)
     _ids: itertools.count = field(default_factory=lambda: itertools.count(1))
 
     def next_id(self) -> int:
@@ -49,6 +50,13 @@ class _Users:
     async def update(self, user: User) -> None:
         assert user.id is not None
         self._s.users[user.id] = user
+
+    async def absorb(self, source_id: int, target_id: int) -> None:
+        self._s.absorbed.append((source_id, target_id))
+        self._s.users.pop(source_id, None)
+        self._s.prefs.pop(source_id, None)
+        for cid in [cid for cid, c in self._s.channels.items() if c.user_id == source_id]:
+            del self._s.channels[cid]
 
 
 class _Channels:

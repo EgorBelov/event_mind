@@ -9,10 +9,11 @@ from __future__ import annotations
 from datetime import datetime
 from types import TracebackType
 
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from eventmind.application.ports.recommender import BayesianStats, UserPrefs
+from eventmind.domain.events.entities import Event
 from eventmind.domain.recommender.bayesian import (
     PRIOR_ALPHA,
     PRIOR_BETA,
@@ -29,6 +30,10 @@ from eventmind.infrastructure.db.models import (
     UserModel,
     UserProfileModel,
     UserTopicStatModel,
+)
+from eventmind.infrastructure.recommender.candidate_generator import (
+    event_model_to_entity,
+    load_event_topics,
 )
 
 _POSITIVE_ACTIONS = ("like", "save")
@@ -235,6 +240,49 @@ class SqlAlchemyRecommendationUnitOfWork:
             model.updated_at = profile.updated_at
         # recompute_user_embedding в той же транзакции читает профиль через get
         await self._s.flush()
+
+    async def list_saved(
+        self, user_id: int, *, offset: int, limit: int
+    ) -> tuple[list[Event], int]:
+        saved = (
+            select(
+                InteractionModel.event_id,
+                func.max(InteractionModel.created_at).label("saved_at"),
+            )
+            .where(InteractionModel.user_id == user_id, InteractionModel.action == "save")
+            .group_by(InteractionModel.event_id)
+            .subquery()
+        )
+        total = int(
+            (await self._s.execute(select(func.count()).select_from(saved))).scalar_one()
+        )
+        rows = await self._s.execute(
+            select(EventModel)
+            .join(saved, saved.c.event_id == EventModel.id)
+            .order_by(saved.c.saved_at.desc(), EventModel.id)
+            .offset(offset)
+            .limit(limit)
+        )
+        models = list(rows.scalars().all())
+        topics = await load_event_topics(self._s, [m.id for m in models])
+        return [event_model_to_entity(m, topics.get(m.id, [])) for m in models], total
+
+    async def remove_interactions(self, user_id: int, event_id: int, action: str) -> int:
+        where = (
+            InteractionModel.user_id == user_id,
+            InteractionModel.event_id == event_id,
+            InteractionModel.action == action,
+        )
+        count = int(
+            (
+                await self._s.execute(
+                    select(func.count()).select_from(InteractionModel).where(*where)
+                )
+            ).scalar_one()
+        )
+        if count:
+            await self._s.execute(delete(InteractionModel).where(*where))
+        return count
 
     async def known_topic_codes(self, *, limit: int) -> list[str]:
         rows = await self._s.execute(

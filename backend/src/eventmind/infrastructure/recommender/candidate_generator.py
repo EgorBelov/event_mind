@@ -24,7 +24,7 @@ _GRACE_HOURS = 6  # показываем события, начавшиеся д
 _EXCLUDING_ACTIONS = ("like", "dislike", "save")
 
 
-def _to_entity(m: EventModel, topics: list[str]) -> Event:
+def event_model_to_entity(m: EventModel, topics: list[str]) -> Event:
     return Event(
         id=m.id,
         source=m.source,
@@ -99,18 +99,20 @@ class PgvectorCandidateGenerator:
             events = list((await session.execute(query)).scalars().all())
             if not events:
                 return []
-            topic_map = await self._load_topics(session, [e.id for e in events])
-        return [_to_entity(e, topic_map.get(e.id, [])) for e in events]
+            topic_map = await load_event_topics(session, [e.id for e in events])
+        return [event_model_to_entity(e, topic_map.get(e.id, [])) for e in events]
 
-    async def _load_topics(
-        self, session: AsyncSession, event_ids: list[int]
-    ) -> dict[int, list[str]]:
-        rows = await session.execute(
-            select(EventTopicModel.event_id, TopicModel.code)
-            .join(TopicModel, EventTopicModel.topic_id == TopicModel.id)
-            .where(EventTopicModel.event_id.in_(event_ids))
-        )
-        out: dict[int, list[str]] = {}
-        for event_id, code in rows.all():
-            out.setdefault(event_id, []).append(code)
-        return out
+
+async def load_event_topics(session: AsyncSession, event_ids: list[int]) -> dict[int, list[str]]:
+    """{event_id: [topic codes]} одним запросом."""
+    if not event_ids:
+        return {}
+    rows = await session.execute(
+        select(EventTopicModel.event_id, TopicModel.code)
+        .join(TopicModel, EventTopicModel.topic_id == TopicModel.id)
+        .where(EventTopicModel.event_id.in_(event_ids))
+    )
+    out: dict[int, list[str]] = {}
+    for event_id, code in rows.all():
+        out.setdefault(event_id, []).append(code)
+    return out

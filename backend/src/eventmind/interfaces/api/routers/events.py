@@ -6,38 +6,23 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Query
 from starlette.status import HTTP_404_NOT_FOUND
 
+from eventmind.application.recommender.explain import ExplainEvent
 from eventmind.application.search.use_cases import GetEvent, NlSearch
 from eventmind.domain.events.entities import Event
-from eventmind.interfaces.api.dependencies import get_event_uc, get_nl_search
+from eventmind.interfaces.api.dependencies import (
+    CurrentUser,
+    get_event_uc,
+    get_explain_event_uc,
+    get_nl_search,
+)
 from eventmind.interfaces.api.errors import ApiError
-from eventmind.interfaces.api.schemas import EventDetailResponse, NlSearchResponse
+from eventmind.interfaces.api.schemas import EventDetailResponse, ExplainResponse, NlSearchResponse
 
 router = APIRouter(prefix="/api/v1/events", tags=["events"])
 
 
 def _to_response(event: Event) -> EventDetailResponse:
-    assert event.id is not None
-    return EventDetailResponse(
-        id=event.id,
-        source=event.source,
-        title=event.title,
-        description=event.description,
-        format=event.format,
-        city=event.city,
-        level=event.level,
-        date=event.date,
-        start_at=event.start_at.isoformat() if event.start_at else None,
-        event_type=event.event_type,
-        target_audience=event.target_audience,
-        source_url=event.source_url,
-        summary=event.summary,
-        tech_stack=event.tech_stack,
-        seniority=event.seniority,
-        quality_score=event.quality_score,
-        hype_score=event.hype_score,
-        series_slug=event.series_slug,
-        topics=event.topics,
-    )
+    return EventDetailResponse.from_entity(event)
 
 
 @router.get("/nl-search", response_model=NlSearchResponse)
@@ -63,3 +48,21 @@ async def event_detail(
     if event is None:
         raise ApiError(HTTP_404_NOT_FOUND, "not_found", "Событие не найдено")
     return _to_response(event)
+
+
+@router.get("/{event_id}/explain", response_model=ExplainResponse)
+async def explain_event(
+    event_id: int,
+    current_user: CurrentUser,
+    use_case: Annotated[ExplainEvent, Depends(get_explain_event_uc)],
+) -> ExplainResponse:
+    """«📖 Подробнее»: пересказ события (LLM, кэш 6 ч) + почему рекомендовано."""
+    result = await use_case.execute(event_id, user_id=current_user.id)
+    if result is None:
+        raise ApiError(HTTP_404_NOT_FOUND, "not_found", "Событие не найдено")
+    return ExplainResponse(
+        event=EventDetailResponse.from_entity(result.event),
+        summary=result.summary,
+        summary_source=result.summary_source,
+        reasons=result.reasons,
+    )

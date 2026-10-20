@@ -18,7 +18,7 @@ from eventmind.application.recommender.profile_extractor import (
     clean_about,
     postprocess_profile,
 )
-from eventmind.application.recommender.use_cases import _user_context
+from eventmind.application.recommender.use_cases import build_user_context
 from eventmind.domain.recommender.scoring import cosine_similarity
 from eventmind.domain.recommender.user_model import (
     ANTI_INTEREST_PENALTY,
@@ -79,7 +79,7 @@ def test_merge_declared_topics() -> None:
 def test_user_context_uses_declared_and_anti_interests() -> None:
     prefs = UserPrefs(interests=["ai_ml"], anti_interests=["frontend"])
     stats = {"frontend": (7.0, 1.0), "backend": (4.0, 1.0)}
-    ctx = _user_context(prefs, stats)
+    ctx = build_user_context(prefs, stats)
     assert ctx.topics == {"ai_ml", "backend"}
     assert ctx.topic_weights["frontend"] == -ANTI_INTEREST_PENALTY
 

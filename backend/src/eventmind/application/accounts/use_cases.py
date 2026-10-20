@@ -7,6 +7,7 @@
 """
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import timedelta
 
 from eventmind.application.accounts.config import AccountsConfig
@@ -312,12 +313,18 @@ class ConfirmTelegramLink:
             assert token.user_id is not None
             user_id = token.user_id
 
-            # chat_id уже привязан к другому аккаунту? — запрещаем.
+            # chat_id уже привязан к другому аккаунту? Если это аккаунт, созданный
+            # прямо в боте (B1), — сливаем его в веб-аккаунт (история, профиль);
+            # полноценный чужой аккаунт — запрещаем.
             existing = await uow.channels.get_by_type_and_address(
                 ChannelType.TELEGRAM, chat_id
             )
             if existing is not None and existing.user_id != user_id:
-                raise ChannelAlreadyLinked()
+                owner = await uow.users.get_by_id(existing.user_id)
+                if owner is None or not owner.is_telegram_only:
+                    raise ChannelAlreadyLinked()
+                assert owner.id is not None
+                await uow.users.absorb(owner.id, user_id)
 
             channel = await uow.channels.get_by_user_and_type(user_id, ChannelType.TELEGRAM)
             if channel is None:
@@ -343,6 +350,58 @@ class ConfirmTelegramLink:
             await uow.tokens.update(token)
             await uow.commit()
         return user_id
+
+
+@dataclass(slots=True)
+class TelegramRegistration:
+    user_id: int
+    created: bool
+
+
+class RegisterViaTelegram:
+    """Аккаунт прямо из бота (B1): без email и пароля, идентичность — telegram-канал.
+
+    Идемпотентно по chat_id: повторный /start возвращает существующий аккаунт.
+    Гонка двух одновременных /start упирается в уникальность канала
+    (type, address) — проигравший перечитывает и возвращает победителя.
+    """
+
+    def __init__(self, uow_factory: UnitOfWorkFactory) -> None:
+        self._uow_factory = uow_factory
+
+    async def _existing(self, chat_id: str) -> int | None:
+        async with self._uow_factory() as uow:
+            channel = await uow.channels.get_by_type_and_address(ChannelType.TELEGRAM, chat_id)
+            return channel.user_id if channel is not None else None
+
+    async def execute(self, chat_id: str) -> TelegramRegistration:
+        existing = await self._existing(chat_id)
+        if existing is not None:
+            return TelegramRegistration(user_id=existing, created=False)
+        try:
+            async with self._uow_factory() as uow:
+                user = await uow.users.add(User(email=None, password_hash=None))
+                assert user.id is not None
+                await uow.channels.add(
+                    UserChannel(
+                        user_id=user.id,
+                        type=ChannelType.TELEGRAM,
+                        address=chat_id,
+                        verified=True,
+                    )
+                )
+                await uow.preferences.add(
+                    NotificationPreference(
+                        user_id=user.id, email_enabled=False, telegram_enabled=True
+                    )
+                )
+                await uow.commit()
+        except Exception:
+            raced = await self._existing(chat_id)
+            if raced is None:
+                raise
+            return TelegramRegistration(user_id=raced, created=False)
+        return TelegramRegistration(user_id=user.id, created=True)
 
 
 class UpdateProfile:
@@ -382,7 +441,9 @@ class UpdatePreferences:
         telegram_enabled: bool | None = None,
         quiet_hours_start: int | None = None,
         quiet_hours_end: int | None = None,
+        clear_quiet_hours: bool = False,
     ) -> NotificationPreference:
+        """None — поле не меняется; `clear_quiet_hours` — выключить тихие часы."""
         async with self._uow_factory() as uow:
             pref = await uow.preferences.get_by_user(user_id)
             if pref is None:
@@ -397,6 +458,9 @@ class UpdatePreferences:
                 pref.quiet_hours_start = quiet_hours_start
             if quiet_hours_end is not None:
                 pref.quiet_hours_end = quiet_hours_end
+            if clear_quiet_hours:
+                pref.quiet_hours_start = None
+                pref.quiet_hours_end = None
             await uow.preferences.update(pref)
             await uow.commit()
         return pref

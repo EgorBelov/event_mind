@@ -20,6 +20,7 @@ from eventmind.application.accounts.use_cases import (
     ConfirmTelegramLink,
     CreateTelegramLinkToken,
     RegisterUser,
+    RegisterViaTelegram,
     RequestPasswordReset,
     ResetPassword,
     ResolveAccountByTelegram,
@@ -39,11 +40,14 @@ from eventmind.application.notifications.use_cases import (
     MarkNotificationRead,
     Unsubscribe,
 )
+from eventmind.application.recommender.explain import ExplainEvent
 from eventmind.application.recommender.profile import GetUserProfile, UpdateUserProfile
 from eventmind.application.recommender.use_cases import (
     GetRecommendations,
+    ListSavedEvents,
     RecordInteraction,
     RefreshUserEmbeddings,
+    RemoveSavedEvent,
 )
 from eventmind.application.search.use_cases import GetEvent, NlSearch
 from eventmind.domain.accounts.entities import User
@@ -130,6 +134,10 @@ def get_resolve_telegram(container: ContainerDep) -> ResolveAccountByTelegram:
     return ResolveAccountByTelegram(container.uow_factory)
 
 
+def get_register_via_telegram(container: ContainerDep) -> RegisterViaTelegram:
+    return RegisterViaTelegram(container.uow_factory)
+
+
 # ── ingestion (M3) ───────────────────────────────────────────────────────────
 def get_load_source(container: ContainerDep) -> LoadSource:
     return LoadSource(container.events_uow_factory, container.task_queue)
@@ -185,6 +193,27 @@ def get_update_user_profile(container: ContainerDep) -> UpdateUserProfile:
 
 def get_user_profile_uc(container: ContainerDep) -> GetUserProfile:
     return GetUserProfile(container.recommendation_uow_factory)
+
+
+def get_list_saved_uc(container: ContainerDep) -> ListSavedEvents:
+    return ListSavedEvents(container.recommendation_uow_factory)
+
+
+def get_remove_saved_uc(container: ContainerDep) -> RemoveSavedEvent:
+    return RemoveSavedEvent(
+        container.recommendation_uow_factory, container.cache, container.clock, ScoringWeights()
+    )
+
+
+def get_explain_event_uc(container: ContainerDep) -> ExplainEvent:
+    return ExplainEvent(
+        container.search_repository,
+        container.recommendation_uow_factory,
+        container.llm,
+        container.cache,
+        container.clock,
+        ScoringWeights(),
+    )
 
 
 def get_record_interaction_uc(container: ContainerDep) -> RecordInteraction:

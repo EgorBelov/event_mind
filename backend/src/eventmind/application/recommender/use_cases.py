@@ -41,7 +41,7 @@ class RecommendationItem:
     topics: list[str] = field(default_factory=list)
 
 
-def _user_context(prefs: UserPrefs, stats: BayesianStats) -> UserContext:
+def build_user_context(prefs: UserPrefs, stats: BayesianStats) -> UserContext:
     """Собрать профиль скоринга: выученные интересы (темы с α>β) + объявленные в
     текстовом профиле; анти-интересы — штраф в rule-скоринге."""
     learned = {code: int(round(a - b)) for code, (a, b) in stats.items() if a > b}
@@ -56,7 +56,7 @@ def _user_context(prefs: UserPrefs, stats: BayesianStats) -> UserContext:
     )
 
 
-def _features(event: Event) -> EventFeatures:
+def event_to_features(event: Event) -> EventFeatures:
     assert event.id is not None
     return EventFeatures(
         id=event.id,
@@ -129,8 +129,8 @@ class GetRecommendations:
         )
         by_id = {ev.id: ev for ev in candidates if ev.id is not None}
         ranked = self._ranker.rank(
-            _user_context(prefs, stats),
-            [_features(ev) for ev in candidates if ev.id is not None],
+            build_user_context(prefs, stats),
+            [event_to_features(ev) for ev in candidates if ev.id is not None],
             stats,
             now=now,
             limit=self._config.result_limit,
@@ -204,3 +204,58 @@ class RefreshUserEmbeddings:
         for user_id in user_ids:
             await self._cache.delete(_cache_key(user_id))
         return len(user_ids)
+
+
+@dataclass(slots=True)
+class SavedPage:
+    items: list[Event]
+    total: int
+    offset: int
+
+
+class ListSavedEvents:
+    """«Сохранённое» пользователя — общее для веба и бота (последние — первыми)."""
+
+    def __init__(self, uow_factory: RecommendationUnitOfWorkFactory) -> None:
+        self._uow_factory = uow_factory
+
+    async def execute(self, user_id: int, *, offset: int = 0, limit: int = 10) -> SavedPage:
+        async with self._uow_factory() as uow:
+            items, total = await uow.list_saved(user_id, offset=offset, limit=limit)
+        return SavedPage(items=items, total=total, offset=offset)
+
+
+class RemoveSavedEvent:
+    """Убрать событие из сохранённого: удалить save, откатить Bayesian-сигнал
+    (direction=-1), пересчитать эмбеддинг пользователя, сбросить кэш выдачи."""
+
+    def __init__(
+        self,
+        uow_factory: RecommendationUnitOfWorkFactory,
+        cache: Cache,
+        clock: Clock,
+        weights: ScoringWeights,
+    ) -> None:
+        self._uow_factory = uow_factory
+        self._cache = cache
+        self._clock = clock
+        self._weights = weights
+
+    async def execute(self, user_id: int, event_id: int) -> bool:
+        async with self._uow_factory() as uow:
+            removed = await uow.remove_interactions(user_id, event_id, "save")
+            if not removed:
+                return False
+            codes = await uow.get_event_topic_codes(event_id)
+            await uow.apply_feedback_to_stats(
+                user_id,
+                codes,
+                "save",
+                -1,
+                now=self._clock.now(),
+                gamma=self._weights.bayes_decay_per_day,
+            )
+            await uow.recompute_user_embedding(user_id)
+            await uow.commit()
+        await self._cache.delete(_cache_key(user_id))
+        return True

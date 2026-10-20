@@ -17,10 +17,15 @@ from eventmind.domain.accounts.value_objects import (
 
 @dataclass
 class User:
-    """Аккаунт пользователя. Идентичность — email, не Telegram."""
+    """Аккаунт пользователя.
 
-    email: str
-    password_hash: str | None  # None допустимо только для будущего OAuth-only
+    Обычно идентичность — email. Аккаунт, созданный прямо в Telegram-боте (B1),
+    живёт без email и пароля — его идентичность — привязанный telegram-канал;
+    при последующей привязке к веб-аккаунту он сливается в него.
+    """
+
+    email: str | None
+    password_hash: str | None  # None — OAuth-only или Telegram-only аккаунт
     id: int | None = None
     email_verified: bool = False
     is_active: bool = True
@@ -31,6 +36,11 @@ class User:
     city: str | None = None
     preferred_format: str | None = None
     created_at: datetime | None = None
+
+    @property
+    def is_telegram_only(self) -> bool:
+        """Создан в боте: нет ни email, ни пароля, ни соц-логина."""
+        return self.email is None and self.password_hash is None and not self.oauth_provider
 
     def mark_email_verified(self) -> None:
         self.email_verified = True

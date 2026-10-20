@@ -4,6 +4,7 @@ from __future__ import annotations
 from pydantic import BaseModel, EmailStr, Field
 
 from eventmind.domain.accounts.entities import NotificationPreference, User
+from eventmind.domain.events.entities import Event
 from eventmind.domain.recommender.user_model import UserProfile
 
 
@@ -32,7 +33,7 @@ class PasswordResetConfirm(BaseModel):
 
 class UserResponse(BaseModel):
     id: int
-    email: str
+    email: str | None  # None — аккаунт создан в Telegram-боте
     email_verified: bool
     is_active: bool
     city: str | None = None
@@ -127,6 +128,46 @@ class EventDetailResponse(BaseModel):
     series_slug: str | None
     topics: list[str]
 
+    @classmethod
+    def from_entity(cls, event: Event) -> EventDetailResponse:
+        assert event.id is not None
+        return cls(
+            id=event.id,
+            source=event.source,
+            title=event.title,
+            description=event.description,
+            format=event.format,
+            city=event.city,
+            level=event.level,
+            date=event.date,
+            start_at=event.start_at.isoformat() if event.start_at else None,
+            event_type=event.event_type,
+            target_audience=event.target_audience,
+            source_url=event.source_url,
+            summary=event.summary,
+            tech_stack=event.tech_stack,
+            seniority=event.seniority,
+            quality_score=event.quality_score,
+            hype_score=event.hype_score,
+            series_slug=event.series_slug,
+            topics=event.topics,
+        )
+
+
+class SavedPageResponse(BaseModel):
+    items: list[EventDetailResponse]
+    total: int
+    offset: int
+
+
+class ExplainResponse(BaseModel):
+    """«📖 Подробнее»: пересказ события + персональные причины рекомендации."""
+
+    event: EventDetailResponse
+    summary: str
+    summary_source: str  # llm | description
+    reasons: list[str]
+
 
 class NlSearchResponse(BaseModel):
     relaxed: bool
@@ -198,6 +239,39 @@ class BotInteractionRequest(BaseModel):
     chat_id: str = Field(min_length=1, max_length=64)
     event_id: int
     action: str = Field(pattern="^(like|dislike|save|view)$")
+
+
+class BotRegisterRequest(BaseModel):
+    chat_id: str = Field(min_length=1, max_length=64)
+
+
+class BotRegisterResponse(BaseModel):
+    user_id: int
+    created: bool
+
+
+class BotProfileRequest(UserProfileRequest):
+    chat_id: str = Field(min_length=1, max_length=64)
+
+
+class BotSettingsResponse(BaseModel):
+    city: str | None
+    preferred_format: str | None
+    digest_frequency: str
+    quiet_hours_start: int | None
+    quiet_hours_end: int | None
+
+
+class BotSettingsUpdateRequest(BaseModel):
+    """None — поле не меняется; пустая строка city / preferred_format — «не важно»."""
+
+    chat_id: str = Field(min_length=1, max_length=64)
+    city: str | None = Field(default=None, max_length=64)
+    preferred_format: str | None = Field(default=None, pattern="^(|online|offline|hybrid)$")
+    digest_frequency: str | None = Field(default=None, pattern="^(off|daily|weekly)$")
+    quiet_hours_start: int | None = Field(default=None, ge=0, le=23)
+    quiet_hours_end: int | None = Field(default=None, ge=0, le=23)
+    clear_quiet_hours: bool = False
 
 
 class PreferencesResponse(BaseModel):

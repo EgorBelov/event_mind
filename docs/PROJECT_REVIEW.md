@@ -251,6 +251,31 @@ top-level пакет (`bot/` рядом с `web/`) имеет смысл, тол
 
 ### P0 — Telegram-бот как самостоятельный интерфейс (B1–B5, §7)
 
+> **Статус (20.10.2026): код B1–B5 написан, НЕ запускался.** Проверено только
+> ruff / mypy / import-linter / unit-тесты (зелёные).
+> - **B1** ✅ `users.email` nullable (миграция 0007), `RegisterViaTelegram`,
+>   `POST /bot/register`; при привязке веб-аккаунта Telegram-only аккаунт
+>   сливается (`UserRepository.absorb`: оценки, статы тем, профиль, уведомления).
+>   Unit-тесты есть.
+> - **B2** ✅ онбординг (FSM: о себе → формат → город), `/settings` (о себе,
+>   город, формат, дайджест, тихие часы), `/saved` с «Убрать»; API
+>   `/bot/{profile,settings,saved}` + веб `GET/DELETE /api/v1/saved`
+>   (`ListSavedEvents`, `RemoveSavedEvent` с откатом Bayesian).
+> - **B3** ✅ `ExplainEvent`: LLM-пересказ (кэш 6 ч, fallback — описание) +
+>   детерминированные причины (`domain/recommender/explain.py`);
+>   `/bot/events/{id}/explain`, веб `GET /api/v1/events/{id}/explain`.
+> - **B4** ✅ лента по 5 + «Ещё ▶» без повторов (показанное — в FSM, Redis).
+> - **B5** ✅ под результатами поиска — 👍 ⭐ 👎 📖 🔗; без аккаунта — создаётся.
+> - Меню команд (`set_my_commands`) — сделано.
+>
+> **Не сделано / следующий шаг:** unit-тесты на `explain_match`, `ExplainEvent`,
+> `ListSavedEvents` / `RemoveSavedEvent`, рендеры бота (`render_profile`,
+> `render_explain`, `next_feed_page`) и новые методы `BotApiClient`;
+> integration-тесты bot-эндпоинтов; веб-страница «Сохранённое» и кнопка
+> «Подробнее» в вебе (API готов); запуск бота в стандартном `make up`;
+> обновить `docs/LAUNCH.md` (раздел про бота). Затем — первый реальный запуск
+> на Windows по `docs/LAUNCH.md`.
+
 Бот остаётся клиентом API (только HTTP через `BotApiClient`), поэтому каждая
 задача — это bot-facing эндпоинт в `/api/v1/bot/*` плюс хендлеры бота.
 

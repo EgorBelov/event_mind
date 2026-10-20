@@ -69,6 +69,16 @@ class RecommendationUnitOfWork(Protocol):
 
     async def get_profile(self, user_id: int) -> UserProfile | None: ...
     async def save_profile(self, profile: UserProfile) -> None: ...
+    async def list_saved(
+        self, user_id: int, *, offset: int, limit: int
+    ) -> tuple[list[Event], int]:
+        """Сохранённые события (последние сохранённые — первыми) и их общее число."""
+        ...
+
+    async def remove_interactions(self, user_id: int, event_id: int, action: str) -> int:
+        """Удалить действия пользователя над событием; вернуть число удалённых."""
+        ...
+
     async def known_topic_codes(self, *, limit: int) -> list[str]:
         """Темы каталога по убыванию числа событий — опора для извлечения профиля."""
         ...
