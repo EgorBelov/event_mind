@@ -222,6 +222,31 @@ class InteractionModel(Base):
     )
 
 
+class UserProfileModel(Base):
+    """Текстовый профиль пользователя + структурная выжимка (LLM) + его эмбеддинг.
+
+    `users.embedding` — итоговый вектор (Rocchio: профиль + история); здесь —
+    только вектор самого профиля.
+    """
+
+    __tablename__ = "user_profiles"
+
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), primary_key=True
+    )
+    about: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    role: Mapped[str] = mapped_column(String(80), nullable=False, default="")
+    level: Mapped[str] = mapped_column(String(16), nullable=False, default="any")
+    stack: Mapped[list[str]] = mapped_column(JSONB, nullable=False, default=list)
+    interests: Mapped[list[str]] = mapped_column(JSONB, nullable=False, default=list)
+    anti_interests: Mapped[list[str]] = mapped_column(JSONB, nullable=False, default=list)
+    goals: Mapped[list[str]] = mapped_column(JSONB, nullable=False, default=list)
+    embedding: Mapped[list[float] | None] = mapped_column(Vector(EMBEDDING_DIM), nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
+    )
+
+
 class UserTopicStatModel(Base):
     __tablename__ = "user_topic_stats"
     __table_args__ = (

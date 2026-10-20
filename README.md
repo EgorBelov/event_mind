@@ -260,12 +260,12 @@ Bayesian-стат + прогрев user-эмбеддинга + инвалида�
 | Группа | Эндпоинты |
 |---|---|
 | auth | `POST /auth/{register,login,logout,refresh,verify-email,password-reset,password-reset/confirm,google}` |
-| users | `GET/PATCH /users/me` · `GET/PATCH /users/me/preferences` |
+| users | `GET/PATCH /users/me` · `GET/PUT /users/me/profile` (текст «о себе» → модель интересов) · `GET/PATCH /users/me/preferences` |
 | channels | `POST /channels/telegram/{link-token,confirm}` |
 | events | `GET /events/nl-search` · `GET /events/{id}` |
 | recommendations | `GET /recommendations` · `POST /interactions` |
 | notifications | `GET /notifications` · `POST /notifications/{id}/read` · `GET /notifications/unsubscribe` |
-| ingestion | `POST /ingestion/{load-source,load-all,normalize}` · `GET /ingestion/status` |
+| ingestion | `POST /ingestion/{load-source,load-all,normalize,retry-failed,backfill-embeddings}` · `GET /ingestion/status` |
 | bot (internal) | `GET /bot/{status,recommendations}` · `POST /bot/interactions` (X-API-Key) |
 | ops | `/health` · `/ready` · `/metrics` · `POST /admin/llm/{status,reprobe}` |
 

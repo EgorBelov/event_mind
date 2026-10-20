@@ -12,6 +12,7 @@ import type {
   Preferences,
   Recommendation,
   TelegramLinkToken,
+  UserProfile,
   UserResponse,
 } from "./types";
 
@@ -61,6 +62,18 @@ export const api = {
     request<UserResponse>("PATCH", "/api/v1/users/me", {
       city,
       preferred_format: preferredFormat,
+    }),
+  getUserProfile: () => request<UserProfile>("GET", "/api/v1/users/me/profile"),
+  // interests / anti_interests: null — пусть система извлечёт сама из текста
+  saveUserProfile: (
+    about: string,
+    interests: string[] | null = null,
+    antiInterests: string[] | null = null,
+  ) =>
+    request<UserProfile>("PUT", "/api/v1/users/me/profile", {
+      about,
+      interests,
+      anti_interests: antiInterests,
     }),
   getPreferences: () => request<Preferences>("GET", "/api/v1/users/me/preferences"),
   updatePreferences: (patch: Partial<Preferences>) =>

@@ -16,6 +16,7 @@ from eventmind.application.recommender.config import RecommenderConfig
 from eventmind.application.recommender.ranker import HybridRanker
 from eventmind.domain.events.entities import Event
 from eventmind.domain.recommender.scoring import EventFeatures, UserContext
+from eventmind.domain.recommender.user_model import merge_declared_topics
 from eventmind.domain.recommender.weights import ScoringWeights
 
 # Разрешённые действия feedback (like/save — позитив, dislike — негатив, view — лог).
@@ -41,9 +42,11 @@ class RecommendationItem:
 
 
 def _user_context(prefs: UserPrefs, stats: BayesianStats) -> UserContext:
-    """Собрать профиль скоринга: интересы — темы с положительным перевесом (α>β)."""
-    topics = {code for code, (a, b) in stats.items() if a > b}
-    weights = {code: int(round(a - b)) for code, (a, b) in stats.items() if a > b}
+    """Собрать профиль скоринга: выученные интересы (темы с α>β) + объявленные в
+    текстовом профиле; анти-интересы — штраф в rule-скоринге."""
+    learned = {code: int(round(a - b)) for code, (a, b) in stats.items() if a > b}
+    weights = merge_declared_topics(learned, prefs.interests, prefs.anti_interests)
+    topics = (set(learned) | set(prefs.interests)) - set(prefs.anti_interests)
     return UserContext(
         topics=topics,
         topic_weights=weights,

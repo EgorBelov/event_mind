@@ -77,3 +77,44 @@ def test_profile_requires_auth(settings: Settings) -> None:
     with TestClient(create_app(settings)) as client:
         assert client.get("/api/v1/users/me").status_code == 401
         assert client.patch("/api/v1/users/me", json={"city": "x"}).status_code == 401
+
+
+def test_text_profile_roundtrip(settings: Settings) -> None:
+    """PUT /me/profile → GET: текст и явные списки сохраняются.
+
+    LLM в тестах недоступна (нет ключей) — use-case деградирует до профиля без
+    LLM-выжимки, явные интересы/анти-интересы берутся из запроса как есть.
+    """
+    with TestClient(create_app(settings)) as client:
+        _register(client, "about@example.com")
+
+        empty = client.get("/api/v1/users/me/profile")
+        assert empty.status_code == 200
+        assert empty.json()["is_empty"] is True
+
+        resp = client.put(
+            "/api/v1/users/me/profile",
+            json={
+                "about": "Backend на Go, хочу в ML",
+                "interests": ["Backend", "ai_ml"],
+                "anti_interests": ["frontend"],
+            },
+        )
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        assert body["about"] == "Backend на Go, хочу в ML"
+        assert body["interests"] == ["backend", "ai_ml"]
+        assert body["anti_interests"] == ["frontend"]
+        assert body["is_empty"] is False
+
+        again = client.get("/api/v1/users/me/profile").json()
+        assert again["interests"] == ["backend", "ai_ml"]
+
+        # рекомендации с профилем не падают (cold-start или kNN по профилю)
+        assert client.get("/api/v1/recommendations").status_code == 200
+
+
+def test_text_profile_requires_auth(settings: Settings) -> None:
+    with TestClient(create_app(settings)) as client:
+        assert client.get("/api/v1/users/me/profile").status_code == 401
+        assert client.put("/api/v1/users/me/profile", json={"about": "x"}).status_code == 401

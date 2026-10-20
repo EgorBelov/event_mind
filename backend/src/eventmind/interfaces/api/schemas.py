@@ -4,6 +4,7 @@ from __future__ import annotations
 from pydantic import BaseModel, EmailStr, Field
 
 from eventmind.domain.accounts.entities import NotificationPreference, User
+from eventmind.domain.recommender.user_model import UserProfile
 
 
 class RegisterRequest(BaseModel):
@@ -136,6 +137,42 @@ class NlSearchResponse(BaseModel):
 class ProfileUpdateRequest(BaseModel):
     city: str | None = None
     preferred_format: str | None = None
+
+
+class UserProfileRequest(BaseModel):
+    """Текст «о себе» + необязательные правки списков (перекрывают извлечённое LLM)."""
+
+    about: str = Field(default="", max_length=4000)
+    interests: list[str] | None = Field(default=None, max_length=30)
+    anti_interests: list[str] | None = Field(default=None, max_length=30)
+
+
+class UserProfileResponse(BaseModel):
+    """Как система видит пользователя: текст + структурная выжимка."""
+
+    about: str
+    role: str
+    level: str
+    stack: list[str]
+    interests: list[str]
+    anti_interests: list[str]
+    goals: list[str]
+    has_embedding: bool
+    is_empty: bool
+
+    @classmethod
+    def from_entity(cls, profile: UserProfile) -> UserProfileResponse:
+        return cls(
+            about=profile.about,
+            role=profile.role,
+            level=profile.level,
+            stack=profile.stack,
+            interests=profile.interests,
+            anti_interests=profile.anti_interests,
+            goals=profile.goals,
+            has_embedding=profile.embedding is not None,
+            is_empty=profile.is_empty,
+        )
 
 
 class PreferencesUpdateRequest(BaseModel):

@@ -2,12 +2,13 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from types import TracebackType
 from typing import Protocol
 
 from eventmind.domain.events.entities import Event
+from eventmind.domain.recommender.user_model import UserProfile
 
 BayesianStats = dict[str, tuple[float, float]]
 
@@ -17,6 +18,9 @@ class UserPrefs:
     city: str | None = None
     preferred_format: str | None = None
     embedding: list[float] | None = None
+    # Из текстового профиля (user_profiles): объявленные интересы/анти-интересы.
+    interests: list[str] = field(default_factory=list)
+    anti_interests: list[str] = field(default_factory=list)
 
 
 class CandidateGenerator(Protocol):
@@ -59,7 +63,15 @@ class RecommendationUnitOfWork(Protocol):
         now: datetime,
         gamma: float,
     ) -> None: ...
-    async def recompute_user_embedding(self, user_id: int) -> None: ...
+    async def recompute_user_embedding(self, user_id: int) -> None:
+        """user.embedding = Rocchio(профиль, like/save, dislike) — см. domain/user_model."""
+        ...
+
+    async def get_profile(self, user_id: int) -> UserProfile | None: ...
+    async def save_profile(self, profile: UserProfile) -> None: ...
+    async def known_topic_codes(self, *, limit: int) -> list[str]:
+        """Темы каталога по убыванию числа событий — опора для извлечения профиля."""
+        ...
     async def users_with_positive_feedback_on(
         self, event_ids: list[int], *, limit: int
     ) -> list[int]:

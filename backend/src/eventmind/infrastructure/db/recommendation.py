@@ -1,14 +1,15 @@
 """`SqlAlchemyRecommendationUnitOfWork` — чтение профиля/статов + online-обучение.
 
-Bayesian-обновление по feedback, ленивый temporal-decay при чтении, прогрев
-user.embedding как среднее эмбеддингов понравившихся событий.
+Bayesian-обновление по feedback, ленивый temporal-decay при чтении, текстовый
+профиль пользователя (user_profiles) и пересчёт user.embedding по Rocchio:
+профиль + понравившиеся события − дизлайкнутые (domain/recommender/user_model).
 """
 from __future__ import annotations
 
 from datetime import datetime
 from types import TracebackType
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from eventmind.application.ports.recommender import BayesianStats, UserPrefs
@@ -19,14 +20,34 @@ from eventmind.domain.recommender.bayesian import (
     apply_feedback,
     feedback_delta,
 )
+from eventmind.domain.recommender.user_model import UserProfile, combine_user_embedding
 from eventmind.infrastructure.db.models import (
     EventModel,
     EventTopicModel,
     InteractionModel,
     TopicModel,
     UserModel,
+    UserProfileModel,
     UserTopicStatModel,
 )
+
+_POSITIVE_ACTIONS = ("like", "save")
+_NEGATIVE_ACTIONS = ("dislike",)
+
+
+def _profile_to_entity(m: UserProfileModel) -> UserProfile:
+    return UserProfile(
+        user_id=m.user_id,
+        about=m.about,
+        role=m.role,
+        level=m.level,
+        stack=list(m.stack),
+        interests=list(m.interests),
+        anti_interests=list(m.anti_interests),
+        goals=list(m.goals),
+        embedding=list(m.embedding) if m.embedding is not None else None,
+        updated_at=m.updated_at,
+    )
 
 
 class SqlAlchemyRecommendationUnitOfWork:
@@ -62,18 +83,26 @@ class SqlAlchemyRecommendationUnitOfWork:
 
     async def get_user_prefs(self, user_id: int) -> UserPrefs | None:
         row = await self._s.execute(
-            select(UserModel.city, UserModel.preferred_format, UserModel.embedding).where(
-                UserModel.id == user_id
+            select(
+                UserModel.city,
+                UserModel.preferred_format,
+                UserModel.embedding,
+                UserProfileModel.interests,
+                UserProfileModel.anti_interests,
             )
+            .outerjoin(UserProfileModel, UserProfileModel.user_id == UserModel.id)
+            .where(UserModel.id == user_id)
         )
         result = row.first()
         if result is None:
             return None
-        city, fmt, emb = result
+        city, fmt, emb, interests, anti_interests = result
         return UserPrefs(
             city=city,
             preferred_format=fmt,
             embedding=list(emb) if emb is not None else None,
+            interests=list(interests or []),
+            anti_interests=list(anti_interests or []),
         )
 
     async def load_bayesian_stats(
@@ -146,7 +175,7 @@ class SqlAlchemyRecommendationUnitOfWork:
         rows = await self._s.execute(
             select(InteractionModel.user_id)
             .where(
-                InteractionModel.action.in_(("like", "save")),
+                InteractionModel.action.in_(_POSITIVE_ACTIONS),
                 InteractionModel.event_id.in_(event_ids),
             )
             .distinct()
@@ -155,22 +184,64 @@ class SqlAlchemyRecommendationUnitOfWork:
         )
         return [user_id for (user_id,) in rows.all()]
 
-    async def recompute_user_embedding(self, user_id: int) -> None:
-        """user.embedding = среднее эмбеддингов понравившихся/сохранённых событий."""
+    async def _event_vectors(self, user_id: int, actions: tuple[str, ...]) -> list[list[float]]:
+        """Векторы событий с данными действиями; каждое событие — один раз
+        (like + save на одном событии не удваивают его вес)."""
+        interacted = select(InteractionModel.event_id).where(
+            InteractionModel.user_id == user_id, InteractionModel.action.in_(actions)
+        )
         rows = await self._s.execute(
-            select(EventModel.embedding)
-            .join(InteractionModel, InteractionModel.event_id == EventModel.id)
-            .where(
-                InteractionModel.user_id == user_id,
-                InteractionModel.action.in_(("like", "save")),
-                EventModel.embedding.isnot(None),
+            select(EventModel.embedding).where(
+                EventModel.id.in_(interacted), EventModel.embedding.isnot(None)
             )
         )
-        vectors = [list(v) for (v,) in rows.all() if v is not None]
-        if not vectors:
-            return
-        dim = len(vectors[0])
-        mean = [sum(vec[i] for vec in vectors) / len(vectors) for i in range(dim)]
+        return [list(v) for (v,) in rows.all() if v is not None]
+
+    async def recompute_user_embedding(self, user_id: int) -> None:
+        """user.embedding = Rocchio(профиль, like/save, dislike); None — нет сигнала."""
         user = await self._s.get(UserModel, user_id)
-        if user is not None:
-            user.embedding = mean
+        if user is None:
+            return
+        profile_row = await self._s.get(UserProfileModel, user_id)
+        profile_vec = (
+            list(profile_row.embedding)
+            if profile_row is not None and profile_row.embedding is not None
+            else None
+        )
+        user.embedding = combine_user_embedding(
+            profile_vec,
+            await self._event_vectors(user_id, _POSITIVE_ACTIONS),
+            await self._event_vectors(user_id, _NEGATIVE_ACTIONS),
+        )
+
+    async def get_profile(self, user_id: int) -> UserProfile | None:
+        model = await self._s.get(UserProfileModel, user_id)
+        return _profile_to_entity(model) if model is not None else None
+
+    async def save_profile(self, profile: UserProfile) -> None:
+        model = await self._s.get(UserProfileModel, profile.user_id)
+        if model is None:
+            model = UserProfileModel(user_id=profile.user_id)
+            self._s.add(model)
+        model.about = profile.about
+        model.role = profile.role
+        model.level = profile.level
+        model.stack = list(profile.stack)
+        model.interests = list(profile.interests)
+        model.anti_interests = list(profile.anti_interests)
+        model.goals = list(profile.goals)
+        model.embedding = profile.embedding
+        if profile.updated_at is not None:
+            model.updated_at = profile.updated_at
+        # recompute_user_embedding в той же транзакции читает профиль через get
+        await self._s.flush()
+
+    async def known_topic_codes(self, *, limit: int) -> list[str]:
+        rows = await self._s.execute(
+            select(TopicModel.code)
+            .join(EventTopicModel, EventTopicModel.topic_id == TopicModel.id)
+            .group_by(TopicModel.code)
+            .order_by(func.count().desc(), TopicModel.code)
+            .limit(limit)
+        )
+        return [code for (code,) in rows.all()]

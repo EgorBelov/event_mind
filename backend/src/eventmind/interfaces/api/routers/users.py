@@ -1,7 +1,9 @@
 """Роутер профиля и настроек уведомлений текущего пользователя (JWT).
 
-Профиль (город/формат) влияет на rule-скоринг рекомендера; настройки
-уведомлений — на дайджест-рассылку (частота, каналы, тихие часы).
+Профиль (город/формат) влияет на rule-скоринг рекомендера; текстовый профиль
+«о себе» (`/me/profile`) — модель пользователя: LLM-выжимка + эмбеддинг,
+персональная выдача до первого лайка; настройки уведомлений — на
+дайджест-рассылку (частота, каналы, тихие часы).
 """
 from __future__ import annotations
 
@@ -14,18 +16,23 @@ from eventmind.application.accounts.use_cases import (
     UpdatePreferences,
     UpdateProfile,
 )
+from eventmind.application.recommender.profile import GetUserProfile, UpdateUserProfile
 from eventmind.domain.accounts.errors import UserNotFound
 from eventmind.interfaces.api.dependencies import (
     ContainerDep,
     CurrentUser,
     get_update_preferences,
     get_update_profile,
+    get_update_user_profile,
+    get_user_profile_uc,
 )
 from eventmind.interfaces.api.errors import ApiError
 from eventmind.interfaces.api.schemas import (
     PreferencesResponse,
     PreferencesUpdateRequest,
     ProfileUpdateRequest,
+    UserProfileRequest,
+    UserProfileResponse,
     UserResponse,
 )
 
@@ -53,6 +60,31 @@ async def update_me(
     except UserNotFound as exc:
         raise ApiError(HTTP_404_NOT_FOUND, "not_found", "Пользователь не найден") from exc
     return UserResponse.from_entity(user)
+
+
+@router.get("/me/profile", response_model=UserProfileResponse)
+async def get_user_profile(
+    current_user: CurrentUser,
+    use_case: Annotated[GetUserProfile, Depends(get_user_profile_uc)],
+) -> UserProfileResponse:
+    assert current_user.id is not None
+    return UserProfileResponse.from_entity(await use_case.execute(current_user.id))
+
+
+@router.put("/me/profile", response_model=UserProfileResponse)
+async def put_user_profile(
+    payload: UserProfileRequest,
+    current_user: CurrentUser,
+    use_case: Annotated[UpdateUserProfile, Depends(get_update_user_profile)],
+) -> UserProfileResponse:
+    assert current_user.id is not None
+    profile = await use_case.execute(
+        current_user.id,
+        about=payload.about,
+        interests=payload.interests,
+        anti_interests=payload.anti_interests,
+    )
+    return UserProfileResponse.from_entity(profile)
 
 
 @router.get("/me/preferences", response_model=PreferencesResponse)

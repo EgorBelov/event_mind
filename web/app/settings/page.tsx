@@ -2,20 +2,37 @@
 
 import { useEffect, useState } from "react";
 import { api, ApiError } from "@/lib/api";
-import type { Preferences, TelegramLinkToken, UserResponse } from "@/lib/types";
+import type {
+  Preferences,
+  TelegramLinkToken,
+  UserProfile,
+  UserResponse,
+} from "@/lib/types";
+
+const LEVEL_LABELS: Record<string, string> = {
+  junior: "junior",
+  middle: "middle",
+  senior: "senior",
+  any: "не указан",
+};
 
 export default function SettingsPage() {
   const [user, setUser] = useState<UserResponse | null>(null);
   const [prefs, setPrefs] = useState<Preferences | null>(null);
+  const [profile, setProfile] = useState<UserProfile | null>(null);
+  const [about, setAbout] = useState("");
+  const [savingAbout, setSavingAbout] = useState(false);
   const [tg, setTg] = useState<TelegramLinkToken | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState<string | null>(null);
 
   useEffect(() => {
-    Promise.all([api.me(), api.getPreferences()])
-      .then(([u, p]) => {
+    Promise.all([api.me(), api.getPreferences(), api.getUserProfile()])
+      .then(([u, p, prof]) => {
         setUser(u);
         setPrefs(p);
+        setProfile(prof);
+        setAbout(prof.about);
       })
       .catch((e) =>
         setError(e instanceof ApiError ? e.message : "Не удалось загрузить настройки"),
@@ -38,6 +55,33 @@ export default function SettingsPage() {
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Ошибка сохранения");
     }
+  }
+
+  // interests / anti: null — система извлечёт из текста сама (LLM)
+  async function saveAbout(
+    interests: string[] | null = null,
+    anti: string[] | null = null,
+  ) {
+    setSavingAbout(true);
+    try {
+      const updated = await api.saveUserProfile(about, interests, anti);
+      setProfile(updated);
+      setAbout(updated.about);
+      flash("Профиль интересов обновлён — лента пересчитана");
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Ошибка сохранения профиля");
+    } finally {
+      setSavingAbout(false);
+    }
+  }
+
+  function removeTopic(kind: "interests" | "anti_interests", code: string) {
+    if (!profile) return;
+    const interests = profile.interests.filter((t) => kind !== "interests" || t !== code);
+    const anti = profile.anti_interests.filter(
+      (t) => kind !== "anti_interests" || t !== code,
+    );
+    void saveAbout(interests, anti);
   }
 
   async function savePrefs(patch: Partial<Preferences>) {
@@ -70,6 +114,87 @@ export default function SettingsPage() {
       <h2 style={{ marginTop: 0 }}>Настройки</h2>
       {error && <p className="error">{error}</p>}
       {saved && <p style={{ color: "var(--ok)" }}>{saved}</p>}
+
+      <section className="card">
+        <h3>О себе</h3>
+        <p className="notice">
+          Расскажите своими словами, чем занимаетесь и что интересно — по этому
+          тексту система строит модель ваших интересов и подбирает события сразу,
+          ещё до первых лайков.
+        </p>
+        <textarea
+          value={about}
+          onChange={(e) => setAbout(e.target.value)}
+          rows={5}
+          maxLength={2000}
+          style={{ width: "100%" }}
+          placeholder="Например: backend-разработчик на Go, 3 года опыта. Хочу перейти в ML, интересны highload и Kubernetes. Фронтенд не интересен. Предпочитаю онлайн."
+        />
+        <button
+          className="primary"
+          onClick={() => saveAbout()}
+          disabled={savingAbout}
+          style={{ marginTop: "0.7rem" }}
+        >
+          {savingAbout ? "Разбираю…" : "Сохранить и разобрать"}
+        </button>
+
+        {profile && !profile.is_empty && (
+          <div style={{ marginTop: "1rem" }}>
+            <h4 style={{ margin: "0 0 0.4rem" }}>Как система вас видит</h4>
+            {profile.role && <p style={{ margin: "0.2rem 0" }}>Роль: {profile.role}</p>}
+            <p style={{ margin: "0.2rem 0" }}>
+              Уровень: {LEVEL_LABELS[profile.level] ?? profile.level}
+            </p>
+            {profile.stack.length > 0 && (
+              <p style={{ margin: "0.2rem 0" }}>Стек: {profile.stack.join(", ")}</p>
+            )}
+            {profile.goals.length > 0 && (
+              <p style={{ margin: "0.2rem 0" }}>Цели: {profile.goals.join("; ")}</p>
+            )}
+            <div style={{ marginTop: "0.4rem" }}>
+              Интересы:{" "}
+              {profile.interests.length === 0 && <span className="notice">—</span>}
+              {profile.interests.map((t) => (
+                <span key={t} className="tag">
+                  {t}{" "}
+                  <button
+                    title="Убрать из интересов"
+                    onClick={() => removeTopic("interests", t)}
+                    disabled={savingAbout}
+                    style={{ padding: "0 0.3rem" }}
+                  >
+                    ×
+                  </button>
+                </span>
+              ))}
+            </div>
+            <div style={{ marginTop: "0.4rem" }}>
+              Не интересно:{" "}
+              {profile.anti_interests.length === 0 && <span className="notice">—</span>}
+              {profile.anti_interests.map((t) => (
+                <span key={t} className="tag">
+                  {t}{" "}
+                  <button
+                    title="Убрать из «не интересно»"
+                    onClick={() => removeTopic("anti_interests", t)}
+                    disabled={savingAbout}
+                    style={{ padding: "0 0.3rem" }}
+                  >
+                    ×
+                  </button>
+                </span>
+              ))}
+            </div>
+            {!profile.has_embedding && (
+              <p className="notice" style={{ marginTop: "0.5rem" }}>
+                Семантический вектор профиля пока не построен (модель эмбеддингов
+                недоступна) — подбор идёт по объявленным интересам.
+              </p>
+            )}
+          </div>
+        )}
+      </section>
 
       <section className="card">
         <h3>Профиль</h3>

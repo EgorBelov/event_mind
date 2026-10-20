@@ -9,6 +9,7 @@ export default function FeedPage() {
   const [items, setItems] = useState<Recommendation[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [acted, setActed] = useState<Record<number, string>>({});
+  const [needsProfile, setNeedsProfile] = useState(false);
 
   async function load() {
     setError(null);
@@ -22,6 +23,10 @@ export default function FeedPage() {
 
   useEffect(() => {
     load();
+    api
+      .getUserProfile()
+      .then((p) => setNeedsProfile(p.is_empty))
+      .catch(() => undefined);
   }, []);
 
   async function act(id: number, action: "like" | "dislike" | "save") {
@@ -38,6 +43,13 @@ export default function FeedPage() {
         <button onClick={load}>Обновить</button>
       </div>
       {error && <p className="error">{error}</p>}
+      {needsProfile && (
+        <p className="notice">
+          👋 Лента станет точнее, если рассказать о себе: в{" "}
+          <Link href="/settings">настройках</Link> напишите пару фраз о том, чем
+          занимаетесь и что интересно.
+        </p>
+      )}
       {items.length === 0 && !error && (
         <p className="notice">
           Пока пусто. Настройте интересы в{" "}

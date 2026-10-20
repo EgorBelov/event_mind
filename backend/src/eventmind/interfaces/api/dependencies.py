@@ -39,6 +39,7 @@ from eventmind.application.notifications.use_cases import (
     MarkNotificationRead,
     Unsubscribe,
 )
+from eventmind.application.recommender.profile import GetUserProfile, UpdateUserProfile
 from eventmind.application.recommender.use_cases import (
     GetRecommendations,
     RecordInteraction,
@@ -170,6 +171,20 @@ def get_recommendations_uc(container: ContainerDep) -> GetRecommendations:
         container.recommender_config,
         ScoringWeights(),
     )
+
+
+def get_update_user_profile(container: ContainerDep) -> UpdateUserProfile:
+    return UpdateUserProfile(
+        container.recommendation_uow_factory,
+        container.profile_extractor,
+        container.embedding,
+        container.cache,
+        container.clock,
+    )
+
+
+def get_user_profile_uc(container: ContainerDep) -> GetUserProfile:
+    return GetUserProfile(container.recommendation_uow_factory)
 
 
 def get_record_interaction_uc(container: ContainerDep) -> RecordInteraction:

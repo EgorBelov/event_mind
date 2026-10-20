@@ -75,6 +75,19 @@ export interface InboxResponse {
   items: NotificationItem[];
 }
 
+/** Текстовый профиль «о себе» + как его поняла система (LLM-выжимка). */
+export interface UserProfile {
+  about: string;
+  role: string;
+  level: string;
+  stack: string[];
+  interests: string[];
+  anti_interests: string[];
+  goals: string[];
+  has_embedding: boolean;
+  is_empty: boolean;
+}
+
 export interface Preferences {
   digest_frequency: string;
   email_enabled: boolean;
