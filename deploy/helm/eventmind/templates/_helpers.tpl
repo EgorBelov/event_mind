@@ -44,6 +44,8 @@ helm.sh/chart: {{ .Chart.Name }}-{{ .Chart.Version }}
   valueFrom: { configMapKeyRef: { name: {{ include "eventmind.fullname" . }}-config, key: EMAIL_FROM } }
 - name: DEEPSEEK_MODELS
   valueFrom: { configMapKeyRef: { name: {{ include "eventmind.fullname" . }}-config, key: DEEPSEEK_MODELS } }
+- name: INGEST_SCHEDULE_HOURS
+  valueFrom: { configMapKeyRef: { name: {{ include "eventmind.fullname" . }}-config, key: INGEST_SCHEDULE_HOURS } }
 - name: TELEGRAM_BOT_USERNAME
   valueFrom: { configMapKeyRef: { name: {{ include "eventmind.fullname" . }}-config, key: TELEGRAM_BOT_USERNAME } }
 - name: DATABASE_URL

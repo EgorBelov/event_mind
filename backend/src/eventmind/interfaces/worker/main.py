@@ -6,6 +6,10 @@
 - `normalize_raw_events`— LLM-нормализация пачки raw → events (M3).
 - `send_user_digest`    — дайджест рекомендаций пользователю по каналам (M5).
 - `schedule_digests`    — cron→queue: поставить дайджесты по частоте (M5).
+- `ingest_all`          — все источники → raw_events → нормализация (cron по
+                          INGEST_SCHEDULE_HOURS; корпус событий копится сам).
+- `backfill_embeddings` — досчитать эмбеддинги событиям без вектора и обновить
+                          эмбеддинги лайкнувших их пользователей (cron раз в час).
 
 Запуск: `arq eventmind.interfaces.worker.main.WorkerSettings`.
 Композит-рут воркера: связывает use-case'ы с адаптерами (БД, LLM, embedding, SMTP, каналы).
@@ -26,6 +30,9 @@ from eventmind.application.accounts.email_handlers import (
 from eventmind.application.ingestion.config import IngestionConfig
 from eventmind.application.ingestion.normalizer import EventNormalizer
 from eventmind.application.ingestion.use_cases import (
+    NORMALIZE_TASK,
+    BackfillEventEmbeddings,
+    LoadAllSources,
     LoadSource,
     NormalizeRawEvents,
 )
@@ -33,7 +40,10 @@ from eventmind.application.notifications.use_cases import ScheduleDigests, SendU
 from eventmind.application.outbox.processor import OutboxProcessor
 from eventmind.application.recommender.config import RecommenderConfig
 from eventmind.application.recommender.ranker import HybridRanker
-from eventmind.application.recommender.use_cases import GetRecommendations
+from eventmind.application.recommender.use_cases import (
+    GetRecommendations,
+    RefreshUserEmbeddings,
+)
 from eventmind.config import Settings, get_settings, validate_or_exit
 from eventmind.domain.recommender.weights import ScoringWeights
 from eventmind.infrastructure.cache.redis_cache import RedisCache
@@ -90,12 +100,49 @@ async def normalize_raw_events(ctx: dict[str, Any], limit: int | None = None) ->
             non_it=result.non_it,
             failed=result.failed,
         )
+    # Пачка выбрана целиком и был прогресс — вероятно, сырьё ещё есть: ставим
+    # следующую пачку. Без прогресса (LLM лежит) не крутимся — повторит cron.
+    batch = limit or ctx["ingestion_config"].normalize_batch_size
+    if result.processed >= batch and result.made_progress:
+        await ctx["task_queue"].enqueue(NORMALIZE_TASK, limit=limit)
     return {
         "processed": result.processed,
         "events_created": result.events_created,
         "non_it": result.non_it,
         "failed": result.failed,
     }
+
+
+async def ingest_all(ctx: dict[str, Any], limit: int | None = None) -> dict[str, Any]:
+    """Все источники по очереди; LoadSource сам ставит нормализацию новых сырых."""
+    load_all: LoadAllSources = ctx["load_all"]
+    results = await load_all.execute(limit=limit or ctx["ingest_default_limit"])
+    added = sum(r.added for r in results)
+    _logger.info("ingest_all_done", added=added, sources=len(results))
+    return {"added": added, "sources": {r.source: r.added for r in results}}
+
+
+async def backfill_embeddings(ctx: dict[str, Any], limit: int | None = None) -> dict[str, Any]:
+    backfill: BackfillEventEmbeddings = ctx["backfill_events"]
+    result = await backfill.execute(limit=limit or ctx["embedding_backfill_limit"])
+    refresh: RefreshUserEmbeddings = ctx["refresh_users"]
+    users = await refresh.execute(result.updated_event_ids)
+    if result.updated or result.failed:
+        _logger.info(
+            "embedding_backfill_done",
+            events=result.updated,
+            failed=result.failed,
+            users=users,
+        )
+    return {"events": result.updated, "failed": result.failed, "users": users}
+
+
+async def cron_ingest_all(ctx: dict[str, Any]) -> None:
+    await ingest_all(ctx)
+
+
+async def cron_backfill_embeddings(ctx: dict[str, Any]) -> None:
+    await backfill_embeddings(ctx)
 
 
 # ── жизненный цикл воркера ─────────────────────────────────────────────────────
@@ -168,17 +215,27 @@ def _build_resources(settings: Settings) -> dict[str, Any]:
         clock,
         settings.public_web_url,
     )
-    schedule = ScheduleDigests(notif_uow_factory, ArqTaskQueue(settings.redis_url))
+    task_queue = ArqTaskQueue(settings.redis_url)
+    schedule = ScheduleDigests(notif_uow_factory, task_queue)
+    sources = build_source_registry(settings)
+    load_source = LoadSource(events_uow_factory, task_queue)
 
     return {
         "engine": engine,
         "redis": redis,
+        "task_queue": task_queue,
         "processor": outbox,
-        "sources": build_source_registry(settings),
-        "load_source": LoadSource(events_uow_factory, ArqTaskQueue(settings.redis_url)),
+        "sources": sources,
+        "load_source": load_source,
+        "load_all": LoadAllSources(sources, load_source),
+        "ingest_default_limit": settings.ingest_default_limit,
+        "ingestion_config": ingestion_config,
         "normalize": NormalizeRawEvents(
             events_uow_factory, EventNormalizer(llm), embedding, ingestion_config
         ),
+        "backfill_events": BackfillEventEmbeddings(events_uow_factory, embedding),
+        "refresh_users": RefreshUserEmbeddings(rec_uow_factory, cache),
+        "embedding_backfill_limit": settings.embedding_backfill_limit,
         "send_digest": send_digest,
         "schedule": schedule,
     }
@@ -221,10 +278,27 @@ async def _on_shutdown(ctx: dict[str, Any]) -> None:
     redis = ctx.get("redis")
     if redis is not None:
         await redis.aclose()
+    task_queue = ctx.get("task_queue")
+    if task_queue is not None:
+        await task_queue.aclose()
     _logger.info("worker_shutdown")
 
 
 validate_or_exit(get_settings(), "worker")
+
+
+def build_cron_jobs(settings: Settings) -> list[Any]:
+    """Cron worker'а. arq дедуплицирует cron между воркерами — лидер-лок не нужен."""
+    jobs: list[Any] = [
+        # Дайджесты: раскладываем задачи в очередь раз в сутки (09:00 UTC).
+        cron(cron_schedule_digests, hour={9}, minute={0}),
+        # Догрузка эмбеддингов: раз в час; без работы — один лёгкий запрос.
+        cron(cron_backfill_embeddings, minute={30}),
+    ]
+    hours = settings.ingest_schedule_hour_set
+    if hours:
+        jobs.append(cron(cron_ingest_all, hour=hours, minute={5}))
+    return jobs
 
 
 class WorkerSettings:
@@ -234,10 +308,10 @@ class WorkerSettings:
         normalize_raw_events,
         send_user_digest,
         schedule_digests,
+        ingest_all,
+        backfill_embeddings,
     ]
     on_startup = staticmethod(_on_startup)
     on_shutdown = staticmethod(_on_shutdown)
     redis_settings = redis_settings_from_url(get_settings().redis_url)
-    # Дайджесты: cron раскладывает задачи в очередь раз в сутки (09:00 UTC).
-    # arq дедуплицирует cron между воркерами — отдельный лидер-лок не нужен.
-    cron_jobs: ClassVar[list[Any]] = [cron(cron_schedule_digests, hour={9}, minute={0})]
+    cron_jobs: ClassVar[list[Any]] = build_cron_jobs(get_settings())

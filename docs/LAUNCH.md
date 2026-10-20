@@ -108,6 +108,7 @@ uv run --no-project python -c "import secrets; print(secrets.token_hex(32))"
 | `GOOGLE_API_KEY`, `GROQ_API_KEY` | запасные LLM | по желанию |
 | `GOOGLE_OAUTH_CLIENT_ID` | для входа через Google | по желанию |
 | `LOG_JSON` | `false` — читаемые логи в dev | по желанию |
+| `INGEST_SCHEDULE_HOURS` | часы UTC загрузки источников по расписанию, по умолчанию `0,6,12,18`; пусто — выключено (каждый прогон — LLM-вызовы на новые события) | по желанию |
 | `DATABASE_URL`, `REDIS_URL`, `SMTP_*`, `CORS_ORIGINS`, `PUBLIC_WEB_URL`, `API_INTERNAL_URL` | **оставить как в примере** — рассчитаны на Docker | не трогать |
 | `GOOGLE_MODEL`, `NORMALIZE_BATCH_SIZE`, `MAX_NORMALIZE_RETRIES`, `OTEL_*` | тонкая настройка | не трогать |
 
@@ -177,15 +178,26 @@ $api = "http://localhost:8000/api/v1/ingestion"
 # 1) забрать сырые события из источников (до 100 на источник)
 Invoke-RestMethod -Method Post -Uri "$api/load-all?limit=50" -Headers $h
 
-# 2) нормализовать через LLM (до 200 за вызов; повторять, пока остаются raw)
-Invoke-RestMethod -Method Post -Uri "$api/normalize?limit=100" -Headers $h
-
-# 3) статус
+# 2) статус: raw_events по статусам, events_total, events_without_embedding
 Invoke-RestMethod -Uri "$api/status" -Headers $h
 ```
 
-Нормализация вызывает LLM на каждое событие — это занимает минуты. Упавшие
-можно повторить: `POST $api/retry-failed`.
+После `load-all` нормализацию (LLM на каждое событие) **сам делает worker**:
+пачками по `NORMALIZE_BATCH_SIZE`, следующая пачка ставится автоматически, пока
+есть прогресс. Это занимает минуты — смотреть `dc logs -f worker` и повторять
+`status`, пока `raw` не станет 0. Вручную можно ускорить или повторить:
+
+```powershell
+Invoke-RestMethod -Method Post -Uri "$api/normalize?limit=100" -Headers $h   # пачка в API
+Invoke-RestMethod -Method Post -Uri "$api/retry-failed" -Headers $h           # повтор failed
+```
+
+**По расписанию** (worker, без ручных вызовов):
+- загрузка всех источников — в часы `INGEST_SCHEDULE_HOURS` (по умолчанию
+  `0,6,12,18` UTC; пусто — выключено), корпус событий копится сам;
+- догрузка эмбеддингов событиям без вектора — раз в час (в :30), плюс
+  пересчёт эмбеддингов пользователей, лайкнувших эти события. Вручную:
+  `Invoke-RestMethod -Method Post -Uri "$api/backfill-embeddings" -Headers $h`.
 
 **Сколько событий и есть ли у них эмбеддинги:**
 
@@ -193,9 +205,11 @@ Invoke-RestMethod -Uri "$api/status" -Headers $h
 dc exec postgres psql -U eventmind -c "SELECT count(*) AS events, count(embedding) AS with_embedding FROM events;"
 ```
 
-`with_embedding` должен совпадать с `events`. Первая нормализация после
-чистого запуска дольше: скачивается модель эмбеддингов (~470 МБ) в том
-`hf-cache`, дальше она берётся из кэша.
+`with_embedding` должен совпадать с `events` (то же видно в `status` как
+`events_without_embedding = 0`). Первая нормализация после чистого запуска
+дольше: скачивается модель эмбеддингов (~470 МБ) в том `hf-cache`, дальше она
+берётся из кэша. Если часть событий осталась без вектора — их досчитает
+hourly-backfill или ручной `backfill-embeddings`.
 
 **Состояние LLM-цепочки** (какие звенья включены, cooldown):
 
@@ -339,7 +353,7 @@ dc up --build -d # пересобрать после изменений кода
 | Сборка висит на `FROM ghcr.io/astral-sh/uv…` (слой `0B / 28MB`), а Docker Hub качается | Docker не может скачать слой с CDN GitHub Container Registry (сеть, VPN, прокси, DNS внутри Docker). Проверить VPN/прокси, в Docker Desktop → Settings → Resources → Network / Proxies; перезапустить Docker Desktop; повторить `dc build` |
 | Сервис падает с кодом 78 | Не заполнены обязательные переменные — сообщение в логах называет какие (`dc logs <сервис>`) |
 | Странные значения переменных / ошибки парсинга `.env` | `.env` сохранён с `CRLF` или в кодировке не UTF-8 — пересохранить в `LF` / UTF-8 |
-| `with_embedding` меньше `events` | Смотреть `dc logs api` на `event_embedding_failed`: нет сети для скачивания модели, нехватка памяти Docker (дать ≥ 4 ГБ в Settings → Resources) или образ собран без ML (`EXTRAS` без `--extra ml`) |
+| `with_embedding` меньше `events` | Вызвать `backfill-embeddings` (п. 5). Если не помогает — смотреть `dc logs api` / `dc logs worker` на `event_embedding_failed` / `embedding_backfill_failed`: нет сети для скачивания модели, нехватка памяти Docker (дать ≥ 4 ГБ в Settings → Resources) или образ собран без ML (`EXTRAS` без `--extra ml`) |
 | Нормализация падает / `failed` в статусе | LLM недоступна: проверить ключ, баланс DeepSeek и `/api/v1/admin/llm/status`; повторить `retry-failed` |
 | `403 forbidden` на ingestion | Не передан или не совпадает `X-API-Key` с `API_SHARED_SECRET` |
 | Бот молчит | Нет `BOT_TOKEN` / `API_SHARED_SECRET`, не запущен профиль `bot`, или аккаунт не привязан (`/start <токен>`) |
@@ -380,11 +394,13 @@ dc up --build -d # пересобрать после изменений кода
 3. Режим A (п. 4): docker compose -f deploy/docker-compose.yml up --build -d;
    дождись healthy; проверь /health, /ready, веб :3000, Mailhog :8025.
 4. Демо-аккаунт (п. 5): seed через `docker compose run --rm api ...`.
-5. События (п. 5): load-all?limit=50, затем normalize?limit=100 (повторяй, пока
-   в статусе есть raw), с заголовком X-API-Key из API_SHARED_SECRET; покажи
-   итоговый ingestion/status и количество events / with_embedding из psql.
-6. Убедись, что with_embedding = events. Если нет — найди причину в
-   `docker compose logs api` (event_embedding_failed) и покажи её мне.
+5. События (п. 5): load-all?limit=50 с заголовком X-API-Key из
+   API_SHARED_SECRET; дальше нормализует worker — жди, повторяя
+   ingestion/status, пока raw не станет 0 (при зависании — normalize?limit=100
+   вручную). Покажи итоговый status и events / with_embedding из psql.
+6. Убедись, что with_embedding = events (events_without_embedding = 0). Если
+   нет — вызови backfill-embeddings; не помогло — найди причину в логах api /
+   worker (event_embedding_failed, embedding_backfill_failed) и покажи мне.
 7. Бот (п. 7): если задан BOT_TOKEN — подними его и подскажи, как привязать
    аккаунт через веб.
 8. Прогони проверки (п. 9): ruff, mypy, lint-imports, pytest tests/unit.

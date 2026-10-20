@@ -175,3 +175,29 @@ class RecordInteraction:
                 await uow.recompute_user_embedding(user_id)
             await uow.commit()
         await self._cache.delete(_cache_key(user_id))
+
+
+class RefreshUserEmbeddings:
+    """Пересчитать эмбеддинги пользователей после backfill событий.
+
+    Эмбеддинг пользователя — среднее векторов понравившихся событий; если вектор
+    события появился позже лайка (backfill), профиль пользователя устарел или
+    пуст. Пересчитываем тех, кто лайкал/сохранял досчитанные события, и
+    сбрасываем им кэш выдачи.
+    """
+
+    def __init__(self, uow_factory: RecommendationUnitOfWorkFactory, cache: Cache) -> None:
+        self._uow_factory = uow_factory
+        self._cache = cache
+
+    async def execute(self, event_ids: list[int], *, limit: int = 1000) -> int:
+        if not event_ids:
+            return 0
+        async with self._uow_factory() as uow:
+            user_ids = await uow.users_with_positive_feedback_on(event_ids, limit=limit)
+            for user_id in user_ids:
+                await uow.recompute_user_embedding(user_id)
+            await uow.commit()
+        for user_id in user_ids:
+            await self._cache.delete(_cache_key(user_id))
+        return len(user_ids)

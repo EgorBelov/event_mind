@@ -138,6 +138,23 @@ class SqlAlchemyRecommendationUnitOfWork:
             )
             stat.updated_at = now
 
+    async def users_with_positive_feedback_on(
+        self, event_ids: list[int], *, limit: int
+    ) -> list[int]:
+        if not event_ids:
+            return []
+        rows = await self._s.execute(
+            select(InteractionModel.user_id)
+            .where(
+                InteractionModel.action.in_(("like", "save")),
+                InteractionModel.event_id.in_(event_ids),
+            )
+            .distinct()
+            .order_by(InteractionModel.user_id)
+            .limit(limit)
+        )
+        return [user_id for (user_id,) in rows.all()]
+
     async def recompute_user_embedding(self, user_id: int) -> None:
         """user.embedding = среднее эмбеддингов понравившихся/сохранённых событий."""
         rows = await self._s.execute(

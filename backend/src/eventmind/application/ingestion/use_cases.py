@@ -1,12 +1,13 @@
-"""Use-case'ы ingestion: загрузка источников и LLM-нормализация в events.
+"""Use-case'ы ingestion: загрузка источников, LLM-нормализация в events, backfill.
 
 Пайплайн: source → raw_events → нормализация (LLM) → events. Идемпотентность
 (по source+url), ретраи с DLQ (status=failed при исчерпании), изоляция сбоев
-(падение одного сырья/источника не рушит остальные).
+(падение одного сырья/источника не рушит остальные). События, оставшиеся без
+эмбеддинга (сбой провайдера, образ без ML), досчитывает `BackfillEventEmbeddings`.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import structlog
 
@@ -25,6 +26,11 @@ _logger = structlog.get_logger("eventmind.ingestion")
 NORMALIZE_TASK = "normalize_raw_events"
 
 
+def event_embedding_text(title: str, description: str) -> str:
+    """Текст, по которому строится эмбеддинг события (общий для ingestion и backfill)."""
+    return f"{title}\n{description}".strip()
+
+
 @dataclass(slots=True)
 class LoadResult:
     source: str
@@ -39,6 +45,18 @@ class NormalizeResult:
     events_created: int = 0
     non_it: int = 0
     failed: int = 0
+
+    @property
+    def made_progress(self) -> bool:
+        """Хоть одно сырьё закрыто (event или non-IT) — есть смысл брать следующую пачку."""
+        return self.events_created + self.non_it > 0
+
+
+@dataclass(slots=True)
+class BackfillResult:
+    updated: int = 0
+    failed: int = 0
+    updated_event_ids: list[int] = field(default_factory=list)
 
 
 class LoadSource:
@@ -182,12 +200,56 @@ class NormalizeRawEvents:
         result.events_created += 1
 
     async def _safe_embed(self, title: str, description: str) -> list[float] | None:
-        """Эмбеддинг события; сбой провайдера не рушит нормализацию (backfill в M4)."""
+        """Эмбеддинг события; сбой провайдера не рушит нормализацию (досчитает backfill)."""
         try:
-            return await self._embedding.embed_text(f"{title}\n{description}".strip())
+            return await self._embedding.embed_text(event_embedding_text(title, description))
         except Exception as exc:
             _logger.warning("event_embedding_failed", error=str(exc))
             return None
+
+
+class BackfillEventEmbeddings:
+    """Досчитать эмбеддинги событиям без вектора — пачками, keyset-пагинацией по id.
+
+    Сбой провайдера на пачке не теряет прогресс: уже записанные пачки
+    закоммичены, на ошибке обход останавливается (повторит следующий прогон).
+    """
+
+    def __init__(
+        self,
+        uow_factory: EventsUnitOfWorkFactory,
+        embedding: EmbeddingProvider,
+        *,
+        batch_size: int = 32,
+    ) -> None:
+        self._uow_factory = uow_factory
+        self._embedding = embedding
+        self._batch_size = batch_size
+
+    async def execute(self, *, limit: int = 500) -> BackfillResult:
+        result = BackfillResult()
+        after_id = 0
+        while result.updated + result.failed < limit:
+            size = min(self._batch_size, limit - result.updated - result.failed)
+            async with self._uow_factory() as uow:
+                batch = await uow.events.fetch_without_embedding(limit=size, after_id=after_id)
+                if not batch:
+                    break
+                after_id = batch[-1].event_id
+                try:
+                    vectors = await self._embedding.embed_texts(
+                        [event_embedding_text(ev.title, ev.description) for ev in batch]
+                    )
+                except Exception as exc:
+                    _logger.warning("embedding_backfill_failed", error=str(exc), batch=len(batch))
+                    result.failed += len(batch)
+                    break
+                for ev, vector in zip(batch, vectors, strict=True):
+                    await uow.events.set_embedding(ev.event_id, vector)
+                    result.updated_event_ids.append(ev.event_id)
+                await uow.commit()
+            result.updated += len(batch)
+        return result
 
 
 class GetIngestionStatus:
@@ -198,4 +260,9 @@ class GetIngestionStatus:
         async with self._uow_factory() as uow:
             raw_counts = await uow.raw_events.count_by_status()
             events_total = await uow.events.count()
-        return {"raw_events": raw_counts, "events_total": events_total}
+            without_embedding = await uow.events.count_without_embedding()
+        return {
+            "raw_events": raw_counts,
+            "events_total": events_total,
+            "events_without_embedding": without_embedding,
+        }

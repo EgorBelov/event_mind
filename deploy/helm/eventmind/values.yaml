@@ -31,6 +31,7 @@ config:
   smtpUseSsl: "false"
   emailFrom: "EventMind <noreply@eventmind.example.com>"
   deepseekModels: ""  # через запятую; пусто — deepseek-flash
+  ingestScheduleHours: "0,6,12,18"  # cron загрузки источников (UTC); пусто — выключено
   telegramBotUsername: ""
 
 # ── секреты (→ Secret) ────────────────────────────────────────────────────────

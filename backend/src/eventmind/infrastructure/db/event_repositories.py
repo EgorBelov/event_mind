@@ -5,9 +5,10 @@
 """
 from __future__ import annotations
 
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from eventmind.application.ports.events import EventText
 from eventmind.domain.events.entities import Event, RawEvent
 from eventmind.domain.events.taxonomy import topic_title
 from eventmind.domain.events.value_objects import RawEventStatus
@@ -68,6 +69,9 @@ class SqlAlchemyRawEventRepository:
     async def fetch_for_processing(
         self, statuses: list[RawEventStatus], *, limit: int, max_retries: int
     ) -> list[RawEvent]:
+        # SKIP LOCKED: параллельные нормализации (несколько задач в worker'е,
+        # ручной /normalize) разбирают непересекающиеся пачки, а не гоняют одно
+        # сырьё через LLM дважды. Блокировка держится до commit пачки.
         result = await self._session.execute(
             select(RawEventModel)
             .where(
@@ -76,6 +80,7 @@ class SqlAlchemyRawEventRepository:
             )
             .order_by(RawEventModel.id)
             .limit(limit)
+            .with_for_update(skip_locked=True)
         )
         return [_raw_to_entity(m) for m in result.scalars().all()]
 
@@ -136,6 +141,29 @@ class SqlAlchemyEventRepository:
 
     async def count(self) -> int:
         result = await self._session.execute(select(func.count()).select_from(EventModel))
+        return int(result.scalar_one())
+
+    async def fetch_without_embedding(self, *, limit: int, after_id: int = 0) -> list[EventText]:
+        rows = await self._session.execute(
+            select(EventModel.id, EventModel.title, EventModel.description)
+            .where(EventModel.embedding.is_(None), EventModel.id > after_id)
+            .order_by(EventModel.id)
+            .limit(limit)
+        )
+        return [
+            EventText(event_id=event_id, title=title, description=description)
+            for event_id, title, description in rows.all()
+        ]
+
+    async def set_embedding(self, event_id: int, embedding: list[float]) -> None:
+        await self._session.execute(
+            update(EventModel).where(EventModel.id == event_id).values(embedding=embedding)
+        )
+
+    async def count_without_embedding(self) -> int:
+        result = await self._session.execute(
+            select(func.count()).select_from(EventModel).where(EventModel.embedding.is_(None))
+        )
         return int(result.scalar_one())
 
 

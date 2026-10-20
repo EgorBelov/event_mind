@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from dataclasses import dataclass
 from types import TracebackType
 from typing import Protocol
 
@@ -19,7 +20,11 @@ class RawEventRepository(Protocol):
     async def fetch_for_processing(
         self, statuses: list[RawEventStatus], *, limit: int, max_retries: int
     ) -> list[RawEvent]:
-        """Взять пачку сырых событий на обработку (raw + failed с retry_count<max)."""
+        """Взять пачку сырых событий на обработку (raw + failed с retry_count<max).
+
+        Строки блокируются до commit (SKIP LOCKED): параллельные обработчики
+        получают непересекающиеся пачки.
+        """
         ...
 
     async def update(self, raw: RawEvent) -> None: ...
@@ -27,10 +32,26 @@ class RawEventRepository(Protocol):
     async def count_by_status(self) -> dict[str, int]: ...
 
 
+@dataclass(frozen=True, slots=True)
+class EventText:
+    """Минимум события для пересчёта эмбеддинга (backfill)."""
+
+    event_id: int
+    title: str
+    description: str
+
+
 class EventRepository(Protocol):
     async def exists_by_source_url(self, source_url: str) -> bool: ...
     async def add(self, event: Event, topic_ids: list[int]) -> Event: ...
     async def count(self) -> int: ...
+
+    async def fetch_without_embedding(self, *, limit: int, after_id: int = 0) -> list[EventText]:
+        """События без эмбеддинга с id > after_id по возрастанию id (keyset-пагинация)."""
+        ...
+
+    async def set_embedding(self, event_id: int, embedding: list[float]) -> None: ...
+    async def count_without_embedding(self) -> int: ...
 
 
 class TopicRepository(Protocol):

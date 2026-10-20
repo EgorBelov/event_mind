@@ -91,6 +91,11 @@ class Settings(BaseSettings):
     ingest_default_limit: int = 20
     normalize_batch_size: int = 20
     max_normalize_retries: int = 3
+    # Загрузка всех источников по расписанию (cron в worker): часы UTC через
+    # запятую; пусто — выключено. Корпус событий копится сам.
+    ingest_schedule_hours: str = "0,6,12,18"
+    # Догрузка эмбеддингов (cron в worker, раз в час): максимум событий за прогон.
+    embedding_backfill_limit: int = 500
 
     # ── рекомендер (M4) ──────────────────────────────────────────────────
     reco_candidate_limit: int = 100
@@ -117,6 +122,14 @@ class Settings(BaseSettings):
     @property
     def cors_origin_list(self) -> list[str]:
         return [o.strip() for o in self.cors_origins.split(",") if o.strip()]
+
+    @property
+    def ingest_schedule_hour_set(self) -> set[int]:
+        hours = {int(h) for h in self.ingest_schedule_hours.split(",") if h.strip()}
+        invalid = sorted(h for h in hours if not 0 <= h <= 23)
+        if invalid:
+            raise ValueError(f"INGEST_SCHEDULE_HOURS: часы вне 0..23: {invalid}")
+        return hours
 
     @property
     def deepseek_model_list(self) -> list[str]:

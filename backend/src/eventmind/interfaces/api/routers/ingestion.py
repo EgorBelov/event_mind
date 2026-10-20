@@ -4,7 +4,10 @@
 - `POST /api/v1/ingestion/load-all`      — все источники по очереди.
 - `POST /api/v1/ingestion/normalize`     — нормализовать пачку raw → events.
 - `POST /api/v1/ingestion/retry-failed`  — переобработать failed (в пределах ретраев).
-- `GET  /api/v1/ingestion/status`        — счётчики по статусам raw_events + events.
+- `POST /api/v1/ingestion/backfill-embeddings` — досчитать эмбеддинги событиям без
+  вектора + обновить эмбеддинги лайкнувших их пользователей (то же делает cron).
+- `GET  /api/v1/ingestion/status`        — счётчики raw_events, events и events без
+  эмбеддинга.
 """
 from __future__ import annotations
 
@@ -14,18 +17,22 @@ from typing import Annotated, Any
 from fastapi import APIRouter, Depends, Query
 
 from eventmind.application.ingestion.use_cases import (
+    BackfillEventEmbeddings,
     GetIngestionStatus,
     LoadAllSources,
     LoadSource,
     NormalizeRawEvents,
 )
+from eventmind.application.recommender.use_cases import RefreshUserEmbeddings
 from eventmind.domain.events.value_objects import RawEventStatus
 from eventmind.interfaces.api.dependencies import (
     ContainerDep,
+    get_backfill_event_embeddings,
     get_ingestion_status,
     get_load_all,
     get_load_source,
     get_normalize_raw_events,
+    get_refresh_user_embeddings,
     require_internal_api_key,
 )
 from eventmind.interfaces.api.errors import ApiError
@@ -75,6 +82,17 @@ async def retry_failed(
     return asdict(
         await use_case.execute(limit=limit, statuses=[RawEventStatus.FAILED])
     )
+
+
+@router.post("/backfill-embeddings")
+async def backfill_embeddings(
+    backfill: Annotated[BackfillEventEmbeddings, Depends(get_backfill_event_embeddings)],
+    refresh: Annotated[RefreshUserEmbeddings, Depends(get_refresh_user_embeddings)],
+    limit: Annotated[int, Query(ge=1, le=5000)] = 500,
+) -> dict[str, Any]:
+    result = await backfill.execute(limit=limit)
+    users = await refresh.execute(result.updated_event_ids)
+    return {"events": result.updated, "failed": result.failed, "users": users}
 
 
 @router.get("/status")

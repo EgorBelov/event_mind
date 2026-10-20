@@ -60,6 +60,11 @@ class RecommendationUnitOfWork(Protocol):
         gamma: float,
     ) -> None: ...
     async def recompute_user_embedding(self, user_id: int) -> None: ...
+    async def users_with_positive_feedback_on(
+        self, event_ids: list[int], *, limit: int
+    ) -> list[int]:
+        """Пользователи с like/save хотя бы на одно из `event_ids`."""
+        ...
 
 
 RecommendationUnitOfWorkFactory = Callable[[], RecommendationUnitOfWork]

@@ -28,6 +28,7 @@ from eventmind.application.accounts.use_cases import (
     VerifyEmail,
 )
 from eventmind.application.ingestion.use_cases import (
+    BackfillEventEmbeddings,
     GetIngestionStatus,
     LoadAllSources,
     LoadSource,
@@ -41,6 +42,7 @@ from eventmind.application.notifications.use_cases import (
 from eventmind.application.recommender.use_cases import (
     GetRecommendations,
     RecordInteraction,
+    RefreshUserEmbeddings,
 )
 from eventmind.application.search.use_cases import GetEvent, NlSearch
 from eventmind.domain.accounts.entities import User
@@ -147,6 +149,14 @@ def get_normalize_raw_events(container: ContainerDep) -> NormalizeRawEvents:
 
 def get_ingestion_status(container: ContainerDep) -> GetIngestionStatus:
     return GetIngestionStatus(container.events_uow_factory)
+
+
+def get_backfill_event_embeddings(container: ContainerDep) -> BackfillEventEmbeddings:
+    return BackfillEventEmbeddings(container.events_uow_factory, container.embedding)
+
+
+def get_refresh_user_embeddings(container: ContainerDep) -> RefreshUserEmbeddings:
+    return RefreshUserEmbeddings(container.recommendation_uow_factory, container.cache)
 
 
 # ── рекомендер (M4) ──────────────────────────────────────────────────────────
