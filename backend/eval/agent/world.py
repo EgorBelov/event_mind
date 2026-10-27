@@ -143,6 +143,37 @@ class World:
         out.sort(key=lambda e: (e.start_at or far, e.id or 0))
         return out[:limit]
 
+    async def text_search(
+        self, query: SearchQuery, text: str, *, limit: int, now: datetime
+    ) -> list[Event]:
+        """Упрощённый полнотекстовый: число совпавших слов (без морфологии)."""
+        terms = {t for t in text.casefold().split() if len(t) > 2}
+        scored = []
+        for ev in await self.search(query, limit=len(self.events), now=now):
+            words = set(f"{ev.title} {ev.description}".casefold().split())
+            if hits := len(terms & words):
+                scored.append((hits, ev))
+        scored.sort(key=lambda x: (-x[0], x[1].id or 0))
+        return [ev for _, ev in scored[:limit]]
+
+    async def semantic_search(
+        self,
+        query: SearchQuery,
+        vector: list[float],
+        *,
+        limit: int,
+        now: datetime,
+        min_similarity: float,
+    ) -> list[Event]:
+        scored = [
+            (cosine_similarity(vector, ev.embedding), ev)
+            for ev in await self.search(query, limit=len(self.events), now=now)
+            if ev.embedding is not None
+        ]
+        scored = [x for x in scored if x[0] >= min_similarity]
+        scored.sort(key=lambda x: (-x[0], x[1].id or 0))
+        return [ev for _, ev in scored[:limit]]
+
     async def get_event(self, event_id: int) -> Event | None:
         return self.events.get(event_id)
 
@@ -371,7 +402,7 @@ def build_stack(
         RecommenderConfig(),
         weights,
     )
-    nl_search = NlSearch(gateway, world, clock)
+    nl_search = NlSearch(gateway, world, clock, cache, embedding)
     record = RecordInteraction(uow, cache, clock, weights)
     explain = ExplainEvent(world, uow, gateway, cache, clock, weights)
     apply = ApplyProfileChanges(uow, embedding, cache, clock)

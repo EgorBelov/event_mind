@@ -102,6 +102,13 @@ class Settings(BaseSettings):
     reco_result_limit: int = 20
     reco_cache_ttl_seconds: int = 900
 
+    # ── поиск (P1 №7, №16) ───────────────────────────────────────────────
+    # гибридный поиск: строгий + полнотекстовый + семантический, слияние RRF
+    search_hybrid_enabled: bool = True
+    # HyDE: эмбеддинг «идеального события» от LLM вместо короткого запроса (+1 вызов LLM)
+    search_hyde_enabled: bool = False
+    search_min_similarity: float = 0.3
+
     # ── диалоговый агент (A1–A5) ─────────────────────────────────────────
     # false — свободный текст в боте уходит в NL-поиск, веб-чат отключён.
     agent_enabled: bool = True

@@ -75,6 +75,7 @@ from eventmind.application.recommender.use_cases import (
     RefreshUserEmbeddings,
     RemoveSavedEvent,
 )
+from eventmind.application.search.config import SearchConfig
 from eventmind.application.search.use_cases import GetEvent, NlSearch
 from eventmind.domain.accounts.entities import User
 from eventmind.domain.recommender.weights import ScoringWeights
@@ -250,8 +251,18 @@ def get_record_interaction_uc(container: ContainerDep) -> RecordInteraction:
 
 # ── поиск событий (M6) ───────────────────────────────────────────────────────
 def get_nl_search(container: ContainerDep) -> NlSearch:
+    settings = container.settings
     return NlSearch(
-        container.llm, container.search_repository, container.clock, container.cache
+        container.llm,
+        container.search_repository,
+        container.clock,
+        container.cache,
+        container.embedding,
+        SearchConfig(
+            hybrid=settings.search_hybrid_enabled,
+            hyde=settings.search_hyde_enabled,
+            min_similarity=settings.search_min_similarity,
+        ),
     )
 
 

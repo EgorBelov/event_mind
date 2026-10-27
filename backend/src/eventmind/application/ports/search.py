@@ -1,4 +1,5 @@
-"""Порт поиска событий (строгий SQL-поиск по фильтрам + upcoming)."""
+"""Порт поиска событий: строгий поиск по фильтрам, полнотекстовый и семантический
+(три ретривера гибридного поиска, P1 №7)."""
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -24,7 +25,28 @@ class SearchQuery:
 class SearchRepository(Protocol):
     async def search(
         self, query: SearchQuery, *, limit: int, now: datetime
-    ) -> list[Event]: ...
+    ) -> list[Event]:
+        """Строгий поиск: все фильтры, free_text — подстрокой, по дате."""
+        ...
+
+    async def text_search(
+        self, query: SearchQuery, text: str, *, limit: int, now: datetime
+    ) -> list[Event]:
+        """Полнотекстовый поиск (морфология, ранжирование по релевантности) по
+        `text` с жёсткими фильтрами `query` (даты, город, тип, формат)."""
+        ...
+
+    async def semantic_search(
+        self,
+        query: SearchQuery,
+        vector: list[float],
+        *,
+        limit: int,
+        now: datetime,
+        min_similarity: float,
+    ) -> list[Event]:
+        """kNN по эмбеддингу (cosine ≥ min_similarity) с жёсткими фильтрами `query`."""
+        ...
 
     async def get_event(self, event_id: int) -> Event | None: ...
 
