@@ -44,8 +44,9 @@ Makefile   — up/test/lint/typecheck/imports/migrate/seed/...
 ```
 
 Проверки backend: `cd backend && uv sync --extra dev`, затем
-`uv run ruff check .`, `uv run mypy src`, `uv run lint-imports`,
+`uv run ruff check .`, `uv run mypy src eval`, `uv run lint-imports`,
 `uv run pytest tests/unit` (integration требуют Docker → идут в CI).
+Web: `cd web && npm ci && npx tsc --noEmit && npx next lint`.
 
 ## Статус milestone'ов
 
@@ -109,17 +110,47 @@ Makefile   — up/test/lint/typecheck/imports/migrate/seed/...
   `deepseek-flash`) → Gemini → Groq 70b → Groq 8b (`langchain-deepseek`,
   structured output через function calling). Аудит проекта и план доработок —
   `docs/PROJECT_REVIEW.md`. 160 unit-тестов.
-- [ ] **Дальше** — S1: `docs/LAUNCH.md` написан (запуск + промпт; основная
-  машина — Windows 11, обычный PowerShell + Docker Desktop, без WSL), осталось
-  проверить «с нуля» на Windows; P0 №1 (эмбеддинги в образе: torch CPU через
-  `[tool.uv.sources]`, volume `hf-cache`) сделан, но сборка образа ещё не проверена
-  (на macOS 12 не скачался слой ghcr) — проверить на Windows; затем остальные пункты P0 из
-  `docs/PROJECT_REVIEW.md` §8 (backfill + cron, фиксы D2/D3, текстовая модель
-  пользователя №4–5 — сделаны; eval №6 — задел в `backend/eval/real/`, доделать
-  при первом запуске на реальных данных; бот B1–B5 — код написан (не запускался),
-  осталось: тесты, веб «Сохранённое»/«Подробнее», LAUNCH — см. статус в
-  `docs/PROJECT_REVIEW.md` §8 «P0 — Telegram-бот»), затем
-  ИИ-агент A1–A6 (§14: один агент с инструментами поверх ядра; веб и бот остаются).
+- [x] **P0 (код, 20.10.2026)** — эмбеддинги в образе (torch CPU, volume
+  `hf-cache`), backfill + cron ingestion, фиксы D2/D3, текстовая модель
+  пользователя + Rocchio (№4–5), Telegram-бот как самостоятельный интерфейс
+  (B1–B5). Eval №6 — только задел в `backend/eval/real/`.
+- [x] **ИИ-агент A1–A6 (27.10.2026)** — `application/agent/`: `AgentTurn`
+  (порт `ToolCallingLLM`, `LLMChain.complete_with_tools`), 8 инструментов поверх
+  use-case'ов, подтверждение правок профиля «Да / Нет», белый список, лимиты,
+  журнал `agent_tool_calls`; бот (свободный текст → агент, `/reset`), веб
+  `/assistant`; оценка `backend/eval/agent/` (точность вызовов + симуляция
+  «диалог vs анкета»).
+- [x] **P1 (27.10.2026)** — №14 LLM-гигиена (температура/лимит вызова реально
+  применяются, провенанс событий, изоляция ввода тегами, кэш NL-поиска), №7/№16
+  гибридный поиск (строгий + FTS + kNN, RRF; HyDE под флагом), №15 `summary` +
+  `EMBEDDING_TEXT_MODE`, №11 вклад компонент в объяснении, №8 семантическая
+  дедупликация + LLM-арбитр, №18 цели → `skill_gaps` → компонента `skill_gap`,
+  №13 «Похожие» + бот в `make up`, №10 калибровка весов (`eval/real/calibrate.py`,
+  `SCORING_WEIGHTS`). Миграции до `0012`. 298 unit-тестов.
+- [ ] **Дальше** — ⚠️ ВСЁ НАПИСАННОЕ ПОСЛЕ M8 НЕ ЗАПУСКАЛОСЬ: проверено только
+  ruff / mypy / import-linter / unit-тесты и `tsc` + `next lint` для web;
+  integration-тесты написаны, но не прогонялись (testcontainers не работает на
+  macOS 12). Порядок:
+  1. **S1 — первый реальный запуск на Windows 11** по `docs/LAUNCH.md`
+     (PowerShell + Docker Desktop, без WSL): сборка образа с ML, миграции
+     0001–0012, `make up`, integration-тесты, ручной прогон бота и веба
+     (лента, поиск, «Подробнее», «Похожие», помощник). Чинить найденное.
+  2. **P0 №6 — eval на реальном корпусе**: выгрузка событий из БД, извлечение
+     профилей персон, CLI `eval/real`, разметка судьёй + ручная выборка (κ),
+     отчёт. На этих данных — прогоны: H4 (`EMBEDDING_TEXT_MODE`), №9 (энкодеры),
+     №10 (`python -m eval.real.calibrate`), №7/№16 (строгий vs гибрид, HyDE),
+     A6 (`make eval-agent`, `make eval-agent-sim`), пороги дедупликации.
+  3. Остаток P1: №12 (оценка LLM-извлечения на размеченной выборке),
+     проверка `quality_score` / `hype_score` на разметке.
+  4. Хвосты бота из `docs/PROJECT_REVIEW.md` §8: unit-тесты `ListSavedEvents` /
+     `RemoveSavedEvent`, `render_profile`, `next_feed_page`; integration-тесты
+     bot-эндпоинтов.
+  Статус по каждому пункту — `docs/PROJECT_REVIEW.md` §8. Промпты LLM:
+  `ingestion/normalizer.py`, `recommender/profile_extractor.py`,
+  `recommender/goals.py`, `recommender/explain.py`, `search/use_cases.py`
+  (фильтры + HyDE), `ingestion/dedup.py`, `agent/prompts.py` (все в
+  `backend/src/eventmind/application/`), `eval/real/judge.py`,
+  `eval/agent/simulate.py`.
 
 ## Зафиксированные решения v2
 
