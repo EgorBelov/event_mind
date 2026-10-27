@@ -99,6 +99,12 @@ class Settings(BaseSettings):
     # Текст для эмбеддинга события: raw (заголовок + описание с сайта) | summary
     # (заголовок + каноническое LLM-описание) | both. Эксперимент H4 — eval/real.
     embedding_text_mode: Literal["raw", "summary", "both"] = "raw"
+    # Семантическая дедупликация между источниками (P1 №8): порог cosine «дубль»,
+    # нижняя граница «серой зоны» и LLM-арбитр для неё.
+    dedup_enabled: bool = True
+    dedup_similarity: float = 0.92
+    dedup_uncertain_similarity: float = 0.85
+    dedup_llm_arbiter: bool = True
 
     # ── рекомендер (M4) ──────────────────────────────────────────────────
     reco_candidate_limit: int = 100

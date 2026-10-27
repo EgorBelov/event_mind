@@ -15,7 +15,7 @@ from eventmind.application.ingestion.normalizer import NormalizedResult
 from eventmind.application.ingestion.use_cases import LoadSource, NormalizeRawEvents
 from eventmind.application.ports.sources import RawEventDraft
 from eventmind.infrastructure.db.events_uow import SqlAlchemyEventsUnitOfWork
-from eventmind.infrastructure.db.models import EventModel, EventTopicModel
+from eventmind.infrastructure.db.models import EventModel, EventTopicModel, RawEventModel
 
 pytestmark = pytest.mark.usefixtures("clean_tables")
 
@@ -135,7 +135,6 @@ async def test_failed_normalization_goes_to_dlq_with_retry_count(
     assert r1.failed == 1
 
     # статус failed, retry_count вырос
-    from eventmind.infrastructure.db.models import RawEventModel
 
     async with session_factory() as s:
         raw = (await s.execute(select(RawEventModel))).scalars().one()
@@ -147,3 +146,27 @@ async def test_failed_normalization_goes_to_dlq_with_retry_count(
     await normalize.execute()  # retry 3 == max → в следующий раз не выбирается
     r_after = await normalize.execute()
     assert r_after.processed == 0  # исчерпал ретраи, из очереди обработки выпал
+
+
+async def test_same_event_from_another_source_becomes_duplicate(
+    session_factory: async_sessionmaker,
+) -> None:
+    """P1 №8: тот же митап с другого сайта (другой URL, тот же смысл и город) —
+    не второе событие, а raw со статусом duplicate и ссылкой на первое."""
+    first = [RawEventDraft(title="Go Meetup #5", raw_description="Go", source_url="http://a/1")]
+    second = [RawEventDraft(title="Go-митап #5", raw_description="Go", source_url="http://b/1")]
+    load = LoadSource(_factory(session_factory), FakeQueue())
+    normalize = NormalizeRawEvents(
+        _factory(session_factory), FakeNormalizer(), FakeEmbedding(), CONFIG  # type: ignore[arg-type]
+    )
+    await load.execute(FakeSource(first))
+    assert (await normalize.execute()).events_created == 1
+    await load.execute(FakeSource(second))
+    result = await normalize.execute()
+    assert result.duplicates == 1 and result.events_created == 0
+
+    async with session_factory() as s:
+        event_id = (await s.execute(select(EventModel.id))).scalar_one()
+        query = select(RawEventModel).where(RawEventModel.source_url == "http://b/1")
+        dup = (await s.execute(query)).scalar_one()
+    assert dup.status == "duplicate" and dup.duplicate_of == event_id

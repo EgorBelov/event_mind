@@ -20,10 +20,16 @@ class RawEvent:
     error: str | None = None
     retry_count: int = 0
     created_at: datetime | None = None
+    duplicate_of: int | None = None  # events.id, если это дубль другого источника
 
     def mark_normalized(self) -> None:
         self.status = RawEventStatus.NORMALIZED
         self.error = None
+
+    def mark_duplicate(self, event_id: int) -> None:
+        self.status = RawEventStatus.DUPLICATE
+        self.error = None
+        self.duplicate_of = event_id
 
     def mark_non_it(self) -> None:
         self.status = RawEventStatus.NON_IT

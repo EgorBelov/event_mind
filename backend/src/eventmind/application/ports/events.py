@@ -3,9 +3,11 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
+from datetime import datetime
 from types import TracebackType
 from typing import Protocol
 
+from eventmind.domain.events.dedup import DedupCandidate
 from eventmind.domain.events.entities import Event, RawEvent
 from eventmind.domain.events.value_objects import RawEventStatus
 
@@ -53,6 +55,19 @@ class EventRepository(Protocol):
 
     async def set_embedding(self, event_id: int, embedding: list[float]) -> None: ...
     async def count_without_embedding(self) -> int: ...
+
+    async def find_similar(
+        self,
+        vector: list[float],
+        *,
+        start_at: datetime | None,
+        limit: int,
+        min_similarity: float,
+        max_days_apart: int,
+    ) -> list[DedupCandidate]:
+        """Ближайшие по cosine события (≥ min_similarity); при известной дате —
+        только в окне ±max_days_apart (или без даты)."""
+        ...
 
 
 class TopicRepository(Protocol):

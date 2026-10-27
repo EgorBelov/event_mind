@@ -28,6 +28,7 @@ from eventmind.application.accounts.email_handlers import (
     make_user_registered_handler,
 )
 from eventmind.application.ingestion.config import IngestionConfig
+from eventmind.application.ingestion.dedup import DuplicateArbiter
 from eventmind.application.ingestion.normalizer import EventNormalizer
 from eventmind.application.ingestion.use_cases import (
     NORMALIZE_TASK,
@@ -45,6 +46,7 @@ from eventmind.application.recommender.use_cases import (
     RefreshUserEmbeddings,
 )
 from eventmind.config import Settings, get_settings, validate_or_exit
+from eventmind.domain.events.dedup import DedupPolicy
 from eventmind.domain.recommender.weights import ScoringWeights
 from eventmind.infrastructure.cache.redis_cache import RedisCache
 from eventmind.infrastructure.db.engine import create_engine, create_session_factory
@@ -177,6 +179,11 @@ def _build_resources(settings: Settings) -> dict[str, Any]:
         normalize_batch_size=settings.normalize_batch_size,
         max_normalize_retries=settings.max_normalize_retries,
         embedding_text_mode=settings.embedding_text_mode,
+        semantic_dedup=settings.dedup_enabled,
+        dedup_policy=DedupPolicy(
+            duplicate_similarity=settings.dedup_similarity,
+            uncertain_similarity=settings.dedup_uncertain_similarity,
+        ),
     )
 
     # ── рекомендер + доставка (M4/M5) ──────────────────────────────────────
@@ -232,7 +239,11 @@ def _build_resources(settings: Settings) -> dict[str, Any]:
         "ingest_default_limit": settings.ingest_default_limit,
         "ingestion_config": ingestion_config,
         "normalize": NormalizeRawEvents(
-            events_uow_factory, EventNormalizer(llm), embedding, ingestion_config
+            events_uow_factory,
+            EventNormalizer(llm),
+            embedding,
+            ingestion_config,
+            DuplicateArbiter(llm) if settings.dedup_llm_arbiter else None,
         ),
         "backfill_events": BackfillEventEmbeddings(
             events_uow_factory, embedding, text_mode=settings.embedding_text_mode

@@ -36,6 +36,7 @@ from eventmind.application.recommender.profile_extractor import ProfileExtractor
 from eventmind.application.recommender.ranker import HybridRanker
 from eventmind.config import Settings
 from eventmind.domain.accounts.value_objects import ChannelType
+from eventmind.domain.events.dedup import DedupPolicy
 from eventmind.infrastructure.cache.redis_cache import RedisCache
 from eventmind.infrastructure.db.agent_journal import SqlAlchemyAgentJournal
 from eventmind.infrastructure.db.engine import create_engine, create_session_factory
@@ -146,6 +147,11 @@ def build_container(settings: Settings) -> Container:
             normalize_batch_size=settings.normalize_batch_size,
             max_normalize_retries=settings.max_normalize_retries,
             embedding_text_mode=settings.embedding_text_mode,
+            semantic_dedup=settings.dedup_enabled,
+            dedup_policy=DedupPolicy(
+                duplicate_similarity=settings.dedup_similarity,
+                uncertain_similarity=settings.dedup_uncertain_similarity,
+            ),
         ),
         cache=RedisCache(redis),
         candidate_generator=PgvectorCandidateGenerator(session_factory),

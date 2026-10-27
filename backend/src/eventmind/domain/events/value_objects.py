@@ -9,6 +9,7 @@ class RawEventStatus(str, Enum):
     NORMALIZED = "normalized"  # успешно превращено в Event
     NON_IT = "non_it"          # не IT / не событие — отброшено нормализатором
     FAILED = "failed"          # нормализация упала (DLQ при исчерпании ретраев)
+    DUPLICATE = "duplicate"    # то же событие уже есть из другого источника (P1 №8)
 
 
 class EventFormat(str, Enum):

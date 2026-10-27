@@ -1,14 +1,18 @@
 """async-SQLAlchemy-репозитории событий (raw_events / events / topics).
 
-Идемпотентность: raw по (source, source_url), event по source_url. Топики
+Идемпотентность: raw по (source, source_url), event по source_url; дубли между
+источниками — `find_similar` (kNN по эмбеддингу в окне дат, P1 №8). Топики
 создаются лениво (`ensure_codes`) и линкуются в event_topics.
 """
 from __future__ import annotations
 
-from sqlalchemy import func, select, update
+from datetime import datetime, timedelta
+
+from sqlalchemy import func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from eventmind.application.ports.events import EventText
+from eventmind.domain.events.dedup import DedupCandidate
 from eventmind.domain.events.entities import Event, RawEvent
 from eventmind.domain.events.taxonomy import topic_title
 from eventmind.domain.events.value_objects import RawEventStatus
@@ -31,6 +35,7 @@ def _raw_to_entity(m: RawEventModel) -> RawEvent:
         error=m.error,
         retry_count=m.retry_count,
         created_at=m.created_at,
+        duplicate_of=m.duplicate_of,
     )
 
 
@@ -92,6 +97,7 @@ class SqlAlchemyRawEventRepository:
         model.status = raw.status.value
         model.error = raw.error
         model.retry_count = raw.retry_count
+        model.duplicate_of = raw.duplicate_of
 
     async def count_by_status(self) -> dict[str, int]:
         result = await self._session.execute(
@@ -155,6 +161,40 @@ class SqlAlchemyEventRepository:
         return [
             EventText(event_id=event_id, title=title, description=description, summary=summary)
             for event_id, title, description, summary in rows.all()
+        ]
+
+    async def find_similar(
+        self,
+        vector: list[float],
+        *,
+        start_at: datetime | None,
+        limit: int,
+        min_similarity: float,
+        max_days_apart: int,
+    ) -> list[DedupCandidate]:
+        distance = EventModel.embedding.cosine_distance(vector)
+        stmt = select(EventModel, distance.label("distance")).where(
+            EventModel.embedding.isnot(None), distance <= 1.0 - min_similarity
+        )
+        if start_at is not None:
+            window = timedelta(days=max_days_apart)
+            stmt = stmt.where(
+                or_(
+                    EventModel.start_at.is_(None),
+                    EventModel.start_at.between(start_at - window, start_at + window),
+                )
+            )
+        rows = await self._session.execute(stmt.order_by(distance).limit(limit))
+        return [
+            DedupCandidate(
+                event_id=m.id,
+                title=m.title,
+                description=m.description[:800],
+                city=m.city,
+                start_at=m.start_at,
+                similarity=1.0 - float(d),
+            )
+            for m, d in rows.all()
         ]
 
     async def set_embedding(self, event_id: int, embedding: list[float]) -> None:

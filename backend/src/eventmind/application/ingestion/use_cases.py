@@ -13,11 +13,13 @@ from typing import Literal
 import structlog
 
 from eventmind.application.ingestion.config import IngestionConfig
-from eventmind.application.ingestion.normalizer import EventNormalizer
+from eventmind.application.ingestion.dedup import DuplicateArbiter
+from eventmind.application.ingestion.normalizer import EventNormalizer, NormalizedResult
 from eventmind.application.ports.embedding import EmbeddingProvider
 from eventmind.application.ports.events import EventsUnitOfWork, EventsUnitOfWorkFactory
 from eventmind.application.ports.queue import TaskQueue
 from eventmind.application.ports.sources import EventSource
+from eventmind.domain.events.dedup import judge_duplicate
 from eventmind.domain.events.entities import Event, RawEvent
 from eventmind.domain.events.series import compute_series_slug
 from eventmind.domain.events.value_objects import RawEventStatus
@@ -69,11 +71,12 @@ class NormalizeResult:
     events_created: int = 0
     non_it: int = 0
     failed: int = 0
+    duplicates: int = 0  # то же событие уже есть из другого источника
 
     @property
     def made_progress(self) -> bool:
-        """Хоть одно сырьё закрыто (event или non-IT) — есть смысл брать следующую пачку."""
-        return self.events_created + self.non_it > 0
+        """Хоть одно сырьё закрыто (event, non-IT, дубль) — есть смысл брать следующую пачку."""
+        return self.events_created + self.non_it + self.duplicates > 0
 
 
 @dataclass(slots=True)
@@ -142,11 +145,13 @@ class NormalizeRawEvents:
         normalizer: EventNormalizer,
         embedding: EmbeddingProvider,
         config: IngestionConfig,
+        arbiter: DuplicateArbiter | None = None,
     ) -> None:
         self._uow_factory = uow_factory
         self._normalizer = normalizer
         self._embedding = embedding
         self._config = config
+        self._arbiter = arbiter
 
     async def execute(
         self,
@@ -195,10 +200,18 @@ class NormalizeRawEvents:
             await uow.raw_events.update(raw)
             return
 
-        topic_ids = await uow.topics.ensure_codes(normalized.topics)
         embedding = await self._safe_embed(
             normalized.title, normalized.description, normalized.summary
         )
+        if embedding is not None and self._config.semantic_dedup:
+            duplicate_of = await self._find_duplicate(uow, normalized, embedding)
+            if duplicate_of is not None:
+                raw.mark_duplicate(duplicate_of)
+                await uow.raw_events.update(raw)
+                result.duplicates += 1
+                return
+
+        topic_ids = await uow.topics.ensure_codes(normalized.topics)
 
         event = Event(
             source=raw.source,
@@ -227,6 +240,44 @@ class NormalizeRawEvents:
         raw.mark_normalized()
         await uow.raw_events.update(raw)
         result.events_created += 1
+
+    async def _find_duplicate(
+        self, uow: EventsUnitOfWork, normalized: NormalizedResult, embedding: list[float]
+    ) -> int | None:
+        """id существующего события, если это то же событие из другого источника."""
+        policy = self._config.dedup_policy
+        candidates = await uow.events.find_similar(
+            embedding,
+            start_at=normalized.start_at,
+            limit=self._config.dedup_candidates,
+            min_similarity=policy.uncertain_similarity,
+            max_days_apart=policy.max_days_apart,
+        )
+        for candidate in candidates:
+            verdict = judge_duplicate(
+                title=normalized.title,
+                city=normalized.city,
+                start_at=normalized.start_at,
+                candidate=candidate,
+                policy=policy,
+            )
+            if verdict == "uncertain" and self._arbiter is not None:
+                same = await self._arbiter.same_event(
+                    title=normalized.title,
+                    description=normalized.description,
+                    date=normalized.date,
+                    city=normalized.city,
+                    candidate=candidate,
+                )
+                verdict = "duplicate" if same else "distinct"
+            if verdict == "duplicate":
+                _logger.info(
+                    "semantic_duplicate",
+                    duplicate_of=candidate.event_id,
+                    similarity=round(candidate.similarity, 3),
+                )
+                return candidate.event_id
+        return None
 
     async def _safe_embed(
         self, title: str, description: str, summary: str

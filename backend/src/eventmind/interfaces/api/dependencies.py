@@ -50,6 +50,7 @@ from eventmind.application.agent.use_cases import (
     GetAgentHistory,
     ResetAgentSession,
 )
+from eventmind.application.ingestion.dedup import DuplicateArbiter
 from eventmind.application.ingestion.use_cases import (
     BackfillEventEmbeddings,
     GetIngestionStatus,
@@ -180,6 +181,7 @@ def get_normalize_raw_events(container: ContainerDep) -> NormalizeRawEvents:
         container.normalizer,
         container.embedding,
         container.ingestion_config,
+        DuplicateArbiter(container.llm) if container.settings.dedup_llm_arbiter else None,
     )
 
 
