@@ -20,6 +20,7 @@ from eventmind.application.ports.cache import Cache
 from eventmind.application.ports.embedding import EmbeddingProvider
 from eventmind.application.ports.recommender import RecommendationUnitOfWorkFactory
 from eventmind.application.ports.security import Clock
+from eventmind.application.recommender.goals import GoalPlanner
 from eventmind.application.recommender.profile_extractor import (
     ExtractedProfile,
     ProfileExtractor,
@@ -57,12 +58,14 @@ class UpdateUserProfile:
         embedding: EmbeddingProvider,
         cache: Cache,
         clock: Clock,
+        planner: GoalPlanner | None = None,
     ) -> None:
         self._uow_factory = uow_factory
         self._extractor = extractor
         self._embedding = embedding
         self._cache = cache
         self._clock = clock
+        self._planner = planner
 
     async def execute(
         self,
@@ -77,6 +80,7 @@ class UpdateUserProfile:
         about = clean_about(about)
         async with self._uow_factory() as uow:
             known_topics = await uow.known_topic_codes(limit=_KNOWN_TOPICS_LIMIT)
+            previous = await uow.get_profile(user_id)
 
         extracted = await self._extract(about, known_topics)
         anti = (
@@ -94,8 +98,10 @@ class UpdateUserProfile:
             interests=[t for t in chosen if t not in anti],
             anti_interests=anti,
             goals=extracted.goals,
+            skill_gaps=list(previous.skill_gaps) if previous else [],
             updated_at=self._clock.now(),
         )
+        await _refresh_gaps(self._planner, profile, previous, known_topics)
         profile.embedding = await self._embed(profile)
 
         async with self._uow_factory() as uow:
@@ -116,6 +122,30 @@ class UpdateUserProfile:
 
     async def _embed(self, profile: UserProfile) -> list[float] | None:
         return await _embed_profile(self._embedding, profile)
+
+
+async def _refresh_gaps(
+    planner: GoalPlanner | None,
+    profile: UserProfile,
+    previous: UserProfile | None,
+    known_topics: Sequence[str],
+) -> None:
+    """Пересчитать недостающие навыки, если поменялись цели или то, что
+    пользователь уже знает. LLM недоступна — оставить прежние."""
+    if planner is None:
+        return
+    before = previous or UserProfile(user_id=profile.user_id)
+    changed = (profile.goals, profile.stack, profile.interests, profile.anti_interests) != (
+        before.goals,
+        before.stack,
+        before.interests,
+        before.anti_interests,
+    )
+    if not changed and profile.skill_gaps:
+        return
+    gaps = await planner.plan(profile, known_topics=known_topics)
+    if gaps is not None:
+        profile.skill_gaps = gaps
 
 
 async def _embed_profile(embedding: EmbeddingProvider, profile: UserProfile) -> list[float] | None:
@@ -141,19 +171,23 @@ class ApplyProfileChanges:
         embedding: EmbeddingProvider,
         cache: Cache,
         clock: Clock,
+        planner: GoalPlanner | None = None,
     ) -> None:
         self._uow_factory = uow_factory
         self._embedding = embedding
         self._cache = cache
         self._clock = clock
+        self._planner = planner
 
     async def execute(self, user_id: int, changes: ProfileChanges) -> UserProfile:
         async with self._uow_factory() as uow:
             current = await uow.get_profile(user_id) or UserProfile(user_id=user_id)
+            known_topics = await uow.known_topic_codes(limit=_KNOWN_TOPICS_LIMIT)
         if changes.is_empty:
             return current
         profile = apply_profile_changes(current, changes)
         profile.updated_at = self._clock.now()
+        await _refresh_gaps(self._planner, profile, current, known_topics)
         profile.embedding = await _embed_profile(self._embedding, profile)
 
         async with self._uow_factory() as uow:

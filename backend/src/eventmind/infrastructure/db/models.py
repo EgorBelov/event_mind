@@ -247,6 +247,7 @@ class UserProfileModel(Base):
     interests: Mapped[list[str]] = mapped_column(JSONB, nullable=False, default=list)
     anti_interests: Mapped[list[str]] = mapped_column(JSONB, nullable=False, default=list)
     goals: Mapped[list[str]] = mapped_column(JSONB, nullable=False, default=list)
+    skill_gaps: Mapped[list[str]] = mapped_column(JSONB, nullable=False, default=list)
     embedding: Mapped[list[float] | None] = mapped_column(Vector(EMBEDDING_DIM), nullable=True)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False

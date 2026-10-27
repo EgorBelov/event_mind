@@ -1,9 +1,8 @@
 """HybridRanker — взвешенная сумма компонентов + MMR + series anti-flood.
 
 Каждый компонент в try/except (сбой одного не рушит выдачу — деградация).
-Веса и математика — из `domain/recommender`. Скореры-заделы (skill_gap/bandit/
-gnn) включаются флагами позже; сейчас активны rule/cosine/bayesian/quality/
-hype/freshness.
+Веса и математика — из `domain/recommender`. Активны rule/cosine/bayesian/
+skill_gap/quality/hype/freshness; bandit/gnn — заделы (веса есть, скореров нет).
 """
 from __future__ import annotations
 
@@ -22,6 +21,7 @@ from eventmind.domain.recommender.scoring import (
     cosine_similarity,
     freshness_score,
     rule_score,
+    skill_gap_score,
 )
 from eventmind.domain.recommender.weights import ScoringWeights
 
@@ -77,6 +77,7 @@ class HybridRanker:
             return thompson_score(stats, event.topics, rng=rng)
 
         safe("bayesian", lambda: bayesian() * w.bayesian)
+        safe("skill_gap", lambda: skill_gap_score(user, event) * w.skill_gap)
         safe("quality", lambda: (event.quality_score or 0) * w.quality)
         safe("hype", lambda: (event.hype_score or 0) * w.hype)
         safe(

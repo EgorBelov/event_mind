@@ -118,6 +118,7 @@ def render_profile(profile: dict[str, Any]) -> str:
         ("interests", "✅ Интересно"),
         ("anti_interests", "🚫 Не интересно"),
         ("goals", "🎯 Цели"),
+        ("skill_gaps", "🧭 Не хватает для целей"),
     ):
         values = profile.get(key) or []
         if isinstance(values, list) and values:

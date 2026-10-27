@@ -225,6 +225,7 @@ class UserProfileResponse(BaseModel):
     interests: list[str]
     anti_interests: list[str]
     goals: list[str]
+    skill_gaps: list[str]
     has_embedding: bool
     is_empty: bool
 
@@ -238,6 +239,7 @@ class UserProfileResponse(BaseModel):
             interests=profile.interests,
             anti_interests=profile.anti_interests,
             goals=profile.goals,
+            skill_gaps=profile.skill_gaps,
             has_embedding=profile.embedding is not None,
             is_empty=profile.is_empty,
         )

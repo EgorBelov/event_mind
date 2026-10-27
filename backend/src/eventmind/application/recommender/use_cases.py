@@ -58,6 +58,7 @@ def build_user_context(prefs: UserPrefs, stats: BayesianStats) -> UserContext:
         preferred_format=prefs.preferred_format,
         city=prefs.city,
         embedding=prefs.embedding,
+        skill_gaps=set(prefs.skill_gaps) - set(prefs.anti_interests),
     )
 
 
@@ -73,6 +74,7 @@ def event_to_features(event: Event) -> EventFeatures:
         start_at=event.start_at,
         embedding=event.embedding,
         series_slug=event.series_slug,
+        tech_stack=event.tech_stack,
     )
 
 

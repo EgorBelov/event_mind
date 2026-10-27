@@ -9,6 +9,8 @@ import math
 from dataclasses import dataclass, field
 from datetime import datetime
 
+from eventmind.domain.events.taxonomy import slugify_code
+
 
 @dataclass(slots=True)
 class UserContext:
@@ -19,6 +21,7 @@ class UserContext:
     preferred_format: str | None = None
     city: str | None = None
     embedding: list[float] | None = None
+    skill_gaps: set[str] = field(default_factory=set)  # навыки, нужные для целей
 
 
 @dataclass(slots=True)
@@ -34,6 +37,7 @@ class EventFeatures:
     start_at: datetime | None = None
     embedding: list[float] | None = None
     series_slug: str | None = None
+    tech_stack: list[str] = field(default_factory=list)
 
 
 def cosine_similarity(a: list[float] | None, b: list[float] | None) -> float:
@@ -80,6 +84,20 @@ def rule_score(user: UserContext, event: EventFeatures) -> float:
     elif user.city and user.city == event.city:
         score += 2
     return float(score)
+
+
+def skill_gap_matches(user: UserContext, event: EventFeatures) -> set[str]:
+    """Навыки из целей пользователя, которые закрывает событие (темы + стек)."""
+    if not user.skill_gaps:
+        return set()
+    covered = {slugify_code(t) for t in [*event.topics, *event.tech_stack] if t}
+    return user.skill_gaps & covered
+
+
+def skill_gap_score(user: UserContext, event: EventFeatures) -> float:
+    """0..1: насколько событие закрывает навыки, нужные для целей пользователя
+    (P1 №18). Одно совпадение темы/технологии — 0.5, два и больше — 1.0."""
+    return min(1.0, len(skill_gap_matches(user, event)) / 2)
 
 
 def quality_component(event: EventFeatures) -> float:

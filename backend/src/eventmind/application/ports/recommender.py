@@ -21,6 +21,7 @@ class UserPrefs:
     # Из текстового профиля (user_profiles): объявленные интересы/анти-интересы.
     interests: list[str] = field(default_factory=list)
     anti_interests: list[str] = field(default_factory=list)
+    skill_gaps: list[str] = field(default_factory=list)
 
 
 class CandidateGenerator(Protocol):

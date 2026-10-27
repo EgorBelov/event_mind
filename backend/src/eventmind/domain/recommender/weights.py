@@ -13,7 +13,7 @@ class ScoringWeights:
     quality: float = 0.5   # quality_score 1..10 → до +5
     hype: float = 0.3      # hype_score 1..10 → до +3
     freshness: float = 2.0  # freshness 0..1 → до +2
-    skill_gap: float = 3.0  # задел (скорер включается флагом позже)
+    skill_gap: float = 3.0  # событие закрывает навык для цели: 0..1 → до +3 (P1 №18)
     bandit: float = 2.0     # задел (LinUCB — расширение)
     gnn: float = 3.0        # задел (LightGCN — выкл. по умолчанию)
 

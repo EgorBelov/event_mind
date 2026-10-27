@@ -25,7 +25,7 @@ def test_higher_quality_and_cosine_ranks_first() -> None:
     assert ranked[0].score > ranked[1].score
     # breakdown содержит все компоненты
     assert set(ranked[0].breakdown) == {
-        "rule", "cosine", "bayesian", "quality", "hype", "freshness"
+        "rule", "cosine", "bayesian", "skill_gap", "quality", "hype", "freshness"
     }
 
 

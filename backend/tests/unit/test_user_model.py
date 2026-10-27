@@ -171,6 +171,9 @@ class _Uow:
     async def known_topic_codes(self, *, limit: int) -> list[str]:
         return ["backend", "ai_ml"]
 
+    async def get_profile(self, user_id: int) -> UserProfile | None:
+        return None
+
     async def save_profile(self, profile: UserProfile) -> None:
         self.log.append(("save", profile))
 

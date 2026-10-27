@@ -221,6 +221,7 @@ def get_update_user_profile(container: ContainerDep) -> UpdateUserProfile:
         container.embedding,
         container.cache,
         container.clock,
+        container.goal_planner,
     )
 
 
@@ -283,6 +284,7 @@ def get_apply_profile_changes(container: ContainerDep) -> ApplyProfileChanges:
         container.embedding,
         container.cache,
         container.clock,
+        container.goal_planner,
     )
 
 

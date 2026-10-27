@@ -15,7 +15,12 @@ from dataclasses import dataclass
 from datetime import datetime
 
 from eventmind.domain.events.taxonomy import city_label, topic_title
-from eventmind.domain.recommender.scoring import EventFeatures, UserContext, cosine_similarity
+from eventmind.domain.recommender.scoring import (
+    EventFeatures,
+    UserContext,
+    cosine_similarity,
+    skill_gap_matches,
+)
 
 # Пороги близости для мультиязычных sentence-энкодеров (MiniLM даёт ~0.2–0.7
 # на релевантных парах) — эвристика для формулировки, не для ранжирования.
@@ -47,6 +52,10 @@ def explain_match(user: UserContext, event: EventFeatures, *, now: datetime) -> 
         elif sim >= CLOSE:
             reasons.append("Близко по смыслу к вашему профилю и оценкам")
 
+    gaps = skill_gap_matches(user, event)
+    if gaps:
+        reasons.append(f"Нужно для ваших целей: {_titles(gaps)}")
+
     if user.preferred_format and user.preferred_format == event.format:
         reasons.append(f"Подходящий формат: {event.format}")
     if user.city and user.city not in ("any", "unknown") and user.city == event.city:
@@ -70,6 +79,7 @@ COMPONENT_LABELS: dict[str, str] = {
     "cosine": "смысл",  # близость эмбеддингов профиля/оценок и события
     "rule": "темы, формат, город",
     "bayesian": "ваши оценки",
+    "skill_gap": "ваши цели",
     "quality": "качество",
     "hype": "актуальность",
     "freshness": "дата",

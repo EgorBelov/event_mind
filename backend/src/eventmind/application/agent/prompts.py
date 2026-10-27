@@ -53,6 +53,7 @@ def _profile_lines(profile: dict[str, Any]) -> list[str]:
         ("interests", "интересы"),
         ("anti_interests", "не интересно"),
         ("goals", "цели"),
+        ("skill_gaps", "не хватает для целей"),
     ):
         value = profile.get(key)
         if isinstance(value, list):

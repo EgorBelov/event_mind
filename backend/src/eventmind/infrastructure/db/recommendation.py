@@ -50,6 +50,7 @@ def _profile_to_entity(m: UserProfileModel) -> UserProfile:
         interests=list(m.interests),
         anti_interests=list(m.anti_interests),
         goals=list(m.goals),
+        skill_gaps=list(m.skill_gaps or []),
         embedding=list(m.embedding) if m.embedding is not None else None,
         updated_at=m.updated_at,
     )
@@ -94,6 +95,7 @@ class SqlAlchemyRecommendationUnitOfWork:
                 UserModel.embedding,
                 UserProfileModel.interests,
                 UserProfileModel.anti_interests,
+                UserProfileModel.skill_gaps,
             )
             .outerjoin(UserProfileModel, UserProfileModel.user_id == UserModel.id)
             .where(UserModel.id == user_id)
@@ -101,13 +103,14 @@ class SqlAlchemyRecommendationUnitOfWork:
         result = row.first()
         if result is None:
             return None
-        city, fmt, emb, interests, anti_interests = result
+        city, fmt, emb, interests, anti_interests, skill_gaps = result
         return UserPrefs(
             city=city,
             preferred_format=fmt,
             embedding=list(emb) if emb is not None else None,
             interests=list(interests or []),
             anti_interests=list(anti_interests or []),
+            skill_gaps=list(skill_gaps or []),
         )
 
     async def load_bayesian_stats(
@@ -235,6 +238,7 @@ class SqlAlchemyRecommendationUnitOfWork:
         model.interests = list(profile.interests)
         model.anti_interests = list(profile.anti_interests)
         model.goals = list(profile.goals)
+        model.skill_gaps = list(profile.skill_gaps)
         model.embedding = profile.embedding
         if profile.updated_at is not None:
             model.updated_at = profile.updated_at

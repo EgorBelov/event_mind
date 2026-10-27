@@ -32,6 +32,7 @@ from eventmind.application.ports.security import (
 from eventmind.application.ports.sources import EventSource
 from eventmind.application.ports.uow import UnitOfWork
 from eventmind.application.recommender.config import RecommenderConfig
+from eventmind.application.recommender.goals import GoalPlanner
 from eventmind.application.recommender.profile_extractor import ProfileExtractor
 from eventmind.application.recommender.ranker import HybridRanker
 from eventmind.config import Settings
@@ -81,6 +82,7 @@ class Container:
     sources: dict[str, EventSource]
     normalizer: EventNormalizer
     profile_extractor: ProfileExtractor
+    goal_planner: GoalPlanner
     ingestion_config: IngestionConfig
     cache: RedisCache
     candidate_generator: PgvectorCandidateGenerator
@@ -143,6 +145,7 @@ def build_container(settings: Settings) -> Container:
         sources=build_source_registry(settings),
         normalizer=EventNormalizer(llm),
         profile_extractor=ProfileExtractor(llm),
+        goal_planner=GoalPlanner(llm),
         ingestion_config=IngestionConfig(
             normalize_batch_size=settings.normalize_batch_size,
             max_normalize_retries=settings.max_normalize_retries,

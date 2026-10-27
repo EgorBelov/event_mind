@@ -38,6 +38,7 @@ from eventmind.application.ports.recommender import BayesianStats, UserPrefs
 from eventmind.application.ports.search import SearchQuery
 from eventmind.application.recommender.config import RecommenderConfig
 from eventmind.application.recommender.explain import ExplainEvent
+from eventmind.application.recommender.goals import GoalPlanner
 from eventmind.application.recommender.profile import (
     ApplyProfileChanges,
     GetUserProfile,
@@ -405,7 +406,8 @@ def build_stack(
     nl_search = NlSearch(gateway, world, clock, cache, embedding)
     record = RecordInteraction(uow, cache, clock, weights)
     explain = ExplainEvent(world, uow, gateway, cache, clock, weights)
-    apply = ApplyProfileChanges(uow, embedding, cache, clock)
+    planner = GoalPlanner(gateway)
+    apply = ApplyProfileChanges(uow, embedding, cache, clock, planner)
     toolbox = AgentToolbox(
         [
             SearchEventsTool(nl_search),
@@ -424,7 +426,9 @@ def build_stack(
         cache, ttl_seconds=cfg.session_ttl_seconds, history_limit=cfg.history_limit
     )
     agent = AgentTurn(agent_llm, toolbox, sessions, journal, uow, cache, clock, cfg)
-    update_profile = UpdateUserProfile(uow, ProfileExtractor(gateway), embedding, cache, clock)
+    update_profile = UpdateUserProfile(
+        uow, ProfileExtractor(gateway), embedding, cache, clock, planner
+    )
     return Stack(
         world=world,
         agent=agent,

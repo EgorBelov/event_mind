@@ -84,6 +84,8 @@ export interface UserProfile {
   interests: string[];
   anti_interests: string[];
   goals: string[];
+  /** Чего не хватает для целей — по этим темам подбираются события. */
+  skill_gaps: string[];
   has_embedding: boolean;
   is_empty: boolean;
 }

@@ -152,6 +152,12 @@ export default function SettingsPage() {
             {profile.goals.length > 0 && (
               <p style={{ margin: "0.2rem 0" }}>Цели: {profile.goals.join("; ")}</p>
             )}
+            {profile.skill_gaps.length > 0 && (
+              <p style={{ margin: "0.2rem 0" }}>
+                Не хватает для целей: {profile.skill_gaps.join(", ")}{" "}
+                <span className="notice">— подбираем события под это</span>
+              </p>
+            )}
             <div style={{ marginTop: "0.4rem" }}>
               Интересы:{" "}
               {profile.interests.length === 0 && <span className="notice">—</span>}

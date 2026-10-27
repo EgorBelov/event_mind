@@ -69,7 +69,9 @@ def test_ranker_explain_is_deterministic_and_matches_components() -> None:
     assert first == ranker.explain(user, _features(), stats, now=NOW)
     assert first["bayesian"] == pytest.approx(5.0 / 6.0 * ScoringWeights().bayesian)
     assert first["cosine"] == pytest.approx(ScoringWeights().cosine)
-    assert set(first) == {"rule", "cosine", "bayesian", "quality", "hype", "freshness"}
+    assert set(first) == {
+        "rule", "cosine", "bayesian", "skill_gap", "quality", "hype", "freshness"
+    }
 
 
 # ── use-case ──────────────────────────────────────────────────────────────────

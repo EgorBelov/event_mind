@@ -98,6 +98,7 @@ def profile_data(profile: UserProfile, prefs: UserPrefs | None) -> dict[str, Any
         "interests": profile.interests,
         "anti_interests": profile.anti_interests,
         "goals": profile.goals,
+        "skill_gaps": profile.skill_gaps,
         "city": prefs.city if prefs else None,
         "preferred_format": prefs.preferred_format if prefs else None,
     }

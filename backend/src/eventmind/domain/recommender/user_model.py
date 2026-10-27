@@ -39,6 +39,8 @@ class UserProfile:
     interests: list[str] = field(default_factory=list)  # topic-slug'и
     anti_interests: list[str] = field(default_factory=list)  # topic-slug'и
     goals: list[str] = field(default_factory=list)
+    # чего не хватает для целей (topic/tech slug'и; выводит GoalPlanner, P1 №18)
+    skill_gaps: list[str] = field(default_factory=list)
     embedding: list[float] | None = None
     updated_at: datetime | None = None
 
@@ -210,6 +212,8 @@ def apply_profile_changes(profile: UserProfile, changes: ProfileChanges) -> User
         interests=interests[:MAX_TOPICS],
         anti_interests=anti[:MAX_TOPICS],
         goals=goals[:MAX_GOALS],
+        # цели поменялись — пробелы пересчитает GoalPlanner; иначе остаются
+        skill_gaps=list(profile.skill_gaps),
         embedding=profile.embedding,
         updated_at=profile.updated_at,
     )
