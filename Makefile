@@ -5,7 +5,7 @@ BACKEND := backend
 .DEFAULT_GOAL := help
 
 .PHONY: help up down logs build test test-unit test-integration lint typecheck \
-        imports migrate revision seed eval load-test web-dev fmt
+        imports migrate revision seed eval eval-agent eval-agent-sim load-test web-dev fmt
 
 help: ## Показать доступные команды
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | \
@@ -59,6 +59,12 @@ seed: ## Наполнить БД демо-аккаунтом (идемпотен
 
 eval: ## Offline-eval рекомендера (leave-one-out, seed=42, ablations)
 	cd $(BACKEND) && uv run python -m eval.run
+
+eval-agent: ## Оценка агента: точность вызовов инструментов (нужны ключи LLM)
+	cd $(BACKEND) && uv run python -m eval.agent toolcalls
+
+eval-agent-sim: ## Оценка агента: симуляция пользователей, диалог vs анкета (корпус + разметка eval/real)
+	cd $(BACKEND) && uv run --extra ml python -m eval.agent simulate --judge
 
 load-test: ## Нагрузочный смоук k6 по хот-путям (нужен установленный k6)
 	k6 run -e BASE_URL=$(or $(BASE_URL),http://localhost:8000) deploy/loadtest/k6-smoke.js
