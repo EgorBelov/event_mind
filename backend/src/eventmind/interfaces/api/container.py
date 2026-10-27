@@ -145,6 +145,7 @@ def build_container(settings: Settings) -> Container:
         ingestion_config=IngestionConfig(
             normalize_batch_size=settings.normalize_batch_size,
             max_normalize_retries=settings.max_normalize_retries,
+            embedding_text_mode=settings.embedding_text_mode,
         ),
         cache=RedisCache(redis),
         candidate_generator=PgvectorCandidateGenerator(session_factory),

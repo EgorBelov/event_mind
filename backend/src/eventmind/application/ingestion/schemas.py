@@ -13,6 +13,13 @@ class NormalizedEvent(BaseModel):
 
     title: str = ""
     description: str = ""
+    summary: str = Field(
+        default="",
+        description=(
+            "Каноническое описание 2–3 предложениями: о чём событие, для кого, ключевые "
+            "темы и технологии. Нейтрально, без дат, цен, адресов и рекламы"
+        ),
+    )
     format: str = "unknown"
     city: str = "unknown"
     level: str = "unknown"

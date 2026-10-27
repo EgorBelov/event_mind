@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from typing import Literal
 
 import structlog
 
@@ -26,9 +27,32 @@ _logger = structlog.get_logger("eventmind.ingestion")
 NORMALIZE_TASK = "normalize_raw_events"
 
 
-def event_embedding_text(title: str, description: str) -> str:
-    """Текст, по которому строится эмбеддинг события (общий для ingestion и backfill)."""
-    return f"{title}\n{description}".strip()
+EmbeddingTextMode = Literal["raw", "summary", "both"]
+
+
+def event_embedding_text(
+    title: str,
+    description: str,
+    summary: str | None = None,
+    *,
+    mode: EmbeddingTextMode = "raw",
+) -> str:
+    """Текст, по которому строится эмбеддинг события (общий для ingestion,
+    backfill и офлайн-оценки).
+
+    - `raw` — заголовок + исходное описание (шум сайта: даты, цены, реклама);
+    - `summary` — заголовок + каноническое LLM-описание (P1 №15); без него — raw;
+    - `both` — заголовок + каноническое + исходное.
+    Какой режим лучше — эксперимент H4 (`eval/real`).
+    """
+    parts = [title]
+    if mode == "raw" or not summary:
+        parts.append(description)
+    elif mode == "summary":
+        parts.append(summary)
+    else:
+        parts += [summary, description]
+    return "\n".join(p for p in parts if p).strip()
 
 
 @dataclass(slots=True)
@@ -172,7 +196,9 @@ class NormalizeRawEvents:
             return
 
         topic_ids = await uow.topics.ensure_codes(normalized.topics)
-        embedding = await self._safe_embed(normalized.title, normalized.description)
+        embedding = await self._safe_embed(
+            normalized.title, normalized.description, normalized.summary
+        )
 
         event = Event(
             source=raw.source,
@@ -186,6 +212,7 @@ class NormalizeRawEvents:
             event_type=normalized.event_type,
             target_audience=normalized.target_audience or None,
             source_url=raw.source_url,
+            summary=normalized.summary or None,
             tech_stack=normalized.tech_stack,
             seniority=normalized.seniority,
             quality_score=normalized.quality_score,
@@ -201,10 +228,16 @@ class NormalizeRawEvents:
         await uow.raw_events.update(raw)
         result.events_created += 1
 
-    async def _safe_embed(self, title: str, description: str) -> list[float] | None:
+    async def _safe_embed(
+        self, title: str, description: str, summary: str
+    ) -> list[float] | None:
         """Эмбеддинг события; сбой провайдера не рушит нормализацию (досчитает backfill)."""
         try:
-            return await self._embedding.embed_text(event_embedding_text(title, description))
+            return await self._embedding.embed_text(
+                event_embedding_text(
+                    title, description, summary, mode=self._config.embedding_text_mode
+                )
+            )
         except Exception as exc:
             _logger.warning("event_embedding_failed", error=str(exc))
             return None
@@ -223,10 +256,12 @@ class BackfillEventEmbeddings:
         embedding: EmbeddingProvider,
         *,
         batch_size: int = 32,
+        text_mode: EmbeddingTextMode = "raw",
     ) -> None:
         self._uow_factory = uow_factory
         self._embedding = embedding
         self._batch_size = batch_size
+        self._text_mode = text_mode
 
     async def execute(self, *, limit: int = 500) -> BackfillResult:
         result = BackfillResult()
@@ -240,7 +275,12 @@ class BackfillEventEmbeddings:
                 after_id = batch[-1].event_id
                 try:
                     vectors = await self._embedding.embed_texts(
-                        [event_embedding_text(ev.title, ev.description) for ev in batch]
+                        [
+                            event_embedding_text(
+                                ev.title, ev.description, ev.summary, mode=self._text_mode
+                            )
+                            for ev in batch
+                        ]
                     )
                 except Exception as exc:
                     _logger.warning("embedding_backfill_failed", error=str(exc), batch=len(batch))

@@ -147,14 +147,14 @@ class SqlAlchemyEventRepository:
 
     async def fetch_without_embedding(self, *, limit: int, after_id: int = 0) -> list[EventText]:
         rows = await self._session.execute(
-            select(EventModel.id, EventModel.title, EventModel.description)
+            select(EventModel.id, EventModel.title, EventModel.description, EventModel.summary)
             .where(EventModel.embedding.is_(None), EventModel.id > after_id)
             .order_by(EventModel.id)
             .limit(limit)
         )
         return [
-            EventText(event_id=event_id, title=title, description=description)
-            for event_id, title, description in rows.all()
+            EventText(event_id=event_id, title=title, description=description, summary=summary)
+            for event_id, title, description, summary in rows.all()
         ]
 
     async def set_embedding(self, event_id: int, embedding: list[float]) -> None:

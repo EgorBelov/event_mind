@@ -188,7 +188,11 @@ def get_ingestion_status(container: ContainerDep) -> GetIngestionStatus:
 
 
 def get_backfill_event_embeddings(container: ContainerDep) -> BackfillEventEmbeddings:
-    return BackfillEventEmbeddings(container.events_uow_factory, container.embedding)
+    return BackfillEventEmbeddings(
+        container.events_uow_factory,
+        container.embedding,
+        text_mode=container.ingestion_config.embedding_text_mode,
+    )
 
 
 def get_refresh_user_embeddings(container: ContainerDep) -> RefreshUserEmbeddings:

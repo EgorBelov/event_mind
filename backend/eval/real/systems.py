@@ -28,7 +28,7 @@ from typing import Protocol
 
 from eval.real.data import CorpusEvent, ExtractedPersona, Persona
 from eval.real.text import Bm25Index, TfidfIndex
-from eventmind.application.ingestion.use_cases import event_embedding_text
+from eventmind.application.ingestion.use_cases import EmbeddingTextMode, event_embedding_text
 from eventmind.application.recommender.ranker import HybridRanker
 from eventmind.domain.recommender.scoring import (
     EventFeatures,
@@ -60,8 +60,9 @@ def parse_start(value: str | None) -> datetime | None:
     return dt if dt.tzinfo else dt.replace(tzinfo=UTC)
 
 
-def event_text(ev: CorpusEvent) -> str:
-    return event_embedding_text(ev.title, ev.description)
+def event_text(ev: CorpusEvent, mode: EmbeddingTextMode = "raw") -> str:
+    """Текст события для энкодера; `mode` — эксперимент H4 (raw / summary / both)."""
+    return event_embedding_text(ev.title, ev.description, ev.summary, mode=mode)
 
 
 def persona_profile(persona: Persona, extracted: ExtractedPersona | None) -> UserProfile:

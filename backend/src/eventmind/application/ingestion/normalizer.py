@@ -53,6 +53,7 @@ class NormalizedResult:
     quality_score: int | None
     hype_score: int | None
     start_at: _dt.datetime | None = None
+    summary: str = ""
     llm_provider: str = ""
     prompt_version: str = ""
 
@@ -143,6 +144,7 @@ def postprocess(raw: NormalizedEvent) -> NormalizedResult:
         is_event=bool(topics),
         title=raw.title.strip(),
         description=raw.description.strip(),
+        summary=_clip_summary(raw.summary),
         format=fmt,
         city=city,
         level=level,
@@ -196,6 +198,9 @@ slug в snake_case (topic "mlops", city "barnaul"). Не плоди дубли (
 date — строго YYYY-MM-DD (для диапазона — дата начала); неизвестна → "".
 topics — список slug'ов, минимум 1 для IT-событий.
 tech_stack — конкретные технологии (["Python","FastAPI","Docker"]).
+summary — каноническое описание 2–3 предложениями: о чём событие, для кого,
+ключевые темы и технологии; нейтрально, без дат, цен, адресов, призывов и
+рекламы (по нему строится эмбеддинг — важен смысл, а не оформление).
 quality_score (1-10) — информативность для IT-специалиста.
 hype_score (1-10) — актуальность темы в IT сейчас.
 
@@ -224,7 +229,7 @@ _USER_PROMPT = (
 )
 # Версия промпта нормализатора — пишется с событием (провенанс): при правке
 # промпта видно, какие события извлечены старой версией.
-PROMPT_VERSION = "normalizer-v2"
+PROMPT_VERSION = "normalizer-v3"  # v3: + summary (P1 №15)
 _RAW_MAX_LEN = 8000
 
 
@@ -256,6 +261,16 @@ class EventNormalizer:
         result.llm_provider = extracted.provider
         result.prompt_version = PROMPT_VERSION
         return result
+
+
+_SUMMARY_MAX_LEN = 600
+
+
+def _clip_summary(value: object) -> str:
+    if not isinstance(value, str):
+        return ""
+    text = " ".join(value.split())
+    return text if len(text) <= _SUMMARY_MAX_LEN else text[:_SUMMARY_MAX_LEN].rstrip() + "…"
 
 
 def _untrusted(text: str, limit: int) -> str:

@@ -96,6 +96,9 @@ class Settings(BaseSettings):
     ingest_schedule_hours: str = "0,6,12,18"
     # Догрузка эмбеддингов (cron в worker, раз в час): максимум событий за прогон.
     embedding_backfill_limit: int = 500
+    # Текст для эмбеддинга события: raw (заголовок + описание с сайта) | summary
+    # (заголовок + каноническое LLM-описание) | both. Эксперимент H4 — eval/real.
+    embedding_text_mode: Literal["raw", "summary", "both"] = "raw"
 
     # ── рекомендер (M4) ──────────────────────────────────────────────────
     reco_candidate_limit: int = 100

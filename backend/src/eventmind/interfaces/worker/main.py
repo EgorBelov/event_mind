@@ -176,6 +176,7 @@ def _build_resources(settings: Settings) -> dict[str, Any]:
     ingestion_config = IngestionConfig(
         normalize_batch_size=settings.normalize_batch_size,
         max_normalize_retries=settings.max_normalize_retries,
+        embedding_text_mode=settings.embedding_text_mode,
     )
 
     # ── рекомендер + доставка (M4/M5) ──────────────────────────────────────
@@ -233,7 +234,9 @@ def _build_resources(settings: Settings) -> dict[str, Any]:
         "normalize": NormalizeRawEvents(
             events_uow_factory, EventNormalizer(llm), embedding, ingestion_config
         ),
-        "backfill_events": BackfillEventEmbeddings(events_uow_factory, embedding),
+        "backfill_events": BackfillEventEmbeddings(
+            events_uow_factory, embedding, text_mode=settings.embedding_text_mode
+        ),
         "refresh_users": RefreshUserEmbeddings(rec_uow_factory, cache),
         "embedding_backfill_limit": settings.embedding_backfill_limit,
         "send_digest": send_digest,

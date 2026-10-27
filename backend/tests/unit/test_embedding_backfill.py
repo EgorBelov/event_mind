@@ -198,3 +198,12 @@ def test_worker_cron_includes_ingest_only_when_scheduled() -> None:
     assert names == {"cron:cron_schedule_digests", "cron:cron_backfill_embeddings"}
     names = {job.name for job in build_cron_jobs(Settings(ingest_schedule_hours="3,15"))}
     assert "cron:cron_ingest_all" in names
+
+
+
+def test_event_embedding_text_modes() -> None:
+    assert event_embedding_text("T", "raw", "sum", mode="raw") == "T\nraw"
+    assert event_embedding_text("T", "raw", "sum", mode="summary") == "T\nsum"
+    assert event_embedding_text("T", "raw", "sum", mode="both") == "T\nsum\nraw"
+    # без канонического описания любой режим откатывается к исходному тексту
+    assert event_embedding_text("T", "raw", None, mode="summary") == "T\nraw"

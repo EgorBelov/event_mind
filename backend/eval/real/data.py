@@ -45,6 +45,7 @@ class CorpusEvent:
     source_url: str | None = None
     tech_stack: list[str] = field(default_factory=list)
     series_slug: str | None = None
+    summary: str | None = None  # каноническое LLM-описание (P1 №15, эксперимент H4)
 
 
 @dataclass(slots=True)

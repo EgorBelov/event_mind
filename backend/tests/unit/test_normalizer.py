@@ -102,3 +102,11 @@ async def test_normalizer_normalize_uses_llm_and_postprocesses() -> None:
     # текст сайта изолирован в теге и не может его закрыть
     user = llm.messages[-1].content
     assert user.startswith("<event>") and user.count("</event>") == 1
+
+
+
+def test_postprocess_keeps_clean_summary() -> None:
+    r = postprocess(_ev(summary="  Митап про Go:\n  конкурентность и   highload.  "))
+    assert r.summary == "Митап про Go: конкурентность и highload."
+    long = postprocess(_ev(summary="x" * 1000))
+    assert len(long.summary) <= 601 and long.summary.endswith("…")

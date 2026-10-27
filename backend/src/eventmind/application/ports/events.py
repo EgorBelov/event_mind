@@ -39,6 +39,7 @@ class EventText:
     event_id: int
     title: str
     description: str
+    summary: str | None = None
 
 
 class EventRepository(Protocol):
