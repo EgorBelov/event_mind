@@ -263,12 +263,7 @@ async def explain(
     result = await use_case.execute(event_id, user_id=user_id)
     if result is None:
         raise ApiError(HTTP_404_NOT_FOUND, "not_found", "Событие не найдено")
-    return ExplainResponse(
-        event=EventDetailResponse.from_entity(result.event),
-        summary=result.summary,
-        summary_source=result.summary_source,
-        reasons=result.reasons,
-    )
+    return ExplainResponse.from_explanation(result)
 
 
 # ── A4: диалоговый агент (свободный текст в боте) ─────────────────────────────

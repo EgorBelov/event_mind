@@ -2,9 +2,16 @@
 что использует ранкер (темы, семантическая близость, формат, город, качество,
 дата). LLM здесь не участвует: причины не выдумываются, а выводятся из модели
 пользователя и признаков события.
+
+Два уровня (P1 №11):
+- `explain_match` — человеческие причины («темы из ваших интересов: Go»);
+- `contributions` — вклад каждой компоненты гибридного скоринга в итоговый
+  балл события (доля от суммы модулей): то, что реально подняло событие.
 """
 from __future__ import annotations
 
+from collections.abc import Mapping
+from dataclasses import dataclass
 from datetime import datetime
 
 from eventmind.domain.events.taxonomy import city_label, topic_title
@@ -57,3 +64,38 @@ def explain_match(user: UserContext, event: EventFeatures, *, now: datetime) -> 
             "чтобы подбор был точнее"
         )
     return reasons
+
+
+COMPONENT_LABELS: dict[str, str] = {
+    "cosine": "смысл",  # близость эмбеддингов профиля/оценок и события
+    "rule": "темы, формат, город",
+    "bayesian": "ваши оценки",
+    "quality": "качество",
+    "hype": "актуальность",
+    "freshness": "дата",
+}
+
+
+@dataclass(frozen=True, slots=True)
+class Contribution:
+    component: str
+    label: str
+    value: float  # вклад в балл (со знаком: анти-интерес даёт минус)
+    share: float  # |value| / Σ|value|, 0..1
+
+
+def contributions(breakdown: Mapping[str, float]) -> list[Contribution]:
+    """Вклады компонент по убыванию модуля; нулевые отброшены."""
+    nonzero = {k: v for k, v in breakdown.items() if abs(v) > 1e-9}
+    total = sum(abs(v) for v in nonzero.values())
+    if total <= 0:
+        return []
+    return [
+        Contribution(
+            component=name,
+            label=COMPONENT_LABELS.get(name, name),
+            value=round(value, 4),
+            share=round(abs(value) / total, 4),
+        )
+        for name, value in sorted(nonzero.items(), key=lambda kv: (-abs(kv[1]), kv[0]))
+    ]

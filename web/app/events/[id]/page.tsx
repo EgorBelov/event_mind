@@ -108,6 +108,16 @@ export default function EventPage({ params }: { params: { id: string } }) {
               </ul>
             </>
           )}
+          {explanation.contributions.some((c) => c.value > 0) && (
+            <p className="notice" style={{ marginBottom: 0 }}>
+              Вклад в подбор:{" "}
+              {explanation.contributions
+                .filter((c) => c.value > 0)
+                .slice(0, 4)
+                .map((c) => `${c.label} ${Math.round(c.share * 100)}%`)
+                .join(" · ")}
+            </p>
+          )}
         </article>
       )}
     </main>

@@ -14,7 +14,7 @@ from datetime import datetime
 
 import structlog
 
-from eventmind.domain.recommender.bayesian import thompson_score
+from eventmind.domain.recommender.bayesian import posterior_mean, thompson_score
 from eventmind.domain.recommender.mmr import RankedItem, mmr_rerank, series_anti_flood
 from eventmind.domain.recommender.scoring import (
     EventFeatures,
@@ -48,8 +48,10 @@ class HybridRanker:
         stats: BayesianStats,
         *,
         now: datetime,
-        rng: random.Random,
+        rng: random.Random | None,
     ) -> dict[str, float]:
+        """Вклады компонент. `rng=None` — детерминированно (для объяснения):
+        Bayesian — среднее апостериорного Beta вместо сэмпла Thompson."""
         w = self._w
         out: dict[str, float] = {}
 
@@ -57,7 +59,7 @@ class HybridRanker:
             try:
                 out[name] = float(fn())
             except Exception as exc:
-                _logger.warning("scorer_failed", scorer=name, event=event.id, error=str(exc))
+                _logger.warning("scorer_failed", scorer=name, event_id=event.id, error=str(exc))
                 out[name] = 0.0
 
         safe("rule", lambda: rule_score(user, event) * w.rule)
@@ -67,11 +69,14 @@ class HybridRanker:
         # бы сигнал quality/freshness, делая выдачу случайной. Пока статов нет —
         # bayesian=0 (ранжируем по контенту/качеству/свежести); exploration
         # включается, как только появляется первый фидбэк.
-        safe(
-            "bayesian",
-            lambda: (thompson_score(stats, event.topics, rng=rng) if stats else 0.0)
-            * w.bayesian,
-        )
+        def bayesian() -> float:
+            if not stats:
+                return 0.0
+            if rng is None:
+                return posterior_mean(stats, event.topics)
+            return thompson_score(stats, event.topics, rng=rng)
+
+        safe("bayesian", lambda: bayesian() * w.bayesian)
         safe("quality", lambda: (event.quality_score or 0) * w.quality)
         safe("hype", lambda: (event.hype_score or 0) * w.hype)
         safe(
@@ -82,6 +87,12 @@ class HybridRanker:
             * w.freshness,
         )
         return out
+
+    def explain(
+        self, user: UserContext, event: EventFeatures, stats: BayesianStats, *, now: datetime
+    ) -> dict[str, float]:
+        """Детерминированный разбор балла события по компонентам (P1 №11)."""
+        return self._breakdown(user, event, stats, now=now, rng=None)
 
     def rank(
         self,

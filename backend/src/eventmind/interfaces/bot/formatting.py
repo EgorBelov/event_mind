@@ -165,6 +165,12 @@ def render_explain(explanation: dict[str, Any]) -> str:
         lines.append("")
         lines.append("<b>Почему рекомендовано</b>")
         lines.extend(f"• {esc(r)}" for r in reasons)
+    parts = [
+        c for c in explanation.get("contributions") or [] if float(c.get("value", 0)) > 0
+    ][:4]
+    if parts:
+        shares = " · ".join(f"{esc(c['label'])} {float(c['share']):.0%}" for c in parts)
+        lines.append(f"<i>Вклад в подбор: {shares}</i>")
     return "\n".join(lines) + event_url_line(event)
 
 

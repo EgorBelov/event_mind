@@ -113,6 +113,8 @@ export interface Explanation {
   summary: string;
   summary_source: "llm" | "description";
   reasons: string[];
+  /** Вклад компонент гибридного скоринга: доля в балле события (0..1). */
+  contributions: { component: string; label: string; value: number; share: number }[];
 }
 
 /** Диалоговый агент: предложенное изменение профиля / настроек. */

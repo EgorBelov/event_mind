@@ -124,7 +124,7 @@ async def judge_pool(
                 )
             except Exception as exc:  # одна пара не рушит прогон — повторится при следующем
                 failed += 1
-                _logger.warning("judge_failed", persona=pid, event=eid, error=str(exc))
+                _logger.warning("judge_failed", persona=pid, event_id=eid, error=str(exc))
                 return
         label = Label(
             persona_id=pid,

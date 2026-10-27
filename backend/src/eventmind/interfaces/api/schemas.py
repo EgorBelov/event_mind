@@ -5,6 +5,7 @@ from pydantic import BaseModel, EmailStr, Field
 
 from eventmind.application.agent.session import PendingAction
 from eventmind.application.agent.use_cases import AgentReply
+from eventmind.application.recommender.explain import EventExplanation
 from eventmind.domain.accounts.entities import NotificationPreference, User
 from eventmind.domain.events.entities import Event
 from eventmind.domain.recommender.user_model import UserProfile
@@ -162,13 +163,37 @@ class SavedPageResponse(BaseModel):
     offset: int
 
 
+class ContributionResponse(BaseModel):
+    component: str
+    label: str
+    value: float
+    share: float
+
+
 class ExplainResponse(BaseModel):
-    """«📖 Подробнее»: пересказ события + персональные причины рекомендации."""
+    """«📖 Подробнее»: пересказ события + персональные причины рекомендации +
+    вклад компонент гибридного скоринга."""
 
     event: EventDetailResponse
     summary: str
     summary_source: str  # llm | description
     reasons: list[str]
+    contributions: list[ContributionResponse] = []
+
+    @classmethod
+    def from_explanation(cls, result: EventExplanation) -> ExplainResponse:
+        return cls(
+            event=EventDetailResponse.from_entity(result.event),
+            summary=result.summary,
+            summary_source=result.summary_source,
+            reasons=result.reasons,
+            contributions=[
+                ContributionResponse(
+                    component=c.component, label=c.label, value=c.value, share=c.share
+                )
+                for c in result.contributions
+            ],
+        )
 
 
 class NlSearchResponse(BaseModel):

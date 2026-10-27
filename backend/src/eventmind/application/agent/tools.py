@@ -288,6 +288,8 @@ class ExplainEventTool(AgentTool):
             "event": event_brief(result.event),
             "description": clean_text(result.event.description, _DESCRIPTION_LEN),
             "reasons": result.reasons,
+            # что реально подняло событие в подборке: доля компоненты в балле
+            "contributions": {c.label: f"{c.share:.0%}" for c in result.contributions[:4]},
         }
         return ToolOutput(data=data, events=[result.event])
 
