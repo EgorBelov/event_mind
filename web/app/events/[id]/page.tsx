@@ -1,12 +1,26 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useState } from "react";
 import { api, ApiError } from "@/lib/api";
-import type { EventDetail } from "@/lib/types";
+import type { EventDetail, Explanation } from "@/lib/types";
 
 export default function EventPage({ params }: { params: { id: string } }) {
   const [ev, setEv] = useState<EventDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [explanation, setExplanation] = useState<Explanation | null>(null);
+  const [explainState, setExplainState] = useState<"idle" | "busy" | "login" | "error">("idle");
+
+  async function explain() {
+    if (!ev) return;
+    setExplainState("busy");
+    try {
+      setExplanation(await api.explain(ev.id));
+      setExplainState("idle");
+    } catch (e) {
+      setExplainState(e instanceof ApiError && e.status === 401 ? "login" : "error");
+    }
+  }
 
   useEffect(() => {
     const id = Number(params.id);
@@ -58,14 +72,44 @@ export default function EventPage({ params }: { params: { id: string } }) {
             ))}
           </div>
         )}
-        {ev.source_url && (
-          <p style={{ marginTop: "1rem" }}>
+        <div className="row" style={{ marginTop: "1rem" }}>
+          {!explanation && (
+            <button onClick={explain} disabled={explainState === "busy"}>
+              {explainState === "busy" ? "Готовлю…" : "📖 Подробнее и почему мне"}
+            </button>
+          )}
+          {ev.source_url && (
             <a className="btn primary" href={ev.source_url} target="_blank" rel="noreferrer">
               Открыть источник ↗
             </a>
+          )}
+        </div>
+        {explainState === "login" && (
+          <p className="notice">
+            <Link href={`/login?next=/events/${ev.id}`}>Войдите</Link>, чтобы увидеть, почему
+            событие вам подходит.
           </p>
         )}
+        {explainState === "error" && (
+          <p className="error">Не удалось получить описание — попробуйте позже.</p>
+        )}
       </article>
+      {explanation && (
+        <article className="card">
+          <h3>📖 Коротко о событии</h3>
+          <p style={{ whiteSpace: "pre-wrap" }}>{explanation.summary}</p>
+          {explanation.reasons.length > 0 && (
+            <>
+              <h3>Почему рекомендовано</h3>
+              <ul style={{ margin: 0, paddingLeft: "1.2rem" }}>
+                {explanation.reasons.map((r) => (
+                  <li key={r}>{r}</li>
+                ))}
+              </ul>
+            </>
+          )}
+        </article>
+      )}
     </main>
   );
 }

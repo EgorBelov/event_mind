@@ -5,7 +5,7 @@
  */
 import { type NextRequest, NextResponse } from "next/server";
 
-const PROTECTED = ["/feed", "/search", "/inbox", "/settings"];
+const PROTECTED = ["/feed", "/assistant", "/search", "/saved", "/inbox", "/settings"];
 const ACCESS_COOKIE = "eventmind_access";
 
 export function middleware(request: NextRequest): NextResponse {
@@ -23,5 +23,12 @@ export function middleware(request: NextRequest): NextResponse {
 }
 
 export const config = {
-  matcher: ["/feed/:path*", "/search/:path*", "/inbox/:path*", "/settings/:path*"],
+  matcher: [
+    "/feed/:path*",
+    "/assistant/:path*",
+    "/search/:path*",
+    "/saved/:path*",
+    "/inbox/:path*",
+    "/settings/:path*",
+  ],
 };

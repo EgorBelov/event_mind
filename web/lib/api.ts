@@ -4,13 +4,17 @@
  * `credentials: "include"` шлёт cookie на свой origin.
  */
 import type {
+  AgentHistory,
+  AgentReply,
   AuthResponse,
   EventDetail,
+  Explanation,
   InboxResponse,
   MessageResponse,
   NlSearchResponse,
   Preferences,
   Recommendation,
+  SavedPage,
   TelegramLinkToken,
   UserProfile,
   UserResponse,
@@ -95,6 +99,20 @@ export const api = {
       `/api/v1/events/nl-search?q=${encodeURIComponent(q)}&limit=${limit}`,
     ),
   event: (id: number) => request<EventDetail>("GET", `/api/v1/events/${id}`),
+  explain: (id: number) => request<Explanation>("GET", `/api/v1/events/${id}/explain`),
+
+  // saved
+  saved: (offset = 0, limit = 10) =>
+    request<SavedPage>("GET", `/api/v1/saved?offset=${offset}&limit=${limit}`),
+  removeSaved: (id: number) => request<MessageResponse>("DELETE", `/api/v1/saved/${id}`),
+
+  // диалоговый агент
+  agentSend: (message: string) =>
+    request<AgentReply>("POST", "/api/v1/agent/messages", { message }),
+  agentConfirm: (actionId: string, approve: boolean) =>
+    request<AgentReply>("POST", "/api/v1/agent/confirm", { action_id: actionId, approve }),
+  agentHistory: () => request<AgentHistory>("GET", "/api/v1/agent/session"),
+  agentReset: () => request<MessageResponse>("DELETE", "/api/v1/agent/session"),
 
   // notifications
   inbox: (limit = 30) =>

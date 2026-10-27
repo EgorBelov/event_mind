@@ -101,6 +101,39 @@ export interface TelegramLinkToken {
   deep_link: string;
 }
 
+export interface SavedPage {
+  items: EventDetail[];
+  total: number;
+  offset: number;
+}
+
+/** «Подробнее»: пересказ события + почему рекомендовано (для вас). */
+export interface Explanation {
+  event: EventDetail;
+  summary: string;
+  summary_source: "llm" | "description";
+  reasons: string[];
+}
+
+/** Диалоговый агент: предложенное изменение профиля / настроек. */
+export interface AgentPending {
+  id: string;
+  description: string;
+}
+
+export interface AgentReply {
+  text: string;
+  events: EventDetail[];
+  pending: AgentPending | null;
+  stop_reason: string;
+  degraded: boolean;
+}
+
+export interface AgentHistory {
+  messages: { role: "user" | "assistant"; text: string }[];
+  pending: AgentPending | null;
+}
+
 export interface ApiErrorBody {
   error: { code: string; message: string };
 }

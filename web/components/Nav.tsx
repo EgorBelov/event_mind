@@ -7,7 +7,9 @@ import { api, ApiError } from "@/lib/api";
 
 const LINKS = [
   { href: "/feed", label: "Лента" },
+  { href: "/assistant", label: "Помощник" },
   { href: "/search", label: "Поиск" },
+  { href: "/saved", label: "Сохранённое" },
   { href: "/inbox", label: "Инбокс" },
   { href: "/settings", label: "Настройки" },
 ];

@@ -171,3 +171,34 @@ label {
   background: var(--accent);
   margin-right: 0.4rem;
 }
+
+/* ── помощник (диалоговый агент) ─────────────────────────────────────────── */
+.chat {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  margin: 1rem 0;
+}
+.bubble {
+  max-width: 85%;
+  padding: 0.6rem 0.9rem;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: var(--card);
+  white-space: pre-wrap;
+}
+.bubble.user {
+  align-self: flex-end;
+  background: #eef2ff;
+  border-color: #c7d2fe;
+}
+.bubble.assistant {
+  align-self: flex-start;
+}
+.chat .card {
+  margin: 0.2rem 0 0.2rem 1rem;
+}
+.suggestions button {
+  font-size: 0.85rem;
+  padding: 0.3rem 0.7rem;
+}

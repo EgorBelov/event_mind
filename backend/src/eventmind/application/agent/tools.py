@@ -130,10 +130,12 @@ class AgentTool:
     args_model: ClassVar[type[BaseModel]]
     requires_confirmation: ClassVar[bool] = False
 
-    def spec(self) -> ToolSpec:
-        schema = _strip_titles(self.args_model.model_json_schema())
+    @classmethod
+    def spec(cls) -> ToolSpec:
+        """Схема для модели — без зависимостей инструмента (нужна и офлайн-оценке)."""
+        schema = _strip_titles(cls.args_model.model_json_schema())
         schema.setdefault("properties", {})
-        return ToolSpec(name=self.name, description=self.description, parameters=schema)
+        return ToolSpec(name=cls.name, description=cls.description, parameters=schema)
 
     def describe(self, args: BaseModel) -> str:
         """Человеческое описание действия — для запроса подтверждения."""
@@ -480,3 +482,16 @@ class AgentToolbox:
     @property
     def names(self) -> list[str]:
         return list(self._tools)
+
+
+# Все инструменты агента в порядке регистрации (для оценки A6 — схемы без зависимостей).
+ALL_TOOLS: tuple[type[AgentTool], ...] = (
+    SearchEventsTool,
+    RecommendTool,
+    GetEventTool,
+    ExplainEventTool,
+    GetProfileTool,
+    RecordFeedbackTool,
+    UpdateProfileTool,
+    UpdateSettingsTool,
+)
