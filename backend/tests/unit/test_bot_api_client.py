@@ -4,6 +4,8 @@
 """
 from __future__ import annotations
 
+import json
+
 import httpx
 import pytest
 
@@ -115,3 +117,34 @@ async def test_http_error_degrades(monkeypatch: pytest.MonkeyPatch) -> None:
     client, _ = _client_with(monkeypatch, boom)
     assert await client.recommendations("555") == []
     assert await client.status("555") is False
+
+
+# ── A4: диалоговый агент ──────────────────────────────────────────────────────
+async def test_agent_message_posts_chat_and_text(monkeypatch: pytest.MonkeyPatch) -> None:
+    reply = {"text": "Нашёл", "events": [], "pending": None, "stop_reason": "answer",
+             "degraded": False}
+    client, rec = _client_with(monkeypatch, lambda req: httpx.Response(200, json=reply))
+    assert await client.agent_message("555", "Go в Перми") == reply
+    req = rec.requests[0]
+    assert req.method == "POST" and req.url.path == "/api/v1/bot/agent/messages"
+    assert json.loads(req.read()) == {"chat_id": "555", "message": "Go в Перми"}
+
+
+@pytest.mark.parametrize("status", [409, 503])
+async def test_agent_message_unavailable_returns_none(
+    monkeypatch: pytest.MonkeyPatch, status: int
+) -> None:
+    client, _ = _client_with(monkeypatch, lambda req: httpx.Response(status, json={}))
+    assert await client.agent_message("555", "привет") is None
+
+
+async def test_agent_confirm_and_reset(monkeypatch: pytest.MonkeyPatch) -> None:
+    client, rec = _client_with(
+        monkeypatch, lambda req: httpx.Response(200, json={"text": "✅ Готово"})
+    )
+    assert await client.agent_confirm("555", "abc", approve=True) == {"text": "✅ Готово"}
+    assert await client.agent_reset("555") is True
+    confirm, reset = rec.requests
+    assert confirm.url.path == "/api/v1/bot/agent/confirm"
+    assert json.loads(confirm.read())["approve"] is True
+    assert reset.method == "DELETE" and reset.url.params["chat_id"] == "555"

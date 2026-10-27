@@ -3,6 +3,8 @@ from __future__ import annotations
 
 from pydantic import BaseModel, EmailStr, Field
 
+from eventmind.application.agent.session import PendingAction
+from eventmind.application.agent.use_cases import AgentReply
 from eventmind.domain.accounts.entities import NotificationPreference, User
 from eventmind.domain.events.entities import Event
 from eventmind.domain.recommender.user_model import UserProfile
@@ -290,3 +292,61 @@ class PreferencesResponse(BaseModel):
             quiet_hours_start=pref.quiet_hours_start,
             quiet_hours_end=pref.quiet_hours_end,
         )
+
+
+# ── диалоговый агент (A4/A5) ──────────────────────────────────────────────────
+class AgentMessageRequest(BaseModel):
+    message: str = Field(min_length=1, max_length=4000)
+
+
+class AgentConfirmRequest(BaseModel):
+    action_id: str = Field(min_length=1, max_length=64)
+    approve: bool
+
+
+class BotAgentMessageRequest(AgentMessageRequest):
+    chat_id: str = Field(min_length=1, max_length=64)
+
+
+class BotAgentConfirmRequest(AgentConfirmRequest):
+    chat_id: str = Field(min_length=1, max_length=64)
+
+
+class AgentPendingResponse(BaseModel):
+    """Предложенное изменение — интерфейс показывает «Да / Нет»."""
+
+    id: str
+    description: str
+
+    @classmethod
+    def from_pending(cls, pending: PendingAction | None) -> AgentPendingResponse | None:
+        return cls(id=pending.id, description=pending.description) if pending else None
+
+
+class AgentReplyResponse(BaseModel):
+    text: str
+    events: list[EventDetailResponse]
+    pending: AgentPendingResponse | None
+    stop_reason: str
+    # true — LLM недоступна: интерфейс отвечает без агента (бот — прямым поиском)
+    degraded: bool
+
+    @classmethod
+    def from_reply(cls, reply: AgentReply) -> AgentReplyResponse:
+        return cls(
+            text=reply.text,
+            events=[EventDetailResponse.from_entity(e) for e in reply.events],
+            pending=AgentPendingResponse.from_pending(reply.pending),
+            stop_reason=reply.stop_reason,
+            degraded=reply.degraded,
+        )
+
+
+class AgentHistoryMessage(BaseModel):
+    role: str  # user | assistant
+    text: str
+
+
+class AgentHistoryResponse(BaseModel):
+    messages: list[AgentHistoryMessage]
+    pending: AgentPendingResponse | None

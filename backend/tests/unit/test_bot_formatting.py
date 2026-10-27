@@ -4,9 +4,11 @@ from __future__ import annotations
 from eventmind.interfaces.bot.formatting import (
     event_url_line,
     format_event_date,
+    render_agent_text,
     render_event_card,
     to_plain,
 )
+from eventmind.interfaces.bot.keyboards import agent_confirm_keyboard
 
 
 def test_format_date_from_iso_without_time_shows_only_date() -> None:
@@ -62,3 +64,17 @@ def test_render_card_has_title_and_topics() -> None:
 
 def test_to_plain_strips_tags() -> None:
     assert to_plain("<b>Hi</b> &amp; bye") == "Hi & bye"
+
+
+def test_render_agent_text_escapes_html() -> None:
+    assert render_agent_text({"text": "Go <b>не</b> & ML"}) == "Go &lt;b&gt;не&lt;/b&gt; &amp; ML"
+    assert render_agent_text({"text": "  "}) == "Готово."
+
+
+def test_agent_confirm_keyboard_fits_callback_limit() -> None:
+    action_id = "f" * 32  # uuid4().hex
+    kb = agent_confirm_keyboard(action_id)
+    yes, no = kb.inline_keyboard[0]
+    assert yes.callback_data == f"agent:yes:{action_id}"
+    assert no.callback_data == f"agent:no:{action_id}"
+    assert all(len((b.callback_data or "").encode()) <= 64 for b in (yes, no))

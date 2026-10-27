@@ -5,7 +5,10 @@
   формат → город; `/start <token>` — привязка веб-аккаунта (аккаунт из бота
   при этом сливается в веб-аккаунт на бэкенде);
 - `/feed` — лента порциями по 5 + «Ещё ▶» (без повторов, см. `next_feed_page`);
-- `/search` и свободный текст вне диалога — NL-поиск, под результатами — оценки;
+- свободный текст вне диалога — диалоговый агент (A4): сам ищет, подбирает,
+  объясняет и предлагает правки профиля (кнопки «Да / Нет»); если агент
+  недоступен — прямой NL-поиск. `/search` — всегда прямой поиск без агента;
+  `/reset` — начать разговор с агентом заново;
 - `/saved`, `/settings` — сохранённое и настройки; «📖 Подробнее» — пересказ +
   почему рекомендовано.
 
@@ -18,6 +21,7 @@ from typing import Any
 
 import structlog
 from aiogram import F, Router
+from aiogram.enums import ChatAction
 from aiogram.filters import Command, CommandObject, CommandStart, StateFilter
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
@@ -27,6 +31,7 @@ from eventmind.interfaces.bot.api_client import BotApiClient
 from eventmind.interfaces.bot.formatting import (
     esc,
     next_feed_page,
+    render_agent_text,
     render_event_card,
     render_explain,
     render_profile,
@@ -35,6 +40,7 @@ from eventmind.interfaces.bot.formatting import (
 from eventmind.interfaces.bot.keyboards import (
     DIGEST_NEXT,
     QUIET_DEFAULT,
+    agent_confirm_keyboard,
     city_keyboard,
     feed_more_keyboard,
     feedback_keyboard,
@@ -56,10 +62,13 @@ _FEED_SHOWN_KEY = "feed_shown"
 
 _HELP = (
     "Я — бот EventMind: подбираю IT-мероприятия под вас и учусь на ваших оценках.\n\n"
+    "Просто напишите, что ищете или что вам интересно: «что есть по Go на "
+    "выходных?», «почему второе?», «фронтенд мне больше не интересен».\n\n"
     "• /feed — лента рекомендаций\n"
-    "• /search &lt;запрос&gt; — поиск обычной фразой (или просто напишите текст)\n"
+    "• /search &lt;запрос&gt; — прямой поиск обычной фразой\n"
     "• /saved — сохранённое\n"
-    "• /settings — о себе, город, формат, дайджест\n\n"
+    "• /settings — о себе, город, формат, дайджест\n"
+    "• /reset — начать разговор заново\n\n"
     "Есть аккаунт на сайте? «Настройки → Привязка Telegram» — история из бота "
     "перенесётся в него."
 )
@@ -462,10 +471,72 @@ async def settings_action(callback: CallbackQuery, api: BotApiClient, state: FSM
         await _show_settings(callback, api)
 
 
-# ── свободный текст вне диалога = поиск ───────────────────────────────────────
+# ── свободный текст вне диалога = агент (A4) ──────────────────────────────────
+@router.message(Command("reset"))
+async def reset_cmd(message: Message, api: BotApiClient, state: FSMContext) -> None:
+    chat_id = _chat_id(message)
+    if chat_id is None:
+        return
+    await state.clear()
+    await api.agent_reset(chat_id)
+    await send(message, "Начнём заново. Что ищете — тема, город, даты?")
+
+
 @router.message(StateFilter(None), F.text & ~F.text.startswith("/"))
-async def freeform_search(message: Message, api: BotApiClient) -> None:
-    await _run_search(message, (message.text or "").strip(), api)
+async def freeform(message: Message, api: BotApiClient) -> None:
+    chat_id = _chat_id(message)
+    text = (message.text or "").strip()
+    if chat_id is None or not text:
+        return
+    await _typing(message)
+    reply = await api.agent_message(chat_id, text)
+    if reply is None and not await api.status(chat_id) and await _ensure_account(api, chat_id):
+        # аккаунта ещё нет — создаём на лету и повторяем
+        reply = await api.agent_message(chat_id, text)
+    if reply is None or reply.get("degraded"):
+        await _run_search(message, text, api)  # агент недоступен — прямой поиск
+        return
+    await _show_agent_reply(message, reply)
+
+
+@router.callback_query(F.data.regexp(r"^agent:(yes|no):[0-9a-f]{1,40}$"))
+async def on_agent_confirm(callback: CallbackQuery, api: BotApiClient) -> None:
+    chat_id = _chat_id(callback)
+    if chat_id is None:
+        return
+    _, decision, action_id = (callback.data or "").split(":", 2)
+    await callback.answer()
+    if isinstance(callback.message, Message):
+        await callback.message.edit_reply_markup(reply_markup=None)
+    reply = await api.agent_confirm(chat_id, action_id, approve=decision == "yes")
+    if reply is None:
+        await send(callback, _SERVICE_DOWN)
+        return
+    await _show_agent_reply(callback, reply)
+
+
+async def _show_agent_reply(target: Message | CallbackQuery, reply: dict[str, Any]) -> None:
+    pending = reply.get("pending")
+    await send(
+        target,
+        render_agent_text(reply),
+        reply_markup=agent_confirm_keyboard(str(pending["id"])) if pending else None,
+    )
+    for ev in reply.get("events") or []:
+        await send(
+            target,
+            render_event_card(ev),
+            reply_markup=feedback_keyboard(int(ev["id"]), ev.get("source_url")),
+        )
+
+
+async def _typing(message: Message) -> None:
+    if message.bot is None:
+        return
+    try:
+        await message.bot.send_chat_action(message.chat.id, ChatAction.TYPING)
+    except Exception as exc:  # индикатор — косметика
+        _logger.debug("typing_failed", error=str(exc))
 
 
 def _as_float(value: object) -> float | None:

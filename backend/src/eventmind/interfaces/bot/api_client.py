@@ -1,8 +1,8 @@
 """HTTP-клиент бота к API EventMind (bot↔api по внутреннему X-API-Key).
 
 Бот не лезет в БД и не импортирует application/infrastructure — только HTTP.
-Персональные вызовы идут в `/api/v1/bot/*` (резолв аккаунта по chat_id на
-бэкенде), привязка веб-аккаунта — в `/api/v1/channels/telegram/confirm`,
+Персональные вызовы (включая диалоговый агент) идут в `/api/v1/bot/*` (резолв
+аккаунта по chat_id на бэкенде), привязка веб-аккаунта — в `/api/v1/channels/telegram/confirm`,
 публичный поиск/карточка — в `/api/v1/events/*`.
 
 Ошибки сети/API не роняют бота: методы возвращают None / False / пустое, а
@@ -143,6 +143,45 @@ class BotApiClient:
             )
         except httpx.HTTPError:
             return None
+
+    # ── A4: диалоговый агент ──────────────────────────────────────────────────
+    async def agent_message(self, chat_id: str, message: str) -> dict[str, Any] | None:
+        """Реплика агенту → {"text", "events", "pending", "stop_reason", "degraded"}.
+        None — агент недоступен (выключен, сеть, нет аккаунта): бот отвечает
+        прямым поиском."""
+        try:
+            r = await self._send(
+                "POST",
+                "/api/v1/bot/agent/messages",
+                json={"chat_id": chat_id, "message": message},
+                slow=True,
+            )
+            return _json_or_none(r)
+        except httpx.HTTPError:
+            return None
+
+    async def agent_confirm(
+        self, chat_id: str, action_id: str, *, approve: bool
+    ) -> dict[str, Any] | None:
+        try:
+            r = await self._send(
+                "POST",
+                "/api/v1/bot/agent/confirm",
+                json={"chat_id": chat_id, "action_id": action_id, "approve": approve},
+                slow=True,
+            )
+            return _json_or_none(r)
+        except httpx.HTTPError:
+            return None
+
+    async def agent_reset(self, chat_id: str) -> bool:
+        try:
+            r = await self._send(
+                "DELETE", "/api/v1/bot/agent/session", params={"chat_id": chat_id}
+            )
+            return r.status_code == 200
+        except httpx.HTTPError:
+            return False
 
     # ── привязка аккаунта ─────────────────────────────────────────────────────
     async def confirm_link(self, token: str, chat_id: str) -> tuple[bool, str]:

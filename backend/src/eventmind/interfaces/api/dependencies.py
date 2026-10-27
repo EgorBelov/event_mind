@@ -12,7 +12,11 @@ from typing import Annotated
 import jwt
 from fastapi import Depends, Header, Request
 from fastapi.security.utils import get_authorization_scheme_param
-from starlette.status import HTTP_401_UNAUTHORIZED, HTTP_403_FORBIDDEN
+from starlette.status import (
+    HTTP_401_UNAUTHORIZED,
+    HTTP_403_FORBIDDEN,
+    HTTP_503_SERVICE_UNAVAILABLE,
+)
 
 from eventmind.application.accounts.use_cases import (
     AuthenticateUser,
@@ -28,6 +32,24 @@ from eventmind.application.accounts.use_cases import (
     UpdateProfile,
     VerifyEmail,
 )
+from eventmind.application.agent.session import AgentSessionStore
+from eventmind.application.agent.tools import (
+    AgentToolbox,
+    ExplainEventTool,
+    GetEventTool,
+    GetProfileTool,
+    RecommendTool,
+    RecordFeedbackTool,
+    SearchEventsTool,
+    UpdateProfileTool,
+    UpdateSettingsTool,
+)
+from eventmind.application.agent.use_cases import (
+    AgentTurn,
+    ConfirmAgentAction,
+    GetAgentHistory,
+    ResetAgentSession,
+)
 from eventmind.application.ingestion.use_cases import (
     BackfillEventEmbeddings,
     GetIngestionStatus,
@@ -41,7 +63,11 @@ from eventmind.application.notifications.use_cases import (
     Unsubscribe,
 )
 from eventmind.application.recommender.explain import ExplainEvent
-from eventmind.application.recommender.profile import GetUserProfile, UpdateUserProfile
+from eventmind.application.recommender.profile import (
+    ApplyProfileChanges,
+    GetUserProfile,
+    UpdateUserProfile,
+)
 from eventmind.application.recommender.use_cases import (
     GetRecommendations,
     ListSavedEvents,
@@ -229,6 +255,82 @@ def get_nl_search(container: ContainerDep) -> NlSearch:
 
 def get_event_uc(container: ContainerDep) -> GetEvent:
     return GetEvent(container.search_repository)
+
+
+# ── диалоговый агент (A1–A5) ─────────────────────────────────────────────────
+def get_apply_profile_changes(container: ContainerDep) -> ApplyProfileChanges:
+    return ApplyProfileChanges(
+        container.recommendation_uow_factory,
+        container.embedding,
+        container.cache,
+        container.clock,
+    )
+
+
+def _agent_toolbox(container: Container) -> AgentToolbox:
+    return AgentToolbox(
+        [
+            SearchEventsTool(get_nl_search(container)),
+            RecommendTool(get_recommendations_uc(container), container.search_repository),
+            GetEventTool(container.search_repository),
+            ExplainEventTool(get_explain_event_uc(container)),
+            GetProfileTool(get_user_profile_uc(container), container.recommendation_uow_factory),
+            RecordFeedbackTool(get_record_interaction_uc(container)),
+            UpdateProfileTool(get_apply_profile_changes(container)),
+            UpdateSettingsTool(get_update_profile(container), container.cache),
+        ],
+        allowed=container.agent_config.allowed_tools,
+    )
+
+
+def _agent_sessions(container: Container) -> AgentSessionStore:
+    return AgentSessionStore(
+        container.cache,
+        ttl_seconds=container.agent_config.session_ttl_seconds,
+        history_limit=container.agent_config.history_limit,
+    )
+
+
+def _require_agent(container: Container) -> None:
+    if not container.settings.agent_enabled:
+        raise ApiError(HTTP_503_SERVICE_UNAVAILABLE, "agent_disabled", "Помощник отключён")
+
+
+def get_agent_turn(container: ContainerDep) -> AgentTurn:
+    _require_agent(container)
+    return AgentTurn(
+        container.llm,
+        _agent_toolbox(container),
+        _agent_sessions(container),
+        container.agent_journal,
+        container.recommendation_uow_factory,
+        container.cache,
+        container.clock,
+        container.agent_config,
+    )
+
+
+def get_confirm_agent_action(container: ContainerDep) -> ConfirmAgentAction:
+    _require_agent(container)
+    return ConfirmAgentAction(
+        container.llm,
+        _agent_toolbox(container),
+        _agent_sessions(container),
+        container.agent_journal,
+        container.recommendation_uow_factory,
+        container.cache,
+        container.clock,
+        container.agent_config,
+    )
+
+
+def get_agent_history(container: ContainerDep) -> GetAgentHistory:
+    _require_agent(container)
+    return GetAgentHistory(_agent_sessions(container))
+
+
+def get_reset_agent(container: ContainerDep) -> ResetAgentSession:
+    return ResetAgentSession(_agent_sessions(container))
 
 
 # ── уведомления (M5) ─────────────────────────────────────────────────────────

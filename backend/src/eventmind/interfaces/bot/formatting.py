@@ -178,3 +178,10 @@ def next_feed_page(
     """
     fresh = [it for it in items if int(it["event_id"]) not in shown]
     return fresh[:page_size], max(0, len(fresh) - page_size)
+
+
+def render_agent_text(reply: dict[str, Any]) -> str:
+    """Текст ответа агента (экранированный). Предложенное изменение уже входит
+    в текст — под ним бот ставит кнопки «Да / Нет»."""
+    text = str(reply.get("text") or "").strip()
+    return esc(text) if text else "Готово."

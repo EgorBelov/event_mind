@@ -10,6 +10,7 @@
 | set:*             | пункты /settings                                  |
 | unsave:ID         | убрать из сохранённого                            |
 | saved:OFFSET      | следующая страница сохранённого                   |
+| agent:yes/no:ID   | подтвердить / отклонить изменение, предложенное агентом |
 """
 from __future__ import annotations
 
@@ -117,5 +118,17 @@ def saved_more_keyboard(next_offset: int) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [InlineKeyboardButton(text="Ещё ▶", callback_data=f"saved:{next_offset}")]
+        ]
+    )
+
+
+def agent_confirm_keyboard(action_id: str) -> InlineKeyboardMarkup:
+    """«Да / Нет» под изменением профиля или настроек, которое предложил агент."""
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(text="✅ Да", callback_data=f"agent:yes:{action_id}"),
+                InlineKeyboardButton(text="✖️ Нет", callback_data=f"agent:no:{action_id}"),
+            ]
         ]
     )

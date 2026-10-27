@@ -12,6 +12,7 @@ import structlog
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
 from eventmind.application.accounts.config import AccountsConfig
+from eventmind.application.agent.config import AgentConfig
 from eventmind.application.ingestion.config import IngestionConfig
 from eventmind.application.ingestion.normalizer import EventNormalizer
 from eventmind.application.ports.embedding import EmbeddingProvider
@@ -36,6 +37,7 @@ from eventmind.application.recommender.ranker import HybridRanker
 from eventmind.config import Settings
 from eventmind.domain.accounts.value_objects import ChannelType
 from eventmind.infrastructure.cache.redis_cache import RedisCache
+from eventmind.infrastructure.db.agent_journal import SqlAlchemyAgentJournal
 from eventmind.infrastructure.db.engine import create_engine, create_session_factory
 from eventmind.infrastructure.db.events_uow import SqlAlchemyEventsUnitOfWork
 from eventmind.infrastructure.db.notifications import SqlAlchemyNotificationsUnitOfWork
@@ -86,6 +88,8 @@ class Container:
     notification_channels: dict[ChannelType, NotificationChannel]
     search_repository: SqlAlchemySearchRepository
     google_verifier: GoogleTokenVerifier
+    agent_config: AgentConfig
+    agent_journal: SqlAlchemyAgentJournal
 
     def uow_factory(self) -> UnitOfWork:
         return SqlAlchemyUnitOfWork(self.session_factory)
@@ -153,4 +157,11 @@ def build_container(settings: Settings) -> Container:
         notification_channels=build_notification_channels(settings),
         search_repository=SqlAlchemySearchRepository(session_factory),
         google_verifier=GoogleTokenVerifierHttp(settings.google_oauth_client_id),
+        agent_config=AgentConfig(
+            max_steps=settings.agent_max_steps,
+            max_tokens_per_turn=settings.agent_max_tokens_per_turn,
+            session_ttl_seconds=settings.agent_session_ttl_seconds,
+            history_limit=settings.agent_history_limit,
+        ),
+        agent_journal=SqlAlchemyAgentJournal(session_factory),
     )

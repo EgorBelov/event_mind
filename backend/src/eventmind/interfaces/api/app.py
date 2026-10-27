@@ -22,6 +22,7 @@ from eventmind.interfaces.api.errors import install_error_handlers
 from eventmind.interfaces.api.middleware import RequestContextMiddleware
 from eventmind.interfaces.api.routers import (
     admin,
+    agent,
     auth,
     bot,
     channels,
@@ -91,6 +92,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(events.router)
     app.include_router(users.router)
     app.include_router(bot.router)
+    app.include_router(agent.router)
 
     setup_tracing(app, settings)
     return app

@@ -8,8 +8,8 @@ use-case'ы, что и веб. Доступ — только по `X-API-Key` (b
 
 Бот — самостоятельный интерфейс (B1–B5): `POST /register` создаёт аккаунт
 прямо из Telegram (без email; при последующей привязке веб-аккаунта он
-сливается в него), дальше — профиль «о себе», настройки, сохранённое и
-«📖 Подробнее» с причинами рекомендации.
+сливается в него), дальше — профиль «о себе», настройки, сохранённое,
+«📖 Подробнее» с причинами рекомендации и диалоговый агент (`/agent/*`, A4).
 
 Привязка веб-аккаунта (`/start <token>`) идёт через
 `POST /api/v1/channels/telegram/confirm` — здесь не дублируется.
@@ -29,6 +29,11 @@ from eventmind.application.accounts.use_cases import (
     UpdatePreferences,
     UpdateProfile,
 )
+from eventmind.application.agent.use_cases import (
+    AgentTurn,
+    ConfirmAgentAction,
+    ResetAgentSession,
+)
 from eventmind.application.recommender.explain import ExplainEvent
 from eventmind.application.recommender.profile import GetUserProfile, UpdateUserProfile
 from eventmind.application.recommender.use_cases import (
@@ -40,12 +45,15 @@ from eventmind.application.recommender.use_cases import (
 )
 from eventmind.interfaces.api.dependencies import (
     ContainerDep,
+    get_agent_turn,
+    get_confirm_agent_action,
     get_explain_event_uc,
     get_list_saved_uc,
     get_recommendations_uc,
     get_record_interaction_uc,
     get_register_via_telegram,
     get_remove_saved_uc,
+    get_reset_agent,
     get_resolve_telegram,
     get_update_preferences,
     get_update_profile,
@@ -55,6 +63,9 @@ from eventmind.interfaces.api.dependencies import (
 )
 from eventmind.interfaces.api.errors import ApiError
 from eventmind.interfaces.api.schemas import (
+    AgentReplyResponse,
+    BotAgentConfirmRequest,
+    BotAgentMessageRequest,
     BotInteractionRequest,
     BotProfileRequest,
     BotRegisterRequest,
@@ -258,3 +269,39 @@ async def explain(
         summary_source=result.summary_source,
         reasons=result.reasons,
     )
+
+
+# ── A4: диалоговый агент (свободный текст в боте) ─────────────────────────────
+@router.post("/agent/messages", response_model=AgentReplyResponse)
+async def agent_message(
+    payload: BotAgentMessageRequest,
+    resolve: Annotated[ResolveAccountByTelegram, Depends(get_resolve_telegram)],
+    use_case: Annotated[AgentTurn, Depends(get_agent_turn)],
+) -> AgentReplyResponse:
+    user_id = await _require_account(resolve, payload.chat_id)
+    reply = await use_case.execute(user_id, payload.message, channel="bot")
+    return AgentReplyResponse.from_reply(reply)
+
+
+@router.post("/agent/confirm", response_model=AgentReplyResponse)
+async def agent_confirm(
+    payload: BotAgentConfirmRequest,
+    resolve: Annotated[ResolveAccountByTelegram, Depends(get_resolve_telegram)],
+    use_case: Annotated[ConfirmAgentAction, Depends(get_confirm_agent_action)],
+) -> AgentReplyResponse:
+    user_id = await _require_account(resolve, payload.chat_id)
+    reply = await use_case.execute(
+        user_id, payload.action_id, approve=payload.approve, channel="bot"
+    )
+    return AgentReplyResponse.from_reply(reply)
+
+
+@router.delete("/agent/session", response_model=MessageResponse)
+async def agent_reset(
+    chat_id: ChatId,
+    resolve: Annotated[ResolveAccountByTelegram, Depends(get_resolve_telegram)],
+    use_case: Annotated[ResetAgentSession, Depends(get_reset_agent)],
+) -> MessageResponse:
+    user_id = await _require_account(resolve, chat_id)
+    await use_case.execute(user_id)
+    return MessageResponse(detail="Диалог начат заново")

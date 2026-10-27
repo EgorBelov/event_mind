@@ -32,6 +32,7 @@ BOT_COMMANDS = [
     BotCommand(command="search", description="Поиск обычной фразой"),
     BotCommand(command="saved", description="Сохранённое"),
     BotCommand(command="settings", description="О себе, город, формат, дайджест"),
+    BotCommand(command="reset", description="Начать разговор с помощником заново"),
     BotCommand(command="help", description="Что умеет бот"),
 ]
 
