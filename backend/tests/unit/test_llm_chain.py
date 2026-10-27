@@ -223,3 +223,45 @@ async def test_list_content_from_gemini_is_joined() -> None:
     model = FakeChatModel(content=parts)
     step = await _chain(model).complete_with_tools(MSGS, [SPEC])
     assert step.text == "Привет"
+
+
+# ── параметры вызова (температура, лимит ответа) ─────────────────────────────
+class _TunableModel(FakeChatModel):
+    """Как langchain-модель: pydantic-копия с обновлёнными полями."""
+
+    def __init__(self, **kw: Any) -> None:
+        super().__init__(**kw)
+        self.updates: list[dict[str, Any]] = []
+        self.applied: dict[str, Any] = {}
+
+    def model_copy(self, *, update: dict[str, Any]) -> _TunableModel:
+        self.updates.append(update)
+        copy = _TunableModel(content=self.content, structured_result=self.structured_result)
+        copy.applied = update
+        copy.updates = self.updates
+        return copy
+
+
+async def test_call_temperature_and_max_tokens_reach_the_model() -> None:
+    model = _TunableModel(content="ok")
+    await _chain(model).complete(MSGS, temperature=0.0, max_tokens=50)
+    assert model.updates == [{"temperature": 0.0, "max_tokens": 50}]
+
+
+async def test_gemini_uses_its_own_max_tokens_field() -> None:
+    model = _TunableModel(content="ok")
+    link = ProviderLink(name="gemini", factory=lambda: model, max_tokens_field="max_output_tokens")
+    chain = LLMChain([link], breaker=CircuitBreaker(), cooldown=ProviderCooldown())
+    await chain.complete(MSGS, max_tokens=10)
+    assert model.updates == [{"max_output_tokens": 10}]
+
+
+async def test_no_call_params_keeps_model_and_structured_reports_provider() -> None:
+    model = _TunableModel(structured_result=_Schema(city="perm"))
+    result = await _chain(FakeChatModel(fail=True), model).structured_output_result(
+        MSGS, _Schema, temperature=0.0
+    )
+    assert result.value == _Schema(city="perm") and result.provider == "p1"
+    assert model.updates == [{"temperature": 0.0}]
+    await _chain(model).complete(MSGS)
+    assert model.updates == [{"temperature": 0.0}]  # без параметров копия не делается

@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass, field
-from typing import Any, Literal, Protocol, TypeVar
+from typing import Any, Generic, Literal, Protocol, TypeVar
 
 from pydantic import BaseModel
 
@@ -52,6 +52,14 @@ class LLMResult:
     text: str
     provider: str
     usage: LLMUsage = field(default_factory=LLMUsage)
+
+
+@dataclass(frozen=True, slots=True)
+class StructuredResult(Generic[T]):
+    """Структура + какой провайдер её извлёк (провенанс: пишется рядом с данными)."""
+
+    value: T
+    provider: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -100,6 +108,16 @@ class LLMGateway(Protocol):
         temperature: float | None = None,
     ) -> T:
         """Извлечь структуру в pydantic-схему (with_structured_output по цепочке)."""
+        ...
+
+    async def structured_output_result(
+        self,
+        messages: Sequence[LLMMessage],
+        schema: type[T],
+        *,
+        temperature: float | None = None,
+    ) -> StructuredResult[T]:
+        """То же, что `structured_output`, плюс имя ответившего провайдера."""
         ...
 
 

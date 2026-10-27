@@ -144,6 +144,7 @@ def build_links(settings: Settings, *, gemini_model: str | None) -> list[Provide
             name=f"gemini:{gemini_model}" if gemini_model else "gemini",
             factory=make_gemini,
             enabled=bool(settings.google_api_key and gemini_model),
+            max_tokens_field="max_output_tokens",
         ),
         ProviderLink(
             name=f"groq:{settings.groq_model}",

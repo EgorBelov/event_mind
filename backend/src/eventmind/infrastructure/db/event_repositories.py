@@ -130,6 +130,8 @@ class SqlAlchemyEventRepository:
             hype_score=event.hype_score,
             series_slug=event.series_slug,
             embedding=event.embedding,
+            llm_provider=event.llm_provider,
+            prompt_version=event.prompt_version,
         )
         self._session.add(model)
         await self._session.flush()

@@ -193,6 +193,8 @@ class NormalizeRawEvents:
             series_slug=compute_series_slug(normalized.title or raw.title, normalized.city),
             topics=normalized.topics,
             embedding=embedding,
+            llm_provider=normalized.llm_provider or None,
+            prompt_version=normalized.prompt_version or None,
         )
         await uow.events.add(event, list(topic_ids.values()))
         raw.mark_normalized()

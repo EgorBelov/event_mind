@@ -250,7 +250,9 @@ def get_record_interaction_uc(container: ContainerDep) -> RecordInteraction:
 
 # ── поиск событий (M6) ───────────────────────────────────────────────────────
 def get_nl_search(container: ContainerDep) -> NlSearch:
-    return NlSearch(container.llm, container.search_repository, container.clock)
+    return NlSearch(
+        container.llm, container.search_repository, container.clock, container.cache
+    )
 
 
 def get_event_uc(container: ContainerDep) -> GetEvent:

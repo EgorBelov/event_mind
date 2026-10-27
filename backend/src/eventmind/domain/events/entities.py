@@ -64,3 +64,6 @@ class Event:
     topics: list[str] = field(default_factory=list)
     embedding: list[float] | None = None
     created_at: datetime | None = None
+    # провенанс извлечения: какой LLM-провайдер и какая версия промпта
+    llm_provider: str | None = None
+    prompt_version: str | None = None

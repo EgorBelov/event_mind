@@ -28,6 +28,7 @@ from eventmind.application.ports.llm import (
     LLMResult,
     LLMUnavailable,
     LLMUsage,
+    StructuredResult,
     ToolCall,
     ToolSpec,
     ToolStep,
@@ -61,6 +62,9 @@ class ProviderLink:
     name: str
     factory: Callable[[], ChatModel]
     enabled: bool = True
+    # Поле лимита длины ответа у модели: max_tokens (DeepSeek/Groq) или
+    # max_output_tokens (Gemini).
+    max_tokens_field: str = "max_tokens"
     _model: ChatModel | None = None
 
     def model(self) -> ChatModel:
@@ -142,6 +146,27 @@ def _tool_calls(message: Any) -> tuple[ToolCall, ...]:
     return tuple(calls)
 
 
+def _tuned(
+    model: ChatModel, link: ProviderLink, temperature: float | None, max_tokens: int | None
+) -> ChatModel:
+    """Модель с параметрами конкретного вызова.
+
+    langchain-модели — pydantic-объекты: `model_copy(update=...)` даёт копию с
+    другой температурой / лимитом, общий HTTP-клиент переиспользуется. Без этого
+    `temperature=0` для извлечения молча игнорировался и шёл общий LLM_TEMPERATURE.
+    """
+    update: dict[str, Any] = {}
+    if temperature is not None:
+        update["temperature"] = temperature
+    if max_tokens is not None:
+        update[link.max_tokens_field] = max_tokens
+    copy = getattr(model, "model_copy", None)
+    if not update or copy is None:
+        return model
+    tuned: ChatModel = copy(update=update)
+    return tuned
+
+
 def _count_tokens(provider: str, message: Any) -> LLMUsage:
     usage = _extract_usage(message)
     if usage.input_tokens:
@@ -178,7 +203,9 @@ class LLMChain:
         max_tokens: int | None = None,
     ) -> LLMResult:
         lc = _to_lc(messages)
-        provider, message = await self._run(lambda model: model.ainvoke(lc))
+        provider, message = await self._run(
+            lambda model: model.ainvoke(lc), temperature=temperature, max_tokens=max_tokens
+        )
         usage = _count_tokens(provider, message)
         return LLMResult(text=_content_text(message), provider=provider, usage=usage)
 
@@ -199,7 +226,9 @@ class LLMChain:
         async def call(model: ChatModel) -> Any:
             return await model.bind_tools(schemas).ainvoke(lc)
 
-        provider, message = await self._run(call)
+        provider, message = await self._run(
+            call, temperature=temperature, max_tokens=max_tokens
+        )
         usage = _count_tokens(provider, message)
         return ToolStep(
             text=_content_text(message),
@@ -215,17 +244,31 @@ class LLMChain:
         *,
         temperature: float | None = None,
     ) -> T:
+        result = await self.structured_output_result(messages, schema, temperature=temperature)
+        return result.value
+
+    async def structured_output_result(
+        self,
+        messages: Sequence[LLMMessage],
+        schema: type[T],
+        *,
+        temperature: float | None = None,
+    ) -> StructuredResult[T]:
         lc = _to_lc(messages)
 
         async def call(model: ChatModel) -> Any:
             return await model.with_structured_output(schema).ainvoke(lc)
 
-        _provider, result = await self._run(call)
-        return result  # type: ignore[no-any-return]
+        provider, result = await self._run(call, temperature=temperature)
+        return StructuredResult(value=result, provider=provider)
 
     # ── ядро fallback + breaker + cooldown ───────────────────────────────
     async def _run(
-        self, call: Callable[[ChatModel], Awaitable[Any]]
+        self,
+        call: Callable[[ChatModel], Awaitable[Any]],
+        *,
+        temperature: float | None = None,
+        max_tokens: int | None = None,
     ) -> tuple[str, Any]:
         if self._breaker.is_open():
             LLM_REQUESTS_TOTAL.labels("chain", "breaker_open").inc()
@@ -244,7 +287,7 @@ class LLMChain:
                 continue
             started = time.perf_counter()
             try:
-                model = link.model()
+                model = _tuned(link.model(), link, temperature, max_tokens)
                 result = await asyncio.wait_for(call(model), timeout=self._timeout)
             except Exception as exc:  # любой сбой звена — пробуем следующее
                 last_exc = exc

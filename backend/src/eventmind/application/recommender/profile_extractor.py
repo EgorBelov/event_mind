@@ -150,5 +150,7 @@ class ProfileExtractor:
                 content=f"<profile>\n{clean_about(about).replace('</profile>', '')}\n</profile>",
             ),
         ]
-        raw = await self._llm.structured_output(messages, ExtractedProfileSchema)
+        raw = await self._llm.structured_output(
+            messages, ExtractedProfileSchema, temperature=0.0
+        )
         return postprocess_profile(raw)

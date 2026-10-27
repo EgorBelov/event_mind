@@ -161,6 +161,8 @@ class EventModel(Base):
     hype_score: Mapped[int | None] = mapped_column(Integer, nullable=True)
     series_slug: Mapped[str | None] = mapped_column(String(120), nullable=True, index=True)
     embedding: Mapped[list[float] | None] = mapped_column(Vector(EMBEDDING_DIM), nullable=True)
+    llm_provider: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    prompt_version: Mapped[str | None] = mapped_column(String(32), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
