@@ -32,6 +32,7 @@ config:
   emailFrom: "EventMind <noreply@eventmind.example.com>"
   deepseekModels: ""  # через запятую; пусто — deepseek-flash
   ingestScheduleHours: "0,6,12,18"  # cron загрузки источников (UTC); пусто — выключено
+  agentEnabled: "true"  # диалоговый агент в боте и вебе
   telegramBotUsername: ""
 
 # ── секреты (→ Secret) ────────────────────────────────────────────────────────

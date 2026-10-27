@@ -1,27 +1,40 @@
 """Порт `LLMGateway` — единая точка доступа к LLM (цепочка провайдеров за адаптером).
 
-Внутри инфраструктурной реализации: Gemini → Groq70b → Groq8b, per-provider
+Внутри инфраструктурной реализации: DeepSeek → Gemini → Groq70b → Groq8b, per-provider
 cooldown, circuit-breaker, retry/timeout, учёт токенов, метрики. Прикладной код
-и LangGraph-графы (M3+) ходят в LLM только через этот порт — никаких прямых
+и агент (`ToolCallingLLM`) ходят в LLM только через эти порты — никаких прямых
 вызовов провайдеров.
 """
 from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass, field
-from typing import Literal, Protocol, TypeVar
+from typing import Any, Literal, Protocol, TypeVar
 
 from pydantic import BaseModel
 
-Role = Literal["system", "user", "assistant"]
+Role = Literal["system", "user", "assistant", "tool"]
 
 T = TypeVar("T", bound=BaseModel)
+
+
+@dataclass(frozen=True, slots=True)
+class ToolCall:
+    """Вызов инструмента, который запросила модель (tool calling)."""
+
+    id: str
+    name: str
+    arguments: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(frozen=True, slots=True)
 class LLMMessage:
     role: Role
     content: str
+    # assistant: вызовы инструментов, запрошенные моделью на этом шаге
+    tool_calls: tuple[ToolCall, ...] = ()
+    # tool: ответ на вызов с этим id
+    tool_call_id: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -37,6 +50,25 @@ class LLMUsage:
 @dataclass(frozen=True, slots=True)
 class LLMResult:
     text: str
+    provider: str
+    usage: LLMUsage = field(default_factory=LLMUsage)
+
+
+@dataclass(frozen=True, slots=True)
+class ToolSpec:
+    """Описание инструмента для модели: имя, назначение, JSON Schema аргументов."""
+
+    name: str
+    description: str
+    parameters: dict[str, Any]
+
+
+@dataclass(frozen=True, slots=True)
+class ToolStep:
+    """Ответ модели на шаге с инструментами: текст и/или запрошенные вызовы."""
+
+    text: str
+    tool_calls: tuple[ToolCall, ...]
     provider: str
     usage: LLMUsage = field(default_factory=LLMUsage)
 
@@ -68,4 +100,20 @@ class LLMGateway(Protocol):
         temperature: float | None = None,
     ) -> T:
         """Извлечь структуру в pydantic-схему (with_structured_output по цепочке)."""
+        ...
+
+
+class ToolCallingLLM(Protocol):
+    """LLM с вызовом инструментов (для агента). Отдельный порт: остальным
+    use-case'ам он не нужен, а фейкам в их тестах не нужно его реализовывать."""
+
+    async def complete_with_tools(
+        self,
+        messages: Sequence[LLMMessage],
+        tools: Sequence[ToolSpec],
+        *,
+        temperature: float | None = None,
+        max_tokens: int | None = None,
+    ) -> ToolStep:
+        """Один шаг: модель отвечает текстом или запрашивает вызовы инструментов."""
         ...

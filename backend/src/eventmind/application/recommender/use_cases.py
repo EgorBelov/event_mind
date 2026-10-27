@@ -23,8 +23,13 @@ from eventmind.domain.recommender.weights import ScoringWeights
 VALID_ACTIONS = frozenset({"like", "dislike", "save", "view"})
 
 
-def _cache_key(user_id: int) -> str:
+def recommendation_cache_key(user_id: int) -> str:
+    """Ключ кэша персональной выдачи — сбрасывать при любом изменении модели
+    пользователя (оценки, профиль, город/формат)."""
     return f"reco:{user_id}"
+
+
+_cache_key = recommendation_cache_key
 
 
 @dataclass(slots=True)

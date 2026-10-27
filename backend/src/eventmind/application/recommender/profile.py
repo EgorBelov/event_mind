@@ -25,17 +25,19 @@ from eventmind.application.recommender.profile_extractor import (
     ProfileExtractor,
     clean_about,
 )
+from eventmind.application.recommender.use_cases import recommendation_cache_key
 from eventmind.domain.events.taxonomy import slugify_code
-from eventmind.domain.recommender.user_model import UserProfile, profile_embedding_text
+from eventmind.domain.recommender.user_model import (
+    ProfileChanges,
+    UserProfile,
+    apply_profile_changes,
+    profile_embedding_text,
+)
 
 _logger = structlog.get_logger("eventmind.profile")
 
 _KNOWN_TOPICS_LIMIT = 150
 _MANUAL_TOPICS_MAX = 20
-
-
-def _cache_key(user_id: int) -> str:
-    return f"reco:{user_id}"
 
 
 def _manual_topics(values: Sequence[str]) -> list[str]:
@@ -100,7 +102,7 @@ class UpdateUserProfile:
             await uow.save_profile(profile)
             await uow.recompute_user_embedding(user_id)
             await uow.commit()
-        await self._cache.delete(_cache_key(user_id))
+        await self._cache.delete(recommendation_cache_key(user_id))
         return profile
 
     async def _extract(self, about: str, known_topics: list[str]) -> ExtractedProfile:
@@ -113,14 +115,53 @@ class UpdateUserProfile:
             return ExtractedProfile()
 
     async def _embed(self, profile: UserProfile) -> list[float] | None:
-        text = profile_embedding_text(profile)
-        if not text:
-            return None
-        try:
-            return await self._embedding.embed_text(text)
-        except Exception as exc:
-            _logger.warning("profile_embedding_failed", error=str(exc))
-            return None
+        return await _embed_profile(self._embedding, profile)
+
+
+async def _embed_profile(embedding: EmbeddingProvider, profile: UserProfile) -> list[float] | None:
+    text = profile_embedding_text(profile)
+    if not text:
+        return None
+    try:
+        return await embedding.embed_text(text)
+    except Exception as exc:
+        _logger.warning("profile_embedding_failed", error=str(exc))
+        return None
+
+
+class ApplyProfileChanges:
+    """Точечная правка профиля (интересы, анти-интересы, цели) без повторного
+    LLM-разбора текста «о себе» — для агента и ручных правок. Дальше тот же
+    поток, что у `UpdateUserProfile`: эмбеддинг профиля → сохранение →
+    Rocchio-пересчёт users.embedding → сброс кэша выдачи."""
+
+    def __init__(
+        self,
+        uow_factory: RecommendationUnitOfWorkFactory,
+        embedding: EmbeddingProvider,
+        cache: Cache,
+        clock: Clock,
+    ) -> None:
+        self._uow_factory = uow_factory
+        self._embedding = embedding
+        self._cache = cache
+        self._clock = clock
+
+    async def execute(self, user_id: int, changes: ProfileChanges) -> UserProfile:
+        async with self._uow_factory() as uow:
+            current = await uow.get_profile(user_id) or UserProfile(user_id=user_id)
+        if changes.is_empty:
+            return current
+        profile = apply_profile_changes(current, changes)
+        profile.updated_at = self._clock.now()
+        profile.embedding = await _embed_profile(self._embedding, profile)
+
+        async with self._uow_factory() as uow:
+            await uow.save_profile(profile)
+            await uow.recompute_user_embedding(user_id)
+            await uow.commit()
+        await self._cache.delete(recommendation_cache_key(user_id))
+        return profile
 
 
 class GetUserProfile:

@@ -89,6 +89,17 @@ class SqlAlchemySearchRepository:
             topic_map = await self._load_topics(session, [event_id])
         return _to_entity(model, topic_map.get(event_id, []))
 
+    async def get_events(self, event_ids: list[int]) -> list[Event]:
+        if not event_ids:
+            return []
+        async with self._session_factory() as session:
+            rows = await session.execute(select(EventModel).where(EventModel.id.in_(event_ids)))
+            models = {m.id: m for m in rows.scalars().all()}
+            topic_map = await self._load_topics(session, list(models))
+        return [
+            _to_entity(models[i], topic_map.get(i, [])) for i in event_ids if i in models
+        ]
+
     async def _load_topics(
         self, session: AsyncSession, event_ids: list[int]
     ) -> dict[int, list[str]]:

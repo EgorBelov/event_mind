@@ -20,6 +20,7 @@ data:
   EMAIL_FROM: {{ .Values.config.emailFrom | quote }}
   DEEPSEEK_MODELS: {{ .Values.config.deepseekModels | quote }}
   INGEST_SCHEDULE_HOURS: {{ .Values.config.ingestScheduleHours | quote }}
+  AGENT_ENABLED: {{ .Values.config.agentEnabled | quote }}
   TELEGRAM_BOT_USERNAME: {{ .Values.config.telegramBotUsername | quote }}
 ---
 apiVersion: v1

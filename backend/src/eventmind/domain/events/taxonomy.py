@@ -126,8 +126,26 @@ def city_label(code: str | None) -> str:
     return SEED_CITY_LABELS.get(code) or humanize_code(code)
 
 
+# Русские названия и сокращения (ввод в боте/агенте): «Пермь» → perm, «питер» → spb.
+CYRILLIC_CITY_ALIASES: dict[str, str] = {
+    **{
+        slugify_code(label): code
+        for code, label in SEED_CITY_LABELS.items()
+        if code in CANONICAL_CITIES
+    },
+    "мск": "moscow",
+    "спб": "spb",
+    "питер": "spb",
+    "петербург": "spb",
+    "екб": "ekb",
+    "нижний": "nizhny_novgorod",
+    "нск": "novosibirsk",
+    "ростов": "rostov",
+}
+
+
 def canonicalize_city(code: str | None) -> str:
-    """Схлопнуть slug города к каноническому (msk→moscow, piter→spb).
+    """Схлопнуть slug города к каноническому (msk→moscow, piter→spb, Пермь→perm).
 
     Экзотика вне списка (omsk, barnaul) остаётся как есть — open-domain.
     """
@@ -136,4 +154,4 @@ def canonicalize_city(code: str | None) -> str:
     slug = slugify_code(code)
     if not slug:
         return ""
-    return CITY_ALIASES.get(slug, slug)
+    return CITY_ALIASES.get(slug) or CYRILLIC_CITY_ALIASES.get(slug, slug)

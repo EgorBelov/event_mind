@@ -17,6 +17,7 @@ from eventmind.domain.accounts.entities import (
 from eventmind.domain.accounts.value_objects import ChannelType, DigestFrequency
 from eventmind.domain.recommender.bayesian import PRIOR_ALPHA, PRIOR_BETA
 from eventmind.infrastructure.db.models import (
+    AgentToolCallModel,
     InteractionModel,
     NotificationModel,
     NotificationPreferenceModel,
@@ -130,7 +131,7 @@ class SqlAlchemyUserRepository:
 
     async def absorb(self, source_id: int, target_id: int) -> None:
         s = self._session
-        # оценки и уведомления — просто переносим
+        # оценки, уведомления, журнал агента — просто переносим
         await s.execute(
             update(InteractionModel)
             .where(InteractionModel.user_id == source_id)
@@ -139,6 +140,11 @@ class SqlAlchemyUserRepository:
         await s.execute(
             update(NotificationModel)
             .where(NotificationModel.user_id == source_id)
+            .values(user_id=target_id)
+        )
+        await s.execute(
+            update(AgentToolCallModel)
+            .where(AgentToolCallModel.user_id == source_id)
             .values(user_id=target_id)
         )
         # Bayesian-статы тем: совпавшие темы — суммируем свидетельства сверх prior

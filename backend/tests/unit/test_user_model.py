@@ -9,7 +9,7 @@ from typing import Any
 
 from eventmind.application.ports.llm import LLMMessage
 from eventmind.application.ports.recommender import UserPrefs
-from eventmind.application.recommender.profile import UpdateUserProfile
+from eventmind.application.recommender.profile import ApplyProfileChanges, UpdateUserProfile
 from eventmind.application.recommender.profile_extractor import (
     ABOUT_MAX_LEN,
     ExtractedProfile,
@@ -23,7 +23,9 @@ from eventmind.domain.recommender.scoring import cosine_similarity
 from eventmind.domain.recommender.user_model import (
     ANTI_INTEREST_PENALTY,
     DECLARED_INTEREST_WEIGHT,
+    ProfileChanges,
     UserProfile,
+    apply_profile_changes,
     combine_user_embedding,
     merge_declared_topics,
     profile_embedding_text,
@@ -281,3 +283,72 @@ async def test_empty_about_clears_profile_without_llm_call() -> None:
     assert embedding.texts == []
     assert profile.embedding is None
     assert profile.is_empty
+
+
+# ── точечные правки профиля (агент) ──────────────────────────────────────────
+def test_apply_profile_changes_canonicalizes_and_last_change_wins() -> None:
+    profile = UserProfile(
+        user_id=1,
+        about="текст",
+        interests=["backend", "frontend"],
+        anti_interests=["qa"],
+        goals=["Стать тимлидом"],
+    )
+    changed = apply_profile_changes(
+        profile,
+        ProfileChanges(
+            add_interests=("AI / ML", "qa"),
+            add_anti_interests=("Frontend",),
+            add_goals=("перейти в ML", "Перейти в ml"),  # дубль без учёта регистра
+            remove_goals=("СТАТЬ ТИМЛИДОМ",),
+        ),
+    )
+    assert changed.interests == ["backend", "ai_ml", "qa"]  # qa вернулся из анти
+    assert changed.anti_interests == ["frontend"]  # frontend ушёл из интересов
+    assert changed.goals == ["перейти в ML"]
+    assert changed.about == "текст"
+    assert profile.interests == ["backend", "frontend"]  # исходный не мутирован
+
+
+def test_profile_changes_is_empty() -> None:
+    assert ProfileChanges().is_empty
+    assert not ProfileChanges(remove_goals=("x",)).is_empty
+
+
+class _ProfileUow(_Uow):
+    def __init__(self, log: list[Any], current: UserProfile | None) -> None:
+        super().__init__(log)
+        self.current = current
+
+    async def get_profile(self, user_id: int) -> UserProfile | None:
+        return self.current
+
+
+async def test_apply_profile_changes_use_case_reembeds_and_recomputes() -> None:
+    log: list[Any] = []
+    current = UserProfile(user_id=5, about="Go", interests=["backend"])
+    embedding, cache = _Embedding(), _Cache()
+    use_case = ApplyProfileChanges(
+        lambda: _ProfileUow(log, current),  # type: ignore[arg-type,return-value]
+        embedding,  # type: ignore[arg-type]
+        cache,  # type: ignore[arg-type]
+        _Clock(),
+    )
+    profile = await use_case.execute(5, ProfileChanges(add_interests=("devops",)))
+    assert profile.interests == ["backend", "devops"]
+    assert profile.embedding == [1.0, 0.0] and profile.updated_at == NOW
+    assert "devops" in embedding.texts[0]
+    assert [e if isinstance(e, str) else e[0] for e in log] == ["save", "recompute", "commit"]
+    assert cache.deleted == ["reco:5"]
+
+
+async def test_apply_empty_changes_is_noop() -> None:
+    log: list[Any] = []
+    use_case = ApplyProfileChanges(
+        lambda: _ProfileUow(log, None),  # type: ignore[arg-type,return-value]
+        _Embedding(),  # type: ignore[arg-type]
+        _Cache(),  # type: ignore[arg-type]
+        _Clock(),
+    )
+    profile = await use_case.execute(5, ProfileChanges())
+    assert profile.is_empty and log == []

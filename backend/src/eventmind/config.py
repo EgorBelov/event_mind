@@ -102,6 +102,14 @@ class Settings(BaseSettings):
     reco_result_limit: int = 20
     reco_cache_ttl_seconds: int = 900
 
+    # ── диалоговый агент (A1–A5) ─────────────────────────────────────────
+    # false — свободный текст в боте уходит в NL-поиск, веб-чат отключён.
+    agent_enabled: bool = True
+    agent_max_steps: int = 5
+    agent_max_tokens_per_turn: int = 24000
+    agent_session_ttl_seconds: int = 3600
+    agent_history_limit: int = 24
+
     # ── email-канал (M1/M5): dev→Mailhog, prod→Yandex/Mail.ru SMTP ───────
     smtp_host: str = "mailhog"
     smtp_port: int = 1025

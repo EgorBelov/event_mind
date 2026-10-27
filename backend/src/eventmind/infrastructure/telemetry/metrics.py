@@ -56,3 +56,23 @@ NOTIFICATIONS_DELIVERED_TOTAL = Counter(
 def render_metrics() -> tuple[bytes, str]:
     """Отрендерить текущий срез метрик для эндпоинта `/metrics`."""
     return generate_latest(), CONTENT_TYPE_LATEST
+
+# ── агент (A3) ───────────────────────────────────────────────────────────────
+AGENT_TURNS_TOTAL = Counter(
+    "eventmind_agent_turns_total",
+    "Ходы диалогового агента по причине остановки",
+    labelnames=("channel", "stop_reason"),
+)
+
+AGENT_TOOL_CALLS_TOTAL = Counter(
+    "eventmind_agent_tool_calls_total",
+    "Вызовы инструментов агента",
+    labelnames=("tool", "status"),
+)
+
+AGENT_TURN_DURATION_SECONDS = Histogram(
+    "eventmind_agent_turn_duration_seconds",
+    "Длительность хода агента, сек",
+    labelnames=("channel",),
+    buckets=(0.5, 1.0, 2.5, 5.0, 10.0, 20.0, 40.0, 80.0),
+)

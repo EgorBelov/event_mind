@@ -14,7 +14,13 @@ from dataclasses import dataclass
 from typing import Any, Protocol, TypeVar
 
 import structlog
-from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
+from langchain_core.messages import (
+    AIMessage,
+    BaseMessage,
+    HumanMessage,
+    SystemMessage,
+    ToolMessage,
+)
 from pydantic import BaseModel
 
 from eventmind.application.ports.llm import (
@@ -22,6 +28,9 @@ from eventmind.application.ports.llm import (
     LLMResult,
     LLMUnavailable,
     LLMUsage,
+    ToolCall,
+    ToolSpec,
+    ToolStep,
 )
 from eventmind.infrastructure.llm.breaker import CircuitBreaker, ProviderCooldown
 from eventmind.infrastructure.telemetry.metrics import (
@@ -66,7 +75,17 @@ def _to_lc(messages: Sequence[LLMMessage]) -> list[BaseMessage]:
         if m.role == "system":
             out.append(SystemMessage(content=m.content))
         elif m.role == "assistant":
-            out.append(AIMessage(content=m.content))
+            out.append(
+                AIMessage(
+                    content=m.content,
+                    tool_calls=[
+                        {"id": c.id, "name": c.name, "args": c.arguments, "type": "tool_call"}
+                        for c in m.tool_calls
+                    ],
+                )
+            )
+        elif m.role == "tool":
+            out.append(ToolMessage(content=m.content, tool_call_id=m.tool_call_id or ""))
         else:
             out.append(HumanMessage(content=m.content))
     return out
@@ -86,11 +105,54 @@ def _content_text(message: Any) -> str:
     content = getattr(message, "content", message)
     if isinstance(content, str):
         return content
+    if isinstance(content, list):
+        # Gemini отдаёт контент списком частей: [{"type": "text", "text": ...}, ...]
+        return "".join(
+            part.get("text", "") if isinstance(part, dict) else str(part) for part in content
+        )
     return str(content)
 
 
+def _tool_schema(spec: ToolSpec) -> dict[str, Any]:
+    """OpenAI-формат описания функции — его понимают bind_tools всех провайдеров."""
+    return {
+        "type": "function",
+        "function": {
+            "name": spec.name,
+            "description": spec.description,
+            "parameters": spec.parameters,
+        },
+    }
+
+
+def _tool_calls(message: Any) -> tuple[ToolCall, ...]:
+    calls: list[ToolCall] = []
+    for i, raw in enumerate(getattr(message, "tool_calls", None) or []):
+        name = raw.get("name") if isinstance(raw, dict) else None
+        if not name:
+            continue
+        args = raw.get("args")
+        calls.append(
+            ToolCall(
+                id=str(raw.get("id") or f"call_{i}"),
+                name=str(name),
+                arguments=dict(args) if isinstance(args, dict) else {},
+            )
+        )
+    return tuple(calls)
+
+
+def _count_tokens(provider: str, message: Any) -> LLMUsage:
+    usage = _extract_usage(message)
+    if usage.input_tokens:
+        LLM_TOKENS_TOTAL.labels(provider, "input").inc(usage.input_tokens)
+    if usage.output_tokens:
+        LLM_TOKENS_TOTAL.labels(provider, "output").inc(usage.output_tokens)
+    return usage
+
+
 class LLMChain:
-    """Цепочка LLM-провайдеров за портом `LLMGateway`."""
+    """Цепочка LLM-провайдеров за портами `LLMGateway` и `ToolCallingLLM`."""
 
     def __init__(
         self,
@@ -117,12 +179,34 @@ class LLMChain:
     ) -> LLMResult:
         lc = _to_lc(messages)
         provider, message = await self._run(lambda model: model.ainvoke(lc))
-        usage = _extract_usage(message)
-        if usage.input_tokens:
-            LLM_TOKENS_TOTAL.labels(provider, "input").inc(usage.input_tokens)
-        if usage.output_tokens:
-            LLM_TOKENS_TOTAL.labels(provider, "output").inc(usage.output_tokens)
+        usage = _count_tokens(provider, message)
         return LLMResult(text=_content_text(message), provider=provider, usage=usage)
+
+    async def complete_with_tools(
+        self,
+        messages: Sequence[LLMMessage],
+        tools: Sequence[ToolSpec],
+        *,
+        temperature: float | None = None,
+        max_tokens: int | None = None,
+    ) -> ToolStep:
+        """Шаг агента (порт `ToolCallingLLM`): инструменты привязываются к звену
+        на каждом вызове, поэтому fallback на следующего провайдера работает
+        так же, как для обычной генерации."""
+        lc = _to_lc(messages)
+        schemas = [_tool_schema(t) for t in tools]
+
+        async def call(model: ChatModel) -> Any:
+            return await model.bind_tools(schemas).ainvoke(lc)
+
+        provider, message = await self._run(call)
+        usage = _count_tokens(provider, message)
+        return ToolStep(
+            text=_content_text(message),
+            tool_calls=_tool_calls(message),
+            provider=provider,
+            usage=usage,
+        )
 
     async def structured_output(
         self,
@@ -138,13 +222,6 @@ class LLMChain:
 
         _provider, result = await self._run(call)
         return result  # type: ignore[no-any-return]
-
-    def bind_tools(self, tools: Sequence[object]) -> Any:
-        """Привязать tools к первому включённому звену (seam для LangGraph, M3+)."""
-        for link in self._links:
-            if link.enabled:
-                return link.model().bind_tools(list(tools))
-        raise LLMUnavailable("Нет включённых LLM-провайдеров для bind_tools")
 
     # ── ядро fallback + breaker + cooldown ───────────────────────────────
     async def _run(

@@ -73,11 +73,18 @@ class ExplainEvent:
         self._clock = clock
         self._weights = weights
 
-    async def execute(self, event_id: int, *, user_id: int | None) -> EventExplanation | None:
+    async def execute(
+        self, event_id: int, *, user_id: int | None, with_summary: bool = True
+    ) -> EventExplanation | None:
+        """`with_summary=False` — только причины, без LLM-пересказа (агент сам
+        формулирует ответ по описанию события)."""
         event = await self._search.get_event(event_id)
         if event is None:
             return None
-        summary, source = await self._summary(event)
+        if with_summary:
+            summary, source = await self._summary(event)
+        else:
+            summary, source = _fallback(event), "description"
         reasons = await self._reasons(event, user_id) if user_id is not None else []
         return EventExplanation(
             event=event, summary=summary, summary_source=source, reasons=reasons

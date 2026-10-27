@@ -23,7 +23,11 @@ def test_slugify_code(raw: str, expected: str) -> None:
     ("raw", "expected"),
     [
         ("msk", "moscow"),
-        ("Москва", "москва"),  # кириллица не в алиасах → как есть (slugified)
+        ("Москва", "moscow"),  # русское название из словаря городов
+        ("Санкт-Петербург", "spb"),
+        ("питер", "spb"),
+        ("Нижний Новгород", "nizhny_novgorod"),
+        ("Барнаул", "барнаул"),  # кириллица вне словаря → как есть (slugified)
         ("piter", "spb"),
         ("saint_petersburg", "spb"),
         ("yekaterinburg", "ekb"),

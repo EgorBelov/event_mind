@@ -96,8 +96,13 @@ class NlSearch:
         self._clock = clock
 
     async def execute(self, query_text: str, *, limit: int = 5) -> SearchResult:
-        now = self._clock.now()
         filters = await self._extract(query_text)
+        return await self.search_filters(filters, limit=limit)
+
+    async def search_filters(self, filters: SearchFilters, *, limit: int = 5) -> SearchResult:
+        """Поиск по уже извлечённым фильтрам (агент извлекает их сам — без
+        второго вызова LLM): канонизация → строгий проход → relax-fallback."""
+        now = self._clock.now()
         query = _canonicalize(filters)
 
         strict = await self._repo.search(query, limit=limit, now=now)

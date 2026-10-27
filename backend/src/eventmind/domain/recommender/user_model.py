@@ -21,6 +21,8 @@ from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import datetime
 
+from eventmind.domain.events.taxonomy import slugify_code
+
 # Вес объявленного интереса в rule-скоринге (сопоставим с парой лайков темы)
 # и штраф анти-интереса (перекрывает и объявленный, и выученный интерес).
 DECLARED_INTEREST_WEIGHT = 3
@@ -141,3 +143,73 @@ def merge_declared_topics(
     for code in anti_interests:
         weights[code] = -ANTI_INTEREST_PENALTY
     return weights
+
+
+# ── точечные правки профиля (агент, «Как система вас видит») ─────────────────
+MAX_TOPICS = 20
+MAX_GOALS = 10
+
+
+@dataclass(frozen=True, slots=True)
+class ProfileChanges:
+    """Правка структурного профиля без повторного разбора текста «о себе»."""
+
+    add_interests: tuple[str, ...] = ()
+    remove_interests: tuple[str, ...] = ()
+    add_anti_interests: tuple[str, ...] = ()
+    remove_anti_interests: tuple[str, ...] = ()
+    add_goals: tuple[str, ...] = ()
+    remove_goals: tuple[str, ...] = ()
+
+    @property
+    def is_empty(self) -> bool:
+        return not (
+            self.add_interests
+            or self.remove_interests
+            or self.add_anti_interests
+            or self.remove_anti_interests
+            or self.add_goals
+            or self.remove_goals
+        )
+
+
+def _codes(values: Sequence[str]) -> list[str]:
+    out: list[str] = []
+    for v in values:
+        code = slugify_code(v)
+        if code and code not in out:
+            out.append(code)
+    return out
+
+
+def apply_profile_changes(profile: UserProfile, changes: ProfileChanges) -> UserProfile:
+    """Новый профиль с правками. Темы канонизируются в slug'и; тема не может быть
+    одновременно интересом и анти-интересом — побеждает последняя правка
+    (добавление в интересы убирает из анти, и наоборот)."""
+    add_int, add_anti = _codes(changes.add_interests), _codes(changes.add_anti_interests)
+    drop_int = set(_codes(changes.remove_interests)) | set(add_anti)
+    drop_anti = set(_codes(changes.remove_anti_interests)) | set(add_int)
+
+    interests = [t for t in profile.interests if t not in drop_int]
+    interests += [t for t in add_int if t not in interests]
+    anti = [t for t in profile.anti_interests if t not in drop_anti]
+    anti += [t for t in add_anti if t not in anti]
+
+    drop_goals = {g.strip().casefold() for g in changes.remove_goals}
+    goals = [g for g in profile.goals if g.casefold() not in drop_goals]
+    for goal in (g.strip() for g in changes.add_goals):
+        if goal and goal.casefold() not in {g.casefold() for g in goals}:
+            goals.append(goal)
+
+    return UserProfile(
+        user_id=profile.user_id,
+        about=profile.about,
+        role=profile.role,
+        level=profile.level,
+        stack=list(profile.stack),
+        interests=interests[:MAX_TOPICS],
+        anti_interests=anti[:MAX_TOPICS],
+        goals=goals[:MAX_GOALS],
+        embedding=profile.embedding,
+        updated_at=profile.updated_at,
+    )

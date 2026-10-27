@@ -36,6 +36,7 @@ from eventmind.application.recommender.use_cases import (
     ListSavedEvents,
     RecordInteraction,
     RemoveSavedEvent,
+    recommendation_cache_key,
 )
 from eventmind.interfaces.api.dependencies import (
     ContainerDep,
@@ -196,7 +197,7 @@ async def patch_settings(
             user_id, city=payload.city, preferred_format=payload.preferred_format
         )
         # город/формат входят в rule-скоринг — выдачу пересчитать
-        await container.cache.delete(f"reco:{user_id}")
+        await container.cache.delete(recommendation_cache_key(user_id))
     await update_prefs.execute(
         user_id,
         digest_frequency=payload.digest_frequency,

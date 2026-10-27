@@ -6,15 +6,26 @@ from typing import Any
 import pytest
 from pydantic import BaseModel
 
-from eventmind.application.ports.llm import LLMMessage, LLMUnavailable
+from eventmind.application.ports.llm import (
+    LLMMessage,
+    LLMUnavailable,
+    ToolCall,
+    ToolSpec,
+)
 from eventmind.infrastructure.llm.breaker import CircuitBreaker, ProviderCooldown
 from eventmind.infrastructure.llm.chain import LLMChain, ProviderLink
 
 
 class _FakeAI:
-    def __init__(self, content: str, usage: dict[str, int] | None = None) -> None:
+    def __init__(
+        self,
+        content: Any,
+        usage: dict[str, int] | None = None,
+        tool_calls: list[dict[str, Any]] | None = None,
+    ) -> None:
         self.content = content
         self.usage_metadata = usage
+        self.tool_calls = tool_calls or []
 
 
 class _FakeStructured:
@@ -36,23 +47,29 @@ class FakeChatModel:
         usage: dict[str, int] | None = None,
         fail: bool = False,
         structured_result: Any = None,
+        tool_calls: list[dict[str, Any]] | None = None,
     ) -> None:
         self.content = content
         self.usage = usage
         self.fail = fail
         self.structured_result = structured_result
+        self.tool_calls = tool_calls
         self.calls = 0
+        self.inputs: list[Any] = []
+        self.bound_tools: list[Any] = []
 
     async def ainvoke(self, _input: Any, **_kw: Any) -> Any:
         self.calls += 1
+        self.inputs.append(_input)
         if self.fail:
             raise RuntimeError("provider boom")
-        return _FakeAI(self.content, self.usage)
+        return _FakeAI(self.content, self.usage, self.tool_calls)
 
     def with_structured_output(self, _schema: Any, **_kw: Any) -> _FakeStructured:
         return _FakeStructured(self.structured_result, self.fail)
 
-    def bind_tools(self, _tools: Any, **_kw: Any) -> FakeChatModel:
+    def bind_tools(self, tools: Any, **_kw: Any) -> FakeChatModel:
+        self.bound_tools = list(tools)
         return self
 
 
@@ -141,3 +158,68 @@ async def test_provider_cooldown_skips_repeatedly_failing_provider() -> None:
     calls_after_two = a.calls
     await chain.complete(MSGS)
     assert a.calls == calls_after_two  # p0 пропущен, ответил p1
+
+
+# ── tool calling (агент) ─────────────────────────────────────────────────────
+SPEC = ToolSpec(
+    name="search_events",
+    description="Поиск",
+    parameters={"type": "object", "properties": {"city": {"type": "string"}}},
+)
+
+
+async def test_complete_with_tools_parses_calls_and_binds_openai_schema() -> None:
+    model = FakeChatModel(
+        content="",
+        usage={"input_tokens": 7, "output_tokens": 3},
+        tool_calls=[
+            {"id": "call_1", "name": "search_events", "args": {"city": "perm"}},
+            {"name": "", "args": {}},  # мусор без имени отбрасывается
+        ],
+    )
+    step = await _chain(model).complete_with_tools(MSGS, [SPEC])
+    assert step.tool_calls == (
+        ToolCall(id="call_1", name="search_events", arguments={"city": "perm"}),
+    )
+    assert step.provider == "p0" and step.usage.total_tokens == 10
+    assert model.bound_tools == [
+        {
+            "type": "function",
+            "function": {"name": "search_events", "description": "Поиск",
+                         "parameters": SPEC.parameters},
+        }
+    ]
+
+
+async def test_complete_with_tools_falls_back_to_next_provider() -> None:
+    a = FakeChatModel(fail=True)
+    b = FakeChatModel(content="ответ")
+    step = await _chain(a, b).complete_with_tools(MSGS, [SPEC])
+    assert step.text == "ответ" and step.tool_calls == () and step.provider == "p1"
+
+
+async def test_tool_history_is_converted_to_langchain_messages() -> None:
+    from langchain_core.messages import AIMessage, ToolMessage
+
+    model = FakeChatModel(content="ok")
+    history = [
+        LLMMessage(role="user", content="Go в Перми"),
+        LLMMessage(
+            role="assistant",
+            content="",
+            tool_calls=(ToolCall(id="c1", name="search_events", arguments={"city": "perm"}),),
+        ),
+        LLMMessage(role="tool", content='{"count": 0}', tool_call_id="c1"),
+    ]
+    await _chain(model).complete_with_tools(history, [SPEC])
+    _, ai, tool = model.inputs[0]
+    assert isinstance(ai, AIMessage) and ai.tool_calls[0]["id"] == "c1"
+    assert ai.tool_calls[0]["args"] == {"city": "perm"}
+    assert isinstance(tool, ToolMessage) and tool.tool_call_id == "c1"
+
+
+async def test_list_content_from_gemini_is_joined() -> None:
+    parts = [{"type": "text", "text": "При"}, {"type": "text", "text": "вет"}]
+    model = FakeChatModel(content=parts)
+    step = await _chain(model).complete_with_tools(MSGS, [SPEC])
+    assert step.text == "Привет"
