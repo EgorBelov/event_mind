@@ -110,6 +110,9 @@ class Settings(BaseSettings):
     reco_candidate_limit: int = 100
     reco_result_limit: int = 20
     reco_cache_ttl_seconds: int = 900
+    # Откалиброванные веса гибрида (P1 №10) — JSON, например {"cosine": 12, "rule": 0.8};
+    # пусто — значения по умолчанию (domain/recommender/weights.py).
+    scoring_weights: str = ""
 
     # ── поиск (P1 №7, №16) ───────────────────────────────────────────────
     # гибридный поиск: строгий + полнотекстовый + семантический, слияние RRF
@@ -206,6 +209,13 @@ def validate_config(settings: Settings, context: Context) -> list[str]:
             f"Незаполнены обязательные переменные окружения для контекста "
             f"'{context}': {', '.join(missing)}. Проверь .env (см. .env.example)."
         )
+    if context in ("api", "worker"):
+        from eventmind.domain.recommender.weights import ScoringWeights
+
+        try:
+            ScoringWeights.from_json(settings.scoring_weights)
+        except ValueError as exc:  # json.JSONDecodeError — подкласс ValueError
+            raise ConfigError(f"SCORING_WEIGHTS: {exc}") from exc
     return missing
 
 

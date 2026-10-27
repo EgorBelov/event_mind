@@ -197,10 +197,11 @@ def _build_resources(settings: Settings) -> dict[str, Any]:
     def notif_uow_factory() -> SqlAlchemyNotificationsUnitOfWork:
         return SqlAlchemyNotificationsUnitOfWork(session_factory)
 
+    weights = ScoringWeights.from_json(settings.scoring_weights)
     get_recommendations = GetRecommendations(
         rec_uow_factory,
         PgvectorCandidateGenerator(session_factory),
-        HybridRanker(),
+        HybridRanker(weights),
         cache,
         clock,
         RecommenderConfig(
@@ -208,7 +209,7 @@ def _build_resources(settings: Settings) -> dict[str, Any]:
             result_limit=settings.reco_result_limit,
             cache_ttl_seconds=settings.reco_cache_ttl_seconds,
         ),
-        ScoringWeights(),
+        weights,
     )
     # JWT-секрет для unsubscribe-ссылок должен совпадать с API (задать JWT_SECRET
     # в проде); в dev без него ссылки не провалидируются кросс-процессно.

@@ -38,6 +38,7 @@ from eventmind.application.recommender.ranker import HybridRanker
 from eventmind.config import Settings
 from eventmind.domain.accounts.value_objects import ChannelType
 from eventmind.domain.events.dedup import DedupPolicy
+from eventmind.domain.recommender.weights import ScoringWeights
 from eventmind.infrastructure.cache.redis_cache import RedisCache
 from eventmind.infrastructure.db.agent_journal import SqlAlchemyAgentJournal
 from eventmind.infrastructure.db.engine import create_engine, create_session_factory
@@ -87,6 +88,7 @@ class Container:
     cache: RedisCache
     candidate_generator: PgvectorCandidateGenerator
     ranker: HybridRanker
+    scoring_weights: ScoringWeights
     recommender_config: RecommenderConfig
     notification_channels: dict[ChannelType, NotificationChannel]
     search_repository: SqlAlchemySearchRepository
@@ -124,6 +126,7 @@ def build_container(settings: Settings) -> Container:
         _logger.warning("jwt_secret_empty_using_ephemeral")
 
     llm = create_llm_chain(settings)
+    weights = ScoringWeights.from_json(settings.scoring_weights)
 
     return Container(
         settings=settings,
@@ -158,7 +161,8 @@ def build_container(settings: Settings) -> Container:
         ),
         cache=RedisCache(redis),
         candidate_generator=PgvectorCandidateGenerator(session_factory),
-        ranker=HybridRanker(),
+        ranker=HybridRanker(weights),
+        scoring_weights=weights,
         recommender_config=RecommenderConfig(
             candidate_limit=settings.reco_candidate_limit,
             result_limit=settings.reco_result_limit,

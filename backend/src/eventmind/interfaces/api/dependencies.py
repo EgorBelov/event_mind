@@ -79,7 +79,6 @@ from eventmind.application.recommender.use_cases import (
 from eventmind.application.search.config import SearchConfig
 from eventmind.application.search.use_cases import GetEvent, NlSearch, SimilarEvents
 from eventmind.domain.accounts.entities import User
-from eventmind.domain.recommender.weights import ScoringWeights
 from eventmind.interfaces.api.container import Container
 from eventmind.interfaces.api.errors import ApiError
 
@@ -210,7 +209,7 @@ def get_recommendations_uc(container: ContainerDep) -> GetRecommendations:
         container.cache,
         container.clock,
         container.recommender_config,
-        ScoringWeights(),
+        container.scoring_weights,
     )
 
 
@@ -235,7 +234,10 @@ def get_list_saved_uc(container: ContainerDep) -> ListSavedEvents:
 
 def get_remove_saved_uc(container: ContainerDep) -> RemoveSavedEvent:
     return RemoveSavedEvent(
-        container.recommendation_uow_factory, container.cache, container.clock, ScoringWeights()
+        container.recommendation_uow_factory,
+        container.cache,
+        container.clock,
+        container.scoring_weights,
     )
 
 
@@ -246,13 +248,16 @@ def get_explain_event_uc(container: ContainerDep) -> ExplainEvent:
         container.llm,
         container.cache,
         container.clock,
-        ScoringWeights(),
+        container.scoring_weights,
     )
 
 
 def get_record_interaction_uc(container: ContainerDep) -> RecordInteraction:
     return RecordInteraction(
-        container.recommendation_uow_factory, container.cache, container.clock, ScoringWeights()
+        container.recommendation_uow_factory,
+        container.cache,
+        container.clock,
+        container.scoring_weights,
     )
 
 

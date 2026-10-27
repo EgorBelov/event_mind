@@ -1,6 +1,14 @@
-"""Веса гибридного скоринга и параметры rerank/decay (значения из v1)."""
+"""Веса гибридного скоринга и параметры rerank/decay.
+
+Значения по умолчанию — эмпирические из v1. Откалиброванные веса (P1 №10,
+`python -m eval.real.calibrate`) подставляются через настройку
+`SCORING_WEIGHTS` (JSON) — `ScoringWeights.with_overrides`.
+"""
 from __future__ import annotations
 
+import dataclasses
+import json
+from collections.abc import Mapping
 from dataclasses import dataclass
 
 
@@ -22,3 +30,25 @@ class ScoringWeights:
     bayes_decay_per_day: float = 0.995
     mmr_lambda: float = 0.7
     dedup_threshold: float = 0.92
+
+    def with_overrides(self, overrides: Mapping[str, object]) -> ScoringWeights:
+        """Копия с заменёнными полями; неизвестное поле или не число ≥ 0 — ValueError."""
+        known = {f.name for f in dataclasses.fields(self)}
+        clean: dict[str, float] = {}
+        for key, value in overrides.items():
+            if key not in known:
+                raise ValueError(f"Неизвестный вес скоринга: {key}")
+            if isinstance(value, bool) or not isinstance(value, int | float) or value < 0:
+                raise ValueError(f"Вес {key} должен быть числом ≥ 0")
+            clean[key] = float(value)
+        return dataclasses.replace(self, **clean)
+
+    @classmethod
+    def from_json(cls, raw: str) -> ScoringWeights:
+        """Из настройки SCORING_WEIGHTS: пусто — значения по умолчанию."""
+        if not raw.strip():
+            return cls()
+        data = json.loads(raw)
+        if not isinstance(data, dict):
+            raise ValueError("SCORING_WEIGHTS должен быть JSON-объектом")
+        return cls().with_overrides(data)
