@@ -4,6 +4,7 @@
 |-------------------|---------------------------------------------------|
 | like/save/hide:ID | оценка события (лента, поиск, «Подробнее»)        |
 | more:ID           | «📖 Подробнее» — пересказ + почему рекомендовано  |
+| sim:ID            | «🔍 Похожие» — ближайшие по смыслу события        |
 | feed:more         | следующая порция ленты                            |
 | fmt:X / city:X    | формат / город (онбординг и настройки; "" — не важно) |
 | onb:skip          | пропустить «о себе» в онбординге                  |
@@ -40,11 +41,12 @@ def feedback_keyboard(event_id: int, source_url: str | None = None) -> InlineKey
     kb.button(text="⭐ Сохранить", callback_data=f"save:{event_id}")
     kb.button(text="👎 Скрыть", callback_data=f"hide:{event_id}")
     kb.button(text="📖 Подробнее", callback_data=f"more:{event_id}")
+    kb.button(text="🔍 Похожие", callback_data=f"sim:{event_id}")
     if source_url:
         kb.button(text="🔗 На источнике", url=source_url)
-        kb.adjust(3, 2)
+        kb.adjust(3, 2, 1)
     else:
-        kb.adjust(3, 1)
+        kb.adjust(3, 2)
     return kb.as_markup()
 
 

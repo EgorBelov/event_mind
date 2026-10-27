@@ -274,6 +274,41 @@ class NlSearch:
         return filters
 
 
+class SimilarEvents:
+    """«🔍 Похожие» (P1 №13): kNN по эмбеддингу события среди предстоящих, без
+    самого события и других выпусков его серии. Без эмбеддинга — по темам."""
+
+    def __init__(
+        self, repository: SearchRepository, clock: Clock, *, min_similarity: float = 0.5
+    ) -> None:
+        self._repo = repository
+        self._clock = clock
+        self._min_similarity = min_similarity
+
+    async def execute(self, event_id: int, *, limit: int = 5) -> list[Event] | None:
+        """None — события нет."""
+        event = await self._repo.get_event(event_id)
+        if event is None:
+            return None
+        now = self._clock.now()
+        depth = limit * 2 + 1
+        if event.embedding:
+            found = await self._repo.semantic_search(
+                SearchQuery(), event.embedding, limit=depth, now=now,
+                min_similarity=self._min_similarity,
+            )
+        elif event.topics:
+            found = await self._repo.search(SearchQuery(topics=event.topics), limit=depth, now=now)
+        else:
+            return []
+        same_series = event.series_slug
+        return [
+            e
+            for e in found
+            if e.id != event.id and not (same_series and e.series_slug == same_series)
+        ][:limit]
+
+
 class GetEvent:
     def __init__(self, repository: SearchRepository) -> None:
         self._repo = repository

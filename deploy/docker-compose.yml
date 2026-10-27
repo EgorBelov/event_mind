@@ -91,14 +91,14 @@ services:
       migrate:
         condition: service_completed_successfully
 
-  # Telegram-бот (M7): вторичный клиент, ходит в API по HTTP (X-API-Key).
-  # Профиль `bot` — поднимается только при заданном BOT_TOKEN:
-  #   docker compose --profile bot up
+  # Telegram-бот (M7, B1–B5, A4): клиент API по HTTP (X-API-Key). Входит в
+  # стандартный `make up`; без BOT_TOKEN в .env штатно завершается сразу.
   bot:
     build:
       context: ../backend
     command: ["python", "-m", "eventmind.interfaces.bot.main"]
-    profiles: ["bot"]
+    # в стандартном `make up`: без BOT_TOKEN процесс сразу штатно завершается (код 0)
+    restart: on-failure
     env_file:
       - path: ../.env
         required: false

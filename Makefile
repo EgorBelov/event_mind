@@ -11,7 +11,7 @@ help: ## Показать доступные команды
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | \
 		awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-18s\033[0m %s\n", $$1, $$2}'
 
-up: ## Поднять dev-стек (pg+redis+api+web+prometheus+grafana+mailhog)
+up: ## Поднять dev-стек (pg+redis+api+worker+web+бот+prometheus+grafana+mailhog)
 	$(COMPOSE) up --build -d
 	@echo "api:        http://localhost:8000/health"
 	@echo "web:        http://localhost:3000"

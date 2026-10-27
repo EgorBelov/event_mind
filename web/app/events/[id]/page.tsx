@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
+import { EventCard } from "@/components/EventCard";
 import { api, ApiError } from "@/lib/api";
 import type { EventDetail, Explanation } from "@/lib/types";
 
@@ -9,6 +10,7 @@ export default function EventPage({ params }: { params: { id: string } }) {
   const [ev, setEv] = useState<EventDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [explanation, setExplanation] = useState<Explanation | null>(null);
+  const [similar, setSimilar] = useState<EventDetail[]>([]);
   const [explainState, setExplainState] = useState<"idle" | "busy" | "login" | "error">("idle");
 
   async function explain() {
@@ -28,6 +30,10 @@ export default function EventPage({ params }: { params: { id: string } }) {
       setError("Некорректный идентификатор");
       return;
     }
+    api
+      .similar(id, 3)
+      .then(setSimilar)
+      .catch(() => setSimilar([]));
     api
       .event(id)
       .then(setEv)
@@ -119,6 +125,14 @@ export default function EventPage({ params }: { params: { id: string } }) {
             </p>
           )}
         </article>
+      )}
+      {similar.length > 0 && (
+        <>
+          <h3>🔍 Похожие события</h3>
+          {similar.map((item) => (
+            <EventCard key={item.id} ev={item} actions={false} />
+          ))}
+        </>
       )}
     </main>
   );

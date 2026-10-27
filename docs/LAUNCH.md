@@ -228,7 +228,7 @@ Invoke-RestMethod -Uri "http://localhost:8000/api/v1/admin/llm/status" -Headers 
 ```powershell
 dc up -d postgres redis mailhog migrate
 dc stop api worker web
-dc --profile bot stop bot     # если бот был запущен в Docker
+dc stop bot                   # бот в Docker тоже остановить
 ```
 
 **6.2. Зависимости backend** (первый раз долго: torch ≈ сотни МБ):
@@ -286,12 +286,20 @@ API на хосте.
 
 Нужны `BOT_TOKEN`, `TELEGRAM_BOT_USERNAME`, `API_SHARED_SECRET` в `.env`.
 
-Режим A:
+Режим A: бот поднимается вместе со стеком (`dc up -d`), если в `.env` задан
+`BOT_TOKEN`; без токена контейнер `bot` штатно завершается — это нормально.
+После правки `.env`:
 
 ```powershell
-dc --profile bot up -d bot
+dc up -d bot
 dc logs -f bot
 ```
+
+Что умеет бот: `/start` (регистрация прямо в Telegram + онбординг «о себе →
+формат → город»), `/feed` (лента по 5), `/saved`, `/settings`, `/search`
+(прямой поиск); свободный текст — диалоговый помощник (агент): ищет,
+объясняет, предлагает правки профиля с кнопками «Да / Нет»; `/reset` — новый
+разговор. Под карточками — 👍 ⭐ 👎 📖 🔍 (похожие).
 
 Режим B — окно 3 из п. 6.4.
 

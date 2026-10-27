@@ -77,7 +77,7 @@ from eventmind.application.recommender.use_cases import (
     RemoveSavedEvent,
 )
 from eventmind.application.search.config import SearchConfig
-from eventmind.application.search.use_cases import GetEvent, NlSearch
+from eventmind.application.search.use_cases import GetEvent, NlSearch, SimilarEvents
 from eventmind.domain.accounts.entities import User
 from eventmind.domain.recommender.weights import ScoringWeights
 from eventmind.interfaces.api.container import Container
@@ -271,6 +271,10 @@ def get_nl_search(container: ContainerDep) -> NlSearch:
             min_similarity=settings.search_min_similarity,
         ),
     )
+
+
+def get_similar_events_uc(container: ContainerDep) -> SimilarEvents:
+    return SimilarEvents(container.search_repository, container.clock)
 
 
 def get_event_uc(container: ContainerDep) -> GetEvent:

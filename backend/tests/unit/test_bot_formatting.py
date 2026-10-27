@@ -78,3 +78,13 @@ def test_agent_confirm_keyboard_fits_callback_limit() -> None:
     assert yes.callback_data == f"agent:yes:{action_id}"
     assert no.callback_data == f"agent:no:{action_id}"
     assert all(len((b.callback_data or "").encode()) <= 64 for b in (yes, no))
+
+
+
+def test_feedback_keyboard_has_similar_button() -> None:
+    from eventmind.interfaces.bot.keyboards import feedback_keyboard
+
+    rows = feedback_keyboard(7, "https://x").inline_keyboard
+    data = [b.callback_data for row in rows for b in row]
+    assert "sim:7" in data and "more:7" in data
+    assert [len(r) for r in rows] == [3, 2, 1]

@@ -58,6 +58,7 @@ router = Router(name="eventmind")
 FEED_PAGE = 5
 FEED_FETCH = 20  # = RecommenderConfig.result_limit: вся текущая выдача
 SAVED_PAGE = 5
+SIMILAR_LIMIT = 3
 _FEED_SHOWN_KEY = "feed_shown"
 
 _HELP = (
@@ -351,6 +352,23 @@ async def on_more(callback: CallbackQuery, api: BotApiClient) -> None:
         render_explain(explanation),
         reply_markup=feedback_keyboard(int(raw_id), event.get("source_url")),
     )
+
+
+@router.callback_query(F.data.regexp(r"^sim:\d+$"))
+async def on_similar(callback: CallbackQuery, api: BotApiClient) -> None:
+    _, _, raw_id = (callback.data or "").partition(":")
+    await callback.answer()
+    similar = await api.similar(int(raw_id), limit=SIMILAR_LIMIT)
+    if not similar:
+        await send(callback, "Похожих предстоящих событий пока нет.")
+        return
+    await send(callback, "🔍 Похожие события:")
+    for ev in similar:
+        await send(
+            callback,
+            render_event_card(ev),
+            reply_markup=feedback_keyboard(int(ev["id"]), ev.get("source_url")),
+        )
 
 
 # ── /saved (B2) ───────────────────────────────────────────────────────────────

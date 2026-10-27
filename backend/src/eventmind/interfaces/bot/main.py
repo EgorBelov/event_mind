@@ -71,6 +71,11 @@ async def _run(settings: Settings) -> None:
 def main() -> None:
     settings = get_settings()
     configure_logging(level=settings.log_level, json_output=settings.log_json)
+    if not settings.bot_token:
+        # бот входит в стандартный `make up`: без токена — штатный выход (код 0),
+        # а не ошибка конфигурации, чтобы стек без Telegram поднимался чисто
+        _logger.warning("bot_disabled", hint="задайте BOT_TOKEN в .env, чтобы включить бота")
+        return
     validate_or_exit(settings, "bot")
     asyncio.run(_run(settings))
 

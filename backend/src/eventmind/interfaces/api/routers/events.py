@@ -7,13 +7,14 @@ from fastapi import APIRouter, Depends, Query
 from starlette.status import HTTP_404_NOT_FOUND
 
 from eventmind.application.recommender.explain import ExplainEvent
-from eventmind.application.search.use_cases import GetEvent, NlSearch
+from eventmind.application.search.use_cases import GetEvent, NlSearch, SimilarEvents
 from eventmind.domain.events.entities import Event
 from eventmind.interfaces.api.dependencies import (
     CurrentUser,
     get_event_uc,
     get_explain_event_uc,
     get_nl_search,
+    get_similar_events_uc,
 )
 from eventmind.interfaces.api.errors import ApiError
 from eventmind.interfaces.api.schemas import EventDetailResponse, ExplainResponse, NlSearchResponse
@@ -48,6 +49,19 @@ async def event_detail(
     if event is None:
         raise ApiError(HTTP_404_NOT_FOUND, "not_found", "Событие не найдено")
     return _to_response(event)
+
+
+@router.get("/{event_id}/similar", response_model=list[EventDetailResponse])
+async def similar_events(
+    event_id: int,
+    use_case: Annotated[SimilarEvents, Depends(get_similar_events_uc)],
+    limit: Annotated[int, Query(ge=1, le=10)] = 5,
+) -> list[EventDetailResponse]:
+    """«🔍 Похожие»: ближайшие по смыслу предстоящие события (публично)."""
+    found = await use_case.execute(event_id, limit=limit)
+    if found is None:
+        raise ApiError(HTTP_404_NOT_FOUND, "not_found", "Событие не найдено")
+    return [_to_response(e) for e in found]
 
 
 @router.get("/{event_id}/explain", response_model=ExplainResponse)

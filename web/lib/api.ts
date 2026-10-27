@@ -100,6 +100,8 @@ export const api = {
     ),
   event: (id: number) => request<EventDetail>("GET", `/api/v1/events/${id}`),
   explain: (id: number) => request<Explanation>("GET", `/api/v1/events/${id}/explain`),
+  similar: (id: number, limit = 5) =>
+    request<EventDetail[]>("GET", `/api/v1/events/${id}/similar?limit=${limit}`),
 
   // saved
   saved: (offset = 0, limit = 10) =>

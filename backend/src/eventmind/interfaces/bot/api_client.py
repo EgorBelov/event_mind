@@ -240,6 +240,17 @@ class BotApiClient:
         except httpx.HTTPError:
             return {"relaxed": False, "results": []}
 
+    async def similar(self, event_id: int, limit: int = 3) -> list[dict[str, Any]]:
+        """«🔍 Похожие»: при ошибке — пусто."""
+        try:
+            r = await self._get(f"/api/v1/events/{event_id}/similar", {"limit": limit})
+            if r.status_code != 200:
+                return []
+            data = r.json()
+            return list(data) if isinstance(data, list) else []
+        except httpx.HTTPError:
+            return []
+
     async def event(self, event_id: int) -> dict[str, Any] | None:
         try:
             r = await self._get(f"/api/v1/events/{event_id}")

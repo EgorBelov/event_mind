@@ -10,7 +10,7 @@ from eventmind.application.ports.llm import LLMMessage, LLMResult
 from eventmind.application.ports.search import SearchQuery
 from eventmind.application.search.config import SearchConfig
 from eventmind.application.search.schemas import SearchFilters
-from eventmind.application.search.use_cases import NlSearch
+from eventmind.application.search.use_cases import NlSearch, SimilarEvents
 from eventmind.domain.events.entities import Event
 
 NOW = datetime(2026, 10, 27, 12, 0, tzinfo=UTC)
@@ -204,3 +204,35 @@ async def test_hyde_embeds_hypothetical_event_and_caches_it() -> None:
     assert embedding.texts[1] == embedding.texts[0]
     hyde_calls = [c for c in llm.calls if "идеально" in c[0][0].content]
     assert len(hyde_calls) == 1 and hyde_calls[0][0][1].content.startswith("<query>")
+
+
+# ── «🔍 Похожие» (P1 №13) ─────────────────────────────────────────────────────
+class _SimilarRepo(_Repo):
+    def __init__(self, event: Event | None, found: list[Event]) -> None:
+        super().__init__(semantic=found)
+        self.event = event
+        self.hits = {"": found}
+
+    async def get_event(self, event_id: int) -> Event | None:
+        return self.event
+
+
+async def test_similar_excludes_self_and_same_series() -> None:
+    source = _event(1)
+    source.embedding, source.series_slug = [1.0, 0.0], "go-meetup"
+    same_series = _event(2)
+    same_series.series_slug = "go-meetup"
+    repo = _SimilarRepo(source, [source, same_series, _event(3), _event(4)])
+    found = await SimilarEvents(repo, _Clock()).execute(1, limit=1)  # type: ignore[arg-type]
+    assert found is not None and [e.id for e in found] == [3]
+    assert repo.semantic_calls[0][1] == [1.0, 0.0] and repo.semantic_calls[0][2] == 0.5
+
+
+async def test_similar_without_embedding_uses_topics_and_missing_event_is_none() -> None:
+    source = _event(1)
+    source.topics = ["golang"]
+    repo = _SimilarRepo(source, [_event(5)])
+    found = await SimilarEvents(repo, _Clock()).execute(1)  # type: ignore[arg-type]
+    assert found is not None and [e.id for e in found] == [5]
+    assert repo.queries[0].topics == ["golang"] and repo.semantic_calls == []
+    assert await SimilarEvents(_SimilarRepo(None, []), _Clock()).execute(9) is None  # type: ignore[arg-type]

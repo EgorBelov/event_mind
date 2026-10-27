@@ -293,8 +293,9 @@ make up                   # pg + redis + api + web + worker + prometheus + grafa
 | Prometheus | http://localhost:9090 |
 | Mailhog (dev-письма) | http://localhost:8025 |
 
-Telegram-бот — отдельный профиль: `docker compose --profile bot up` при заданном
-`BOT_TOKEN`. `make down` — остановить (данные в volume'ах сохраняются).
+Telegram-бот поднимается вместе со стеком, если в `.env` задан `BOT_TOKEN`
+(без токена контейнер `bot` штатно завершается). `make down` — остановить
+(данные в volume'ах сохраняются).
 
 ## Локальная разработка
 

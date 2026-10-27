@@ -148,3 +148,16 @@ async def test_agent_confirm_and_reset(monkeypatch: pytest.MonkeyPatch) -> None:
     assert confirm.url.path == "/api/v1/bot/agent/confirm"
     assert json.loads(confirm.read())["approve"] is True
     assert reset.method == "DELETE" and reset.url.params["chat_id"] == "555"
+
+
+
+async def test_similar_maps_endpoint_and_degrades(monkeypatch: pytest.MonkeyPatch) -> None:
+    client, rec = _client_with(monkeypatch, lambda req: httpx.Response(200, json=[{"id": 2}]))
+    assert await client.similar(1) == [{"id": 2}]
+    assert rec.requests[0].url.path == "/api/v1/events/1/similar"
+    assert rec.requests[0].url.params["limit"] == "3"
+
+
+async def test_similar_missing_event_is_empty(monkeypatch: pytest.MonkeyPatch) -> None:
+    client, _ = _client_with(monkeypatch, lambda req: httpx.Response(404, json={}))
+    assert await client.similar(1) == []
